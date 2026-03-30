@@ -1,0 +1,2 @@
+﻿date_count,hard_region_feasible_count,border_expansion_feasible_count,soft_region_feasible_count,soft_region_feasible_weighted_count,soft_region_feasible_service_time_count,soft_region_feasible_tv_count,avg_soft_capacity_gap_weighted_units,avg_service_time_gap_min
+60,13,19,33,33,55,60,0.18333333333333332,3034.5833333333335

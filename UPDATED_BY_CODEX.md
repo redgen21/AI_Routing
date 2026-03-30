@@ -276,3 +276,51 @@
   - Per region/day, active engineers are selected first.
   - Engineers receive seed jobs from their nearest start points, then nearby jobs are grown from the current route frontier.
   - This prioritizes local route cohesion before workload penalties.
+
+## 2026-03-30
+
+### Added
+
+- Confirmed UPDATED_BY_CODEX.md is maintained as the canonical running work log in UTF-8.
+- Added sr_production_atlanta_assign_soft_line_chunks.py so standard line assignment can be rebuilt in resumable chunks, matching the existing actual-attendance and OSRM chunk runners.
+- Added Atlanta production design supplement:
+  - docs/na_routing_design_20260330_production_update.md
+- Added UTF-8 note file for the March 30 production updates:
+  - docs/codex_update_20260330.md
+- Added merged 320-ZIP Atlanta region mapping output:
+  - 260310/production_input/atlanta_fixed_region_zip_3_manual320.csv
+  - 260310/production_output/atlanta_fixed_region_zip_3_manual320_summary.csv
+
+### Updated
+
+- Refined Atlanta production assignment growth logic in smart_routing/production_assign_atlanta.py.
+  - New jobs are no longer attached using only the current last stop.
+  - New jobs are scored against the closest anchor among the engineer home/start point and all already assigned stops.
+  - This reduces order bias and matches the North America batch-routing requirement better.
+- Kept the post-assignment longest-route move/rebalance logic disabled.
+- Updated sr_production_map.py:
+  - Actual Routes is now the default assignment mode.
+  - Actual-route schedule building runs only for the selected date instead of all dates at app startup.
+  - Added guard logic so partially rebuilt summary/schedule CSVs do not crash the app during background regeneration.
+  - Added safer date/region/engineer filtering when summary files are missing expected columns mid-rebuild.
+  - Replaced remaining deprecated geometry centroid path to use union_all() instead of unary_union.
+- Updated sr_atl_region_compare.py so the left map uses the merged 320-ZIP region definition.
+
+### Region Merge Rule
+
+- Keep the current visible-region assignment for the geometry-visible ZIPs.
+- Fill only the remaining manual ZIPs from ATL Three Markets.xlsx.
+- Manual bucket mapping:
+  - ATL West -> Region 1
+  - ATL East -> Region 2
+  - ATL South -> Region 3
+
+### Production Routing Status
+
+- Production comparison modes now operate as:
+  - Actual Routes
+  - Line Assign
+  - Line Assign (Actual Attendance)
+  - OSRM Assign
+  - OSRM Assign (Actual Attendance)
+- Background rebuild scripts were relaunched using py.exe because the alternate python.exe on the machine did not have the equests dependency required by the routing modules.

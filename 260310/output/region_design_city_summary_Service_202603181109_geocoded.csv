@@ -1,0 +1,11 @@
+﻿STRATEGIC_CITY_NAME,postal_count,service_count,avg_daily_service_count,peak_daily_service_count,total_service_count,service_day_count,active_sm_count,avg_slot_capacity,effective_service_per_sm,algorithm,total_slot_capacity,recommended_region_count,required_sm_total,sm_gap_vs_current,avg_region_service_gap_pct,max_region_radius_km
+"Atlanta, GA",191,36.35,36.35,70.0,2181,60,24,7.12,5.0,balanced,171.0,2,9,-15,97.06,113.79
+"Dallas, TX",219,39.91,39.91,103.0,2714,68,27,7.7,5.0,balanced,208.0,2,9,-18,94.81,80.61
+"Las Vegas, NV",59,17.51,17.51,57.0,1103,63,14,7.07,5.0,balanced,99.0,1,4,-10,0.23,35.82
+"Los Angeles, CA",368,111.64,111.64,352.0,7815,70,67,8.22,5.0,balanced,551.0,5,26,-41,76.46,65.56
+"New Jersey, NJ",678,106.25,106.25,247.0,6694,63,66,14.7,5.0,balanced,970.0,5,24,-42,73.23,104.63
+"North Jersey, NJ",120,17.92,17.92,41.0,950,53,7,9.57,5.0,balanced,67.0,1,4,-3,0.33,61.63
+"Philadelphia, PA",88,12.33,12.33,32.0,715,58,11,16.55,5.0,balanced,182.0,1,3,-8,0.08,84.82
+"San Diego, CA",83,23.05,23.05,51.0,1406,61,9,7.56,5.0,balanced,68.0,1,5,-4,0.17,74.15
+"Tampa, FL",92,23.37,23.37,44.0,1332,57,12,7.67,5.0,balanced,92.0,1,5,-7,0.13,62.93
+"Washington, DC",151,26.6,26.6,67.0,1649,62,13,10.0,5.0,balanced,130.0,2,7,-6,93.91,75.1

@@ -1,0 +1,336 @@
+﻿service_date_key,difference_type,engineer_code,engineer_name,center_type,actual_region_seq,actual_region_name,planned_region_seq,planned_region_name,same_region_as_plan,actual_region_service_count
+2026-01-01,actual_only,40324200,John Park,DMS2,2,Atlanta New Region 2,,Atlanta Floating DMS2,,1
+2026-01-01,actual_only,40324201,,,3,Atlanta New Region 3,,,,1
+2026-01-01,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-01,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-02,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,1
+2026-01-02,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-02,assigned_only,AI102315,Winston Perez,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-02,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-02,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-02,assigned_only,AI103264,Adolph Scarlett,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-02,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-03,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-03,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-03,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-05,actual_only,43143200,,,2,Atlanta New Region 2,,,,1
+2026-01-05,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-05,assigned_only,AI102315,Winston Perez,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-05,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-05,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-05,assigned_only,AI103261,Horace Bull,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-05,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-06,actual_only,40324201,,,3,Atlanta New Region 3,,,,1
+2026-01-06,actual_only,AI102448,Gilbert Dupree,DMS,3,Atlanta New Region 3,1.0,Atlanta New Region 1,False,1
+2026-01-06,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,1
+2026-01-06,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-06,assigned_only,AI102608,Sergey Ashihmin,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-06,assigned_only,AI102933,Richardo Brooks,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-06,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-06,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-06,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-07,actual_only,40324201,,,3,Atlanta New Region 3,,,,1
+2026-01-07,actual_only,43143200,,,3,Atlanta New Region 3,,,,3
+2026-01-07,actual_only,AI105115,Jason Patterson,DMS,3,Atlanta New Region 3,3.0,Atlanta New Region 3,True,1
+2026-01-07,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,1
+2026-01-07,assigned_only,AI102608,Sergey Ashihmin,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-07,assigned_only,AI102933,Richardo Brooks,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-07,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-07,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-07,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-07,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-08,actual_only,40324201,,,3,Atlanta New Region 3,,,,1
+2026-01-08,actual_only,43143200,,,2,Atlanta New Region 2,,,,1
+2026-01-08,actual_only,AI105115,Jason Patterson,DMS,3,Atlanta New Region 3,3.0,Atlanta New Region 3,True,2
+2026-01-08,actual_only,SMCCOLLUM,,,2,Atlanta New Region 2,,,,2
+2026-01-08,assigned_only,AI102087,Marcus Harmon,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-08,assigned_only,AI102448,Gilbert Dupree,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-08,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-08,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-08,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-09,actual_only,AI105115,Jason Patterson,DMS,3,Atlanta New Region 3,3.0,Atlanta New Region 3,True,2
+2026-01-09,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,2
+2026-01-09,assigned_only,AI102087,Marcus Harmon,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-09,assigned_only,AI102448,Gilbert Dupree,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-09,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-09,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-09,assigned_only,AI103128,Ivan Zimic,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-09,assigned_only,AI103146,Arthur Gloster,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-09,assigned_only,AI103261,Horace Bull,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-09,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-09,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-10,actual_only,40324200,John Park,DMS2,2,Atlanta New Region 2,,Atlanta Floating DMS2,,1
+2026-01-10,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-10,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-10,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-11,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-12,actual_only,40324201,,,3,Atlanta New Region 3,,,,4
+2026-01-12,actual_only,AI103289,,,1,Atlanta New Region 1,,,,1
+2026-01-12,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,2
+2026-01-12,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-12,assigned_only,AI105115,Jason Patterson,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-12,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-13,actual_only,AI103289,,,1,Atlanta New Region 1,,,,3
+2026-01-13,actual_only,AI103976,,,1,Atlanta New Region 1,,,,1
+2026-01-13,actual_only,SMCCOLLUM,,,3,Atlanta New Region 3,,,,2
+2026-01-13,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-13,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-13,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-14,actual_only,40324201,,,3,Atlanta New Region 3,,,,1
+2026-01-14,actual_only,AI103289,,,1,Atlanta New Region 1,,,,2
+2026-01-14,actual_only,SMCCOLLUM,,,2,Atlanta New Region 2,,,,3
+2026-01-14,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-14,assigned_only,AI105115,Jason Patterson,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-14,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-14,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-15,actual_only,AI103289,,,2,Atlanta New Region 2,,,,2
+2026-01-15,actual_only,AI103976,,,3,Atlanta New Region 3,,,,1
+2026-01-15,assigned_only,AI103146,Arthur Gloster,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-15,assigned_only,AI105115,Jason Patterson,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-15,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-15,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-16,actual_only,40324201,,,3,Atlanta New Region 3,,,,2
+2026-01-16,actual_only,AI103289,,,1,Atlanta New Region 1,,,,1
+2026-01-16,assigned_only,AI102315,Winston Perez,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-16,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-16,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-16,assigned_only,AI105115,Jason Patterson,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-16,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-16,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-17,actual_only,AI103128,Ivan Zimic,DMS,2,Atlanta New Region 2,2.0,Atlanta New Region 2,True,1
+2026-01-17,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-19,actual_only,40324201,,,3,Atlanta New Region 3,,,,1
+2026-01-19,actual_only,AI103143,,,3,Atlanta New Region 3,,,,3
+2026-01-19,actual_only,AI103289,,,1,Atlanta New Region 1,,,,1
+2026-01-19,actual_only,AI103976,,,3,Atlanta New Region 3,,,,4
+2026-01-19,assigned_only,AI103146,Arthur Gloster,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-19,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-19,assigned_only,AI105115,Jason Patterson,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-19,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-19,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-20,actual_only,AI103143,,,3,Atlanta New Region 3,,,,4
+2026-01-20,actual_only,AI103289,,,1,Atlanta New Region 1,,,,4
+2026-01-20,actual_only,AI103976,,,1,Atlanta New Region 1,,,,1
+2026-01-20,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,1
+2026-01-20,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-20,assigned_only,AI105115,Jason Patterson,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-20,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-20,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-21,actual_only,AI103143,,,3,Atlanta New Region 3,,,,4
+2026-01-21,actual_only,AI103289,,,3,Atlanta New Region 3,,,,2
+2026-01-21,actual_only,SMCCOLLUM,,,2,Atlanta New Region 2,,,,2
+2026-01-21,assigned_only,AI102448,Gilbert Dupree,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-21,assigned_only,AI102933,Richardo Brooks,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-21,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-21,assigned_only,AI105115,Jason Patterson,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-21,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-21,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-22,actual_only,40324201,,,3,Atlanta New Region 3,,,,2
+2026-01-22,actual_only,AI103143,,,3,Atlanta New Region 3,,,,4
+2026-01-22,actual_only,AI103289,,,3,Atlanta New Region 3,,,,4
+2026-01-22,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,2
+2026-01-22,assigned_only,AI102448,Gilbert Dupree,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-22,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-22,assigned_only,AI105115,Jason Patterson,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-22,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-22,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-23,actual_only,AI100033,,,2,Atlanta New Region 2,,,,2
+2026-01-23,actual_only,AI102933,Richardo Brooks,DMS,3,Atlanta New Region 3,3.0,Atlanta New Region 3,True,2
+2026-01-23,actual_only,AI103143,,,3,Atlanta New Region 3,,,,2
+2026-01-23,actual_only,SMCCOLLUM,,,2,Atlanta New Region 2,,,,2
+2026-01-23,assigned_only,AI102448,Gilbert Dupree,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-23,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-23,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-23,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-24,actual_only,40324200,John Park,DMS2,1,Atlanta New Region 1,,Atlanta Floating DMS2,,1
+2026-01-24,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-24,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-26,actual_only,40324201,,,3,Atlanta New Region 3,,,,1
+2026-01-26,actual_only,SMCCOLLUM,,,3,Atlanta New Region 3,,,,1
+2026-01-26,assigned_only,40324200,John Park,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-26,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-26,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-26,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-27,actual_only,40324201,,,3,Atlanta New Region 3,,,,1
+2026-01-27,actual_only,AI103143,,,3,Atlanta New Region 3,,,,3
+2026-01-27,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,1
+2026-01-27,assigned_only,AI103128,Ivan Zimic,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-27,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-27,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-28,actual_only,AI103143,,,3,Atlanta New Region 3,,,,2
+2026-01-28,actual_only,AI105115,Jason Patterson,DMS,3,Atlanta New Region 3,3.0,Atlanta New Region 3,True,2
+2026-01-28,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-28,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-29,actual_only,40324201,,,3,Atlanta New Region 3,,,,1
+2026-01-29,actual_only,AI103143,,,3,Atlanta New Region 3,,,,2
+2026-01-29,assigned_only,AI102087,Marcus Harmon,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-29,assigned_only,AI103264,Adolph Scarlett,DMS,,,2.0,Atlanta New Region 2,,
+2026-01-29,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-29,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-30,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,1
+2026-01-30,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-30,assigned_only,AI102087,Marcus Harmon,DMS,,,1.0,Atlanta New Region 1,,
+2026-01-30,assigned_only,AI103261,Horace Bull,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-30,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-01-30,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-01-31,actual_only,AI105116,Frank Hooks,DMS,1,Atlanta New Region 1,1.0,Atlanta New Region 1,True,1
+2026-01-31,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-01,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-02,actual_only,40324201,,,3,Atlanta New Region 3,,,,1
+2026-02-02,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,4
+2026-02-02,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-02,assigned_only,AI103128,Ivan Zimic,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-02,assigned_only,AI103146,Arthur Gloster,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-02,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-02,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-02,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-03,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,2
+2026-02-03,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-03,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-03,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-04,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,1
+2026-02-04,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-04,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-04,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-04,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-04,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-05,actual_only,40324201,,,3,Atlanta New Region 3,,,,1
+2026-02-05,actual_only,SMCCOLLUM,,,3,Atlanta New Region 3,,,,1
+2026-02-05,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-05,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-06,actual_only,40324201,,,3,Atlanta New Region 3,,,,1
+2026-02-06,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,2
+2026-02-06,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-06,assigned_only,AI102933,Richardo Brooks,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-06,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-06,assigned_only,AI103261,Horace Bull,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-06,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-06,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-07,assigned_only,40324200,John Park,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-07,assigned_only,AI102315,Winston Perez,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-07,assigned_only,AI102448,Gilbert Dupree,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-07,assigned_only,AI102608,Sergey Ashihmin,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-07,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-07,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-09,actual_only,SMCCOLLUM,,,2,Atlanta New Region 2,,,,1
+2026-02-09,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-09,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-10,actual_only,AI103264,Adolph Scarlett,DMS,3,Atlanta New Region 3,2.0,Atlanta New Region 2,False,2
+2026-02-10,actual_only,AI103976,,,2,Atlanta New Region 2,,,,1
+2026-02-10,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,1
+2026-02-10,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-10,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-11,actual_only,40324201,,,3,Atlanta New Region 3,,,,2
+2026-02-11,assigned_only,AI102933,Richardo Brooks,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-11,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-11,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-11,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-11,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-12,actual_only,40324201,,,3,Atlanta New Region 3,,,,2
+2026-02-12,actual_only,43143200,,,2,Atlanta New Region 2,,,,1
+2026-02-12,actual_only,AI105115,Jason Patterson,DMS,3,Atlanta New Region 3,3.0,Atlanta New Region 3,True,2
+2026-02-12,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-12,assigned_only,AI103264,Adolph Scarlett,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-12,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-13,actual_only,SMCCOLLUM,,,2,Atlanta New Region 2,,,,2
+2026-02-13,assigned_only,AI102933,Richardo Brooks,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-13,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-13,assigned_only,AI103146,Arthur Gloster,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-13,assigned_only,AI103261,Horace Bull,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-13,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-13,assigned_only,AI105115,Jason Patterson,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-13,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-14,actual_only,AI102608,Sergey Ashihmin,DMS,1,Atlanta New Region 1,1.0,Atlanta New Region 1,True,1
+2026-02-14,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-14,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-16,actual_only,40324200,John Park,DMS2,3,Atlanta New Region 3,,Atlanta Floating DMS2,,2
+2026-02-16,actual_only,40324201,,,3,Atlanta New Region 3,,,,2
+2026-02-16,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-16,assigned_only,AI102315,Winston Perez,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-16,assigned_only,AI102933,Richardo Brooks,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-16,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-16,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-16,assigned_only,AI103261,Horace Bull,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-16,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-16,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-17,actual_only,40324201,,,3,Atlanta New Region 3,,,,1
+2026-02-17,actual_only,AI100033,,,3,Atlanta New Region 3,,,,1
+2026-02-17,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,1
+2026-02-17,assigned_only,AI102448,Gilbert Dupree,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-17,assigned_only,AI103264,Adolph Scarlett,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-17,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-17,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-18,actual_only,AI100033,,,3,Atlanta New Region 3,,,,1
+2026-02-18,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-18,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-18,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-19,actual_only,AI100033,,,3,Atlanta New Region 3,,,,1
+2026-02-19,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-19,assigned_only,AI105116,Frank Hooks,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-19,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-20,actual_only,AI105115,Jason Patterson,DMS,3,Atlanta New Region 3,3.0,Atlanta New Region 3,True,3
+2026-02-20,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,1
+2026-02-20,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-20,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-20,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-21,actual_only,40324201,,,3,Atlanta New Region 3,,,,1
+2026-02-21,actual_only,AI102608,Sergey Ashihmin,DMS,1,Atlanta New Region 1,1.0,Atlanta New Region 1,True,1
+2026-02-21,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-21,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-22,actual_only,AI102315,Winston Perez,DMS,2,Atlanta New Region 2,2.0,Atlanta New Region 2,True,1
+2026-02-22,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-23,actual_only,AI102933,Richardo Brooks,DMS,3,Atlanta New Region 3,3.0,Atlanta New Region 3,True,1
+2026-02-23,actual_only,AI105115,Jason Patterson,DMS,3,Atlanta New Region 3,3.0,Atlanta New Region 3,True,3
+2026-02-23,actual_only,SMCCOLLUM,,,3,Atlanta New Region 3,,,,2
+2026-02-23,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-23,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-24,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,2
+2026-02-24,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-25,actual_only,AI105115,Jason Patterson,DMS,3,Atlanta New Region 3,3.0,Atlanta New Region 3,True,3
+2026-02-25,actual_only,SMCCOLLUM,,,3,Atlanta New Region 3,,,,2
+2026-02-25,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-02-25,assigned_only,AI103317,Richard Grant,DMS,,,3.0,Atlanta New Region 3,,
+2026-02-25,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-26,actual_only,40324201,,,3,Atlanta New Region 3,,,,2
+2026-02-26,actual_only,SMCCOLLUM,,,3,Atlanta New Region 3,,,,2
+2026-02-26,assigned_only,AI103146,Arthur Gloster,DMS,,,2.0,Atlanta New Region 2,,
+2026-02-26,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-27,actual_only,SMCCOLLUM,,,1,Atlanta New Region 1,,,,1
+2026-02-27,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-02-28,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-03-02,assigned_only,40324200,John Park,DMS2,,,,Atlanta Floating DMS2,,
+2026-03-02,assigned_only,AI105115,Jason Patterson,DMS,,,3.0,Atlanta New Region 3,,
+2026-03-02,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-03-03,actual_only,AI105116,Frank Hooks,DMS,1,Atlanta New Region 1,1.0,Atlanta New Region 1,True,1
+2026-03-03,assigned_only,AI102087,Marcus Harmon,DMS,,,1.0,Atlanta New Region 1,,
+2026-03-03,assigned_only,AI102315,Winston Perez,DMS,,,2.0,Atlanta New Region 2,,
+2026-03-03,assigned_only,AI102448,Gilbert Dupree,DMS,,,1.0,Atlanta New Region 1,,
+2026-03-03,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-03-03,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-03-03,assigned_only,AI103128,Ivan Zimic,DMS,,,2.0,Atlanta New Region 2,,
+2026-03-03,assigned_only,AI103264,Adolph Scarlett,DMS,,,2.0,Atlanta New Region 2,,
+2026-03-04,actual_only,AI102087,Marcus Harmon,DMS,1,Atlanta New Region 1,1.0,Atlanta New Region 1,True,2
+2026-03-04,actual_only,AI105116,Frank Hooks,DMS,1,Atlanta New Region 1,1.0,Atlanta New Region 1,True,1
+2026-03-04,assigned_only,40324200,John Park,DMS2,,,,Atlanta Floating DMS2,,
+2026-03-04,assigned_only,AI102315,Winston Perez,DMS,,,2.0,Atlanta New Region 2,,
+2026-03-04,assigned_only,AI102448,Gilbert Dupree,DMS,,,1.0,Atlanta New Region 1,,
+2026-03-04,assigned_only,AI102608,Sergey Ashihmin,DMS,,,1.0,Atlanta New Region 1,,
+2026-03-04,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,
+2026-03-04,assigned_only,AI103264,Adolph Scarlett,DMS,,,2.0,Atlanta New Region 2,,
+2026-03-04,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-03-05,actual_only,AI102087,Marcus Harmon,DMS,1,Atlanta New Region 1,1.0,Atlanta New Region 1,True,1
+2026-03-05,actual_only,AI102448,Gilbert Dupree,DMS,3,Atlanta New Region 3,1.0,Atlanta New Region 1,False,1
+2026-03-05,actual_only,AI103317,Richard Grant,DMS,3,Atlanta New Region 3,3.0,Atlanta New Region 3,True,1
+2026-03-05,actual_only,AI105115,Jason Patterson,DMS,3,Atlanta New Region 3,3.0,Atlanta New Region 3,True,1
+2026-03-05,assigned_only,40324200,John Park,DMS2,,,,Atlanta Floating DMS2,,
+2026-03-05,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-03-05,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-03-06,actual_only,AI102315,Winston Perez,DMS,2,Atlanta New Region 2,2.0,Atlanta New Region 2,True,1
+2026-03-06,actual_only,AI102448,Gilbert Dupree,DMS,3,Atlanta New Region 3,1.0,Atlanta New Region 1,False,2
+2026-03-06,actual_only,AI103261,Horace Bull,DMS,3,Atlanta New Region 3,3.0,Atlanta New Region 3,True,1
+2026-03-06,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-03-06,assigned_only,AI102961,Nicholas Foskin,DMS,,,2.0,Atlanta New Region 2,,
+2026-03-06,assigned_only,JMOTOS2,James Motos,DMS2,,,,Atlanta Floating DMS2,,
+2026-03-09,actual_only,AI102448,Gilbert Dupree,DMS,3,Atlanta New Region 3,1.0,Atlanta New Region 1,False,1
+2026-03-09,assigned_only,AI005576,RUDY EDOLE,DMS,,,3.0,Atlanta New Region 3,,
+2026-03-09,assigned_only,AI102977,Yu Zheng,DMS,,,1.0,Atlanta New Region 1,,

@@ -1,0 +1,27 @@
+{
+  "cache_version": "2026-03-22-route-explorer-v6",
+  "city_name": "Los Angeles, CA",
+  "best_region_count": 6,
+  "selected_region_count": 6,
+  "profile_path": "260310\\Top 10_DMS_DMS2_Profile_20260317.xlsx",
+  "profile_mtime_ns": 1774569671626090300,
+  "zcta_zip_path": "data\\geo\\tl_2024_us_zcta520.zip",
+  "zcta_zip_mtime_ns": 1773807533319431000,
+  "service_file": "260310\\input\\Service_202603181109_geocoded.csv",
+  "service_file_mtime_ns": 1774511584495998000,
+  "config_file": "config.json",
+  "config_mtime_ns": 1774056884377116000,
+  "routing_cfg": {
+    "distance_backend": "city_osrm_else_haversine",
+    "assignment_distance_backend": "haversine",
+    "effective_service_per_sm": 4,
+    "service_time_per_job_min": 60,
+    "max_work_min_per_sm_day": 480,
+    "max_travel_min_per_sm_day": 240,
+    "max_travel_km_per_sm_day": 120,
+    "city_osrm_urls": {
+      "Los Angeles, CA": "http://20.51.244.68:5001",
+      "Atlanta, GA": "http://20.51.244.68:5002"
+    }
+  }
+}

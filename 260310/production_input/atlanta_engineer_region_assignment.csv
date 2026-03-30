@@ -1,0 +1,18 @@
+﻿SVC_ENGINEER_CODE,assigned_region_seq,zip_overlap_count,zip_overlap_ratio,AREA_NAME,SVC_CENTER_TYPE,assigned_region_name,preferred_region_rank_1,preferred_region_rank_2,preferred_region_rank_3,anchor_region_seq,anchor_region_name,Name,normalized_slot,REF_HEAVY_REPAIR_FLAG
+AI102087,1,11,0.8462,AI102087_Marcus Harmon,DMS,Atlanta New Region 1,,,,,,Marcus Harmon,8,Y
+AI102448,1,15,0.6818,AI102448_Gilbert Dupree,DMS,Atlanta New Region 1,,,,,,Gilbert Dupree,8,Y
+AI102608,1,8,1.0,AI102608_Sergey Ashihmin,DMS,Atlanta New Region 1,,,,,,Sergey Ashihmin,8,Y
+AI102977,1,14,0.875,AI102977_Yu Brandon Zheng,DMS,Atlanta New Region 1,,,,,,Yu Zheng,8,Y
+AI105116,1,6,0.0706,AI105116_Frank Hooks_Float,DMS,Atlanta New Region 1,,,,,,Frank Hooks,8,Y
+AI102315,2,19,0.95,AI102315_Winston Perez,DMS,Atlanta New Region 2,,,,,,Winston Perez,8,Y
+AI102961,2,7,0.0778,AI102961_Nicholas Foskin_SAMEDAY,DMS,Atlanta New Region 2,,,,,,Nicholas Foskin,8,Y
+AI103128,2,13,0.7222,AI103128_Ivan Zimic,DMS,Atlanta New Region 2,,,,,,Ivan Zimic,8,Y
+AI103146,2,4,1.0,AI103146_Arthur Gloster,DMS,Atlanta New Region 2,,,,,,Arthur Gloster,8,Y
+AI103264,2,7,0.4118,AI103264_Adolph Scarlett,DMS,Atlanta New Region 2,,,,,,Adolph Scarlett,8,Y
+AI005576,3,18,0.8182,AI005576_Rudy Edole,DMS,Atlanta New Region 3,,,,,,RUDY EDOLE,8,Y
+AI102933,3,16,0.8,AI102933_Richardo Brooks,DMS,Atlanta New Region 3,,,,,,Richardo Brooks,8,Y
+AI103261,3,16,1.0,AI103261_Horace Bull,DMS,Atlanta New Region 3,,,,,,Horace Bull,8,Y
+AI103317,3,6,0.0606,AI103317_Richard Grant_SAMEDAY,DMS,Atlanta New Region 3,,,,,,Richard Grant,8,Y
+AI105115,3,7,0.875,AI105115_Jason Patterson_T/TH_NON REF,DMS,Atlanta New Region 3,,,,,,Jason Patterson,8,N
+40324200,,,,NPSI_ZONENAME2_40324200,DMS2,Atlanta Floating DMS2,1,3,2,1,Atlanta New Region 1,John Park,8,Y
+JMOTOS2,,,,James Motos,DMS2,Atlanta Floating DMS2,1,3,2,3,Atlanta New Region 3,James Motos,8,Y

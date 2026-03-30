@@ -1,0 +1,2 @@
+﻿run_date,total_unique_addresses,already_cached,pending_before_run,attempted_today,geocoded_today,failed_today,remaining_after_run,cache_path,merged_output_path
+2026-03-17,10447,9391,1056,1056,450,606,606,data\geocode_cache_us_census.csv,260310\input\Service_202603161435_geocoded.csv

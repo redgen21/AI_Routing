@@ -1,0 +1,3 @@
+﻿label,active_engineers,total_distance_km,total_duration_min,avg_distance_km,avg_duration_min,jobs_std,weighted_jobs_std,max_total_work_min,overflow_480_count
+current_saved,17,1414.06,1588.17,83.18,93.42,1.036,1.154,489.24,1
+fairness_first_day_only,17,1225.15,1408.75,72.07,82.87,1.242,1.445,384.53,0

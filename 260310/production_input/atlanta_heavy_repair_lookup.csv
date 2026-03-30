@@ -1,0 +1,64 @@
+﻿CORPORATION_CODE,SERVICE_PRODUCT_GROUP_CODE,SVC_PRODUCT_GROUP_NAME,SERVICE_PRODUCT_CODE,SVC_PRODUCT_NAME,NOTI_TYPE_DESC,SYMP_CODE_ONE,SYMP_NAME_ONE,SYMP_CODE_TWO,SYMP_NAME_TWO,SYMP_CODE_THREE,SYMP_NAME_THREE
+LGEAP,REF,Refrigerator,REF,Top/Bottom Freezer,Dispatch REF  Cooling,1GG,Cooling Performance,1GGGV,Freezer Issue,1GGGVGZ,Freezer: Not Cooling
+LGEAP,REF,Refrigerator,REF,Top/Bottom Freezer,Dispatch REF  Cooling,1GG,Cooling Performance,1GGGV,Freezer Issue,1GGGVGA,Freezer: Weak Cooling
+LGEAP,REF,Refrigerator,REF,Top/Bottom Freezer,Dispatch REF  Cooling,1GG,Cooling Performance,1GGGV,Freezer Issue,1GGGVGB,Entire Unit: Not Cooling
+LGEAP,REF,Refrigerator,REF,Top/Bottom Freezer,Dispatch REF  Cooling,1GG,Cooling Performance,1GGGW,Refrigerator,1GGGWGD,Refrigerator: Week Cooling
+LGEAP,REF,Refrigerator,REF,Top/Bottom Freezer,Dispatch REF  Cooling,1GG,Cooling Performance,1GGGW,Refrigerator,1GGGWGC,Refrigerator: Not Cooling
+LGEAP,REF,Refrigerator,REF,Top/Bottom Freezer,Dispatch REF  Ice&Water GSGS,3AA,Ice/Water Dispenser,3AAAA,Water Dispenser,3AAAAAG,Water Not Dispensing Continuously
+LGEAP,REF,Refrigerator,REF,Top/Bottom Freezer,Dispatch REF  Ice&Water GSGS,3AA,Ice/Water Dispenser,3AAAA,Water Dispenser,3AAAAAE,Water doesn’t dispense
+LGEAP,REF,Refrigerator,REF,Top/Bottom Freezer,Dispatch REF  Ice&Water GSGS,3AA,Ice/Water Dispenser,3AAAA,Water Dispenser,3AAAAAH,Water doesn’t stop dispensing
+LGEAP,REF,Refrigerator,REF,Top/Bottom Freezer,Dispatch REF  Cooling,8ST,ThinQ Care,8STAA,Cooling,8STAAAA,Refrigerant Leak
+LGEAP,REF,Refrigerator,REF,Top/Bottom Freezer,Dispatch REF  Cooling,8ST,ThinQ Care,8STAA,Cooling,8STAAAC,Moisture Blockage
+LGEAP,REF,Refrigerator,REF,Top/Bottom Freezer,Dispatch REF  Cooling,8ST,ThinQ Care,8STAA,Cooling,8STAAAD,Cycle Blockage
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Cooling,1FF,Cooling Performance,1FFFV,Freezer Issue,1FFFVFF,Freezer: Not Cooling
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Cooling,1FF,Cooling Performance,1FFFV,Freezer Issue,1FFFVFG,Freezer: Weak Cooling
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Cooling,1FF,Cooling Performance,1FFFV,Freezer Issue,1FFFVFH,Entire Unit: Not Cooling
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Cooling,1FF,Cooling Performance,1FFFW,Refrigerator,1FFFWFI,Refrigerator: Week Cooling
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Cooling,1FF,Cooling Performance,1FFFW,Refrigerator,1FFFWFJ,Refrigerator: Not Cooling
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIE,Water Dispenser,3IIIEID,Water doesn’t dispense
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIE,Water Dispenser,3IIIEIF,Water Not Dispensing Continuously
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,,Water Dispenser,3IIIEAA,Water doesn’t stop dispensing
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIF,Ice Dispenser,3IIIFII,Ice won't Eject
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIF,Ice Dispenser,3IIIFAD,Not making enough ice [Standard]
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIF,Ice Dispenser,3IIIFIJ,Ice doesn’t Dispense [Cubed]
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIF,Ice Dispenser,3IIIFAA,Ice doesn’t Dispense [Crushed]
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIF,Ice Dispenser,3IIIFIK,Not making enough ice [Craft]
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIF,Ice Dispenser,3IIIFIN,Ice Continuously Dispenses
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIF,Ice Dispenser,3IIIFIO,Ice comes out in pieces
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Cooling,8TU,ThinQ Care,8TUAA,Cooling,8TUAAAA,Cycle Blockage
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Cooling,8TU,ThinQ Care,8TUAA,Cooling,8TUAAAE,"High-pressure refrigerant leak, weak cooling"
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Cooling,8TU,ThinQ Care,8TUAA,Cooling,8TUAAAF,"Low-pressure refrigerant leak, weak cooling"
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Cooling,8TU,ThinQ Care,8TUAA,Cooling,8TUAAAG,"Low-pressure refrigerant leak, energy overuse"
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Cooling,8TU,ThinQ Care,8TUAA,Cooling,8TUAAAH,Refrigerant Leak
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Cooling,8TU,ThinQ Care,8TUAA,Cooling,8TUAAAK,Moisture Blockage
+LGEAP,REF,Refrigerator,SBS,Side by Side,Dispatch REF  Cooling,8TU,ThinQ Care,8TUAB,Ice Issue,8TUABAE,"Water blockage, unable to make ice"
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Cooling,1FF,Cooling Performance,1FFFV,Freezer Issue,1FFFVFF,Freezer: Not Cooling
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Cooling,1FF,Cooling Performance,1FFFV,Freezer Issue,1FFFVFG,Freezer: Weak Cooling
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Cooling,1FF,Cooling Performance,1FFFV,Freezer Issue,1FFFVFH,Entire Unit: Not Cooling
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Cooling,1FF,Cooling Performance,1FFFW,Refrigerator,1FFFWFI,Refrigerator: Week Cooling
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Cooling,1FF,Cooling Performance,1FFFW,Refrigerator,1FFFWFJ,Refrigerator: Not Cooling
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIE,Water Dispenser,3IIIEID,Water doesn’t dispense
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIE,Water Dispenser,3IIIEIF,Water Not Dispensing Continuously
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIE,Water Dispenser,3IIIEAA,Water doesn’t stop dispensing
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIF,Ice Dispenser,3IIIFII,Ice won't Eject
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIF,Ice Dispenser,3IIIFAD,Not making enough ice [Standard]
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIF,Ice Dispenser,3IIIFIJ,Ice doesn’t Dispense [Cubed]
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIF,Ice Dispenser,3IIIFAA,Ice doesn’t Dispense [Crushed]
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIF,Ice Dispenser,3IIIFIK,Not making enough ice [Craft]
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIF,Ice Dispenser,3IIIFIN,Ice Continuously Dispenses
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Ice&Water GSGS,3II,Ice/Water Dispenser,3IIIF,Ice Dispenser,3IIIFIO,Ice comes out in pieces
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Cooling,8TU,ThinQ Care,8TUAA,Cooling,8TUAAAA,Cycle Blockage
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Cooling,8TU,ThinQ Care,8TUAA,Cooling,8TUAAAE,"High-pressure refrigerant leak, weak cooling"
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Cooling,8TU,ThinQ Care,8TUAA,Cooling,8TUAAAF,"Low-pressure refrigerant leak, weak cooling"
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Cooling,8TU,ThinQ Care,8TUAA,Cooling,8TUAAAG,"Low-pressure refrigerant leak, energy overuse"
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Cooling,8TU,ThinQ Care,8TUAA,Cooling,8TUAAAH,Refrigerant Leak
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Cooling,8TU,ThinQ Care,8TUAA,Cooling,8TUAAAK,Moisture Blockage
+LGEAP,REF,Refrigerator,FRD,French Door,Dispatch REF  Cooling,8TU,ThinQ Care,8TUAB,Ice Issue,8TUABAE,"Water blockage, unable to make ice"
+LGEAP,REF,Refrigerator,KRE,Kimchi Refrigerator,Dispatch REF  Cooling,1GG,Cooling Performance,1GGGX,Cooling Issue,1GGGXGS,Freezer: Not Cooling
+LGEAP,REF,Refrigerator,KRE,Kimchi Refrigerator,Dispatch REF  Cooling,1GG,Cooling Performance,1GGGX,Cooling Issue,1GGGXGP,Not Cooling
+LGEAP,REF,Refrigerator,KRE,Kimchi Refrigerator,Dispatch REF  Cooling,1GG,Cooling Performance,1GGGX,Cooling Issue,1GGGXGO,Weak cooling
+LGEAP,REF,Refrigerator,KRE,Kimchi Refrigerator,Dispatch REF  Cooling,1GG,Cooling Performance,1GGGX,Cooling Issue,1GGGXGT,Refrigerator: Not Cooling
+LGEAP,REF,Refrigerator,KRE,Kimchi Refrigerator,Dispatch REF  Cooling,8ST,ThinQ Care,8STAA,Cooling,8STAAAA,High Temperature Detected
+LGEAP,REF,Refrigerator,KRE,Kimchi Refrigerator,Dispatch REF  Cooling,8ST,ThinQ Care,8STAA,Cooling,8STAAAB,Overheating Detected
+LGEAP,REF,Refrigerator,RFO,Wine REF,Dispatch REF  Cooling,1AA,Cooling Performance,1AAAB,Refrigerator: Not Cooling,1AAABAA,Refrigerator: Not Cooling
+LGEAP,REF,Refrigerator,RFO,Wine REF,Dispatch REF  Cooling,1AA,Cooling Performance,1AAAC,Refrigerator: Week Cooling,1AAACAA,Refrigerator: Week Cooling

@@ -1,0 +1,6 @@
+chunk=1 start=2026-01-01 end=2026-01-07 assignment=260310\production_output\atlanta_assignment_result_soft_line_chunk_01.csv
+chunk=2 start=2026-01-08 end=2026-01-13 assignment=260310\production_output\atlanta_assignment_result_soft_line_chunk_02.csv
+chunk=3 start=2026-01-14 end=2026-01-20 assignment=260310\production_output\atlanta_assignment_result_soft_line_chunk_03.csv
+chunk=4 start=2026-01-21 end=2026-01-27 assignment=260310\production_output\atlanta_assignment_result_soft_line_chunk_04.csv
+chunk=5 start=2026-01-28 end=2026-02-02 assignment=260310\production_output\atlanta_assignment_result_soft_line_chunk_05.csv
+chunk=6 start=2026-02-03 end=2026-02-09 assignment=260310\production_output\atlanta_assignment_result_soft_line_chunk_06.csv

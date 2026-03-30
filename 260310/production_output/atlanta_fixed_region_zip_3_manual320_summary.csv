@@ -1,0 +1,7 @@
+﻿region_seq,new_region_name,source,zip_count
+1,Atlanta New Region 1,current_visible_region,55
+1,Atlanta New Region 1,manual_bucket_fill,47
+2,Atlanta New Region 2,current_visible_region,59
+2,Atlanta New Region 2,manual_bucket_fill,36
+3,Atlanta New Region 3,current_visible_region,91
+3,Atlanta New Region 3,manual_bucket_fill,32

@@ -1,0 +1,17 @@
+﻿scenario,STRATEGIC_CITY_NAME,service_day_count,avg_daily_service_count,avg_daily_distance_km,avg_daily_duration_min,avg_daily_deployed_sm,avg_jobs_per_sm,avg_jobs_per_sm_std,avg_distance_per_sm_km,avg_duration_per_sm_min,candidate_region_count
+current,"Atlanta, GA",56,32.75,491.1,1971.14,11.07,2.58,1.25,37.14,147.97,2
+integrated,"Atlanta, GA",56,32.75,708.18,857.52,8.68,3.33,0.7,69.04,87.54,2
+current,"Atlanta, GA",56,32.75,491.1,1971.14,11.07,2.58,1.25,37.14,147.97,3
+integrated,"Atlanta, GA",56,32.75,655.5,769.16,8.62,3.28,0.76,61.65,80.04,3
+current,"Atlanta, GA",56,32.75,491.1,1971.14,11.07,2.58,1.25,37.14,147.97,4
+integrated,"Atlanta, GA",56,32.75,632.11,813.12,9.07,3.13,0.8,56.24,83.44,4
+current,"Atlanta, GA",56,32.75,491.1,1971.14,11.07,2.58,1.25,37.14,147.97,5
+integrated,"Atlanta, GA",56,32.75,566.38,818.43,9.23,3.06,0.81,49.74,82.15,5
+current,"Los Angeles, CA",68,70.4,548.33,2049.89,24.22,2.52,1.36,18.25,68.19,3
+integrated,"Los Angeles, CA",68,70.4,1160.62,1179.06,16.03,3.66,0.75,57.77,61.8,3
+current,"Los Angeles, CA",68,70.4,548.33,2049.89,24.22,2.52,1.36,18.25,68.19,4
+integrated,"Los Angeles, CA",68,70.4,1024.55,1097.19,15.68,3.73,0.68,51.18,61.05,4
+current,"Los Angeles, CA",68,70.4,548.33,2049.89,24.22,2.52,1.36,18.25,68.19,5
+integrated,"Los Angeles, CA",68,70.4,921.35,1028.45,16.06,3.63,0.61,44.49,55.21,5
+current,"Los Angeles, CA",68,70.4,548.33,2049.89,24.22,2.52,1.36,18.25,68.19,6
+integrated,"Los Angeles, CA",68,70.4,855.01,988.93,16.35,3.54,0.64,39.64,50.62,6
