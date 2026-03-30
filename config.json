@@ -1,0 +1,29 @@
+{
+  "geocoding": {
+    "google_api_key": "AIzaSyDEkhBBI27DvvQk08ZLKTrZ9q818IPZAUU",
+    "census_cache_file": "data/geocode_cache_us_census.csv",
+    "census_daily_log_file": "data/geocode_daily_log_us_census.json",
+    "google_cache_file": "data/geocode_cache_google.csv",
+    "google_attempt_log_file": "data/geocode_attempted_google.csv",
+    "google_monthly_limit": 10000,
+    "daily_limit": 10000,
+    "batch_size": 1000,
+    "google_sleep_sec": 0.05
+  },
+  "routing": {
+    "distance_backend": "city_osrm_else_haversine",
+    "assignment_distance_backend": "haversine",
+    "osrm_url": "http://20.51.244.68:5000",
+    "osrm_profile": "driving",
+    "city_osrm_urls": {
+      "Los Angeles, CA": "http://20.51.244.68:5001",
+      "Atlanta, GA": "http://20.51.244.68:5002"
+    },
+    "effective_service_per_sm": 4,
+    "target_sm_per_region": 5,
+    "service_time_per_job_min": 60,
+    "max_work_min_per_sm_day": 480,
+    "max_travel_min_per_sm_day": 240,
+    "max_travel_km_per_sm_day": 120
+  }
+}
