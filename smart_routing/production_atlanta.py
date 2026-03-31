@@ -26,6 +26,7 @@ REF_PRODUCT_GROUP = "REF"
 HEAVY_REPAIR_SHEET = "3depth 기준 중수리 증상"
 DMS_CENTER_TYPE = "DMS"
 DMS2_CENTER_TYPE = "DMS2"
+ENABLE_DMS2 = False
 FLOATING_REGION_NAME = "Atlanta Floating DMS2"
 MANUAL_DMS_REGION_OVERRIDES = {
     "AI102448": 1,
@@ -238,6 +239,8 @@ def _build_engineer_region_df(
         zip_city[zip_city["SVC_CENTER_TYPE"] == DMS2_CENTER_TYPE][["SVC_ENGINEER_CODE", "AREA_NAME", "SVC_CENTER_TYPE"]]
         .drop_duplicates(subset=["SVC_ENGINEER_CODE"])
         .reset_index(drop=True)
+        if ENABLE_DMS2
+        else zip_city.head(0)[["SVC_ENGINEER_CODE", "AREA_NAME", "SVC_CENTER_TYPE"]].copy()
     )
     ranked_regions = region_workload_df["region_seq"].astype(int).tolist()
     dms2_assignment_df = dms2_df.copy()
@@ -381,7 +384,7 @@ def _enrich_service_df(service_df: pd.DataFrame, heavy_lookup_df: pd.DataFrame) 
         axis=1,
     )
     service_df["service_time_min"] = service_df["is_heavy_repair"].map(lambda flag: 100 if bool(flag) else 45)
-    service_df["is_tv_job"] = service_df["SERVICE_PRODUCT_GROUP_CODE"].astype(str).str.strip().eq(TV_PRODUCT_GROUP)
+    service_df["is_tv_job"] = False if not ENABLE_DMS2 else service_df["SERVICE_PRODUCT_GROUP_CODE"].astype(str).str.strip().eq(TV_PRODUCT_GROUP)
     return service_df
 
 

@@ -31,6 +31,7 @@ TV_PRODUCT_GROUP = "TV"
 REF_PRODUCT_GROUP = "REF"
 DMS_CENTER_TYPE = "DMS"
 DMS2_CENTER_TYPE = "DMS2"
+ENABLE_DMS2 = False
 EXPANSION_SOURCE_REGION = 3
 EXPANSION_TARGET_REGIONS = {1, 2}
 EXPANSION_BORDER_EXTRA_KM = 15.0
@@ -44,6 +45,15 @@ class AtlantaProductionAssignmentResult:
     assignment_path: Path
     engineer_day_summary_path: Path
     schedule_path: Path
+
+
+def _weighted_job_units(df: pd.DataFrame) -> pd.Series:
+    if df.empty:
+        return pd.Series(dtype=float)
+    heavy = df.get("is_heavy_repair")
+    if heavy is None:
+        return pd.Series([1.0] * len(df), index=df.index, dtype=float)
+    return heavy.fillna(False).astype(bool).map(lambda flag: 2.0 if flag else 1.0).astype(float)
 
 
 def _output_paths(output_suffix: str = "") -> tuple[Path, Path, Path]:
@@ -93,6 +103,8 @@ def _load_inputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFra
     service_df["service_time_min"] = pd.to_numeric(service_df["service_time_min"], errors="coerce").fillna(45)
     service_df["is_heavy_repair"] = service_df["is_heavy_repair"].fillna(False).astype(bool)
     service_df["is_tv_job"] = service_df["is_tv_job"].fillna(False).astype(bool)
+    if not ENABLE_DMS2:
+        service_df["is_tv_job"] = False
 
     service_df = service_df.merge(
         region_zip_df[["POSTAL_CODE", "region_seq", "new_region_name"]],
@@ -126,6 +138,8 @@ def _build_engineer_master(engineer_region_df: pd.DataFrame, home_df: pd.DataFra
     master_df["normalized_slot"] = pd.to_numeric(master_df["normalized_slot"], errors="coerce").fillna(8)
     master_df["REF_HEAVY_REPAIR_FLAG"] = master_df["REF_HEAVY_REPAIR_FLAG"].fillna("Y").astype(str).str.upper()
     master_df["SVC_CENTER_TYPE"] = master_df["SVC_CENTER_TYPE"].astype(str).str.upper()
+    if not ENABLE_DMS2:
+        master_df = master_df[master_df["SVC_CENTER_TYPE"] == DMS_CENTER_TYPE].copy()
     return master_df
 
 
@@ -191,7 +205,8 @@ def _build_actual_attendance_master(
     service_df: pd.DataFrame,
     engineer_master_df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, dict[str, set[str]]]:
-    actual_df = service_df[service_df["SVC_CENTER_TYPE"].astype(str).str.upper().isin([DMS_CENTER_TYPE, DMS2_CENTER_TYPE])].copy()
+    active_center_types = [DMS_CENTER_TYPE] if not ENABLE_DMS2 else [DMS_CENTER_TYPE, DMS2_CENTER_TYPE]
+    actual_df = service_df[service_df["SVC_CENTER_TYPE"].astype(str).str.upper().isin(active_center_types)].copy()
     if actual_df.empty:
         empty = engineer_master_df.head(0).copy()
         return empty, {}
@@ -202,50 +217,80 @@ def _build_actual_attendance_master(
     actual_df["latitude"] = pd.to_numeric(actual_df["latitude"], errors="coerce")
     actual_df["longitude"] = pd.to_numeric(actual_df["longitude"], errors="coerce")
 
-    roster_codes = set(engineer_master_df["SVC_ENGINEER_CODE"].astype(str))
-    attendance_by_date = {
-        str(service_date_key): set(group["SVC_ENGINEER_CODE"].astype(str).tolist())
-        for service_date_key, group in actual_df.groupby("service_date_key")
-    }
+    attendance_master_df = engineer_master_df.copy()
+    attendance_master_df["SVC_ENGINEER_CODE"] = attendance_master_df["SVC_ENGINEER_CODE"].astype(str)
+    attendance_master_df["SVC_CENTER_TYPE"] = attendance_master_df["SVC_CENTER_TYPE"].astype(str).str.upper()
+    attendance_master_df["assigned_region_seq"] = pd.to_numeric(attendance_master_df["assigned_region_seq"], errors="coerce")
+    if "anchor_region_seq" in attendance_master_df.columns:
+        attendance_master_df["anchor_region_seq"] = pd.to_numeric(attendance_master_df["anchor_region_seq"], errors="coerce")
 
-    supplemental_rows: list[dict[str, Any]] = []
-    for engineer_code, group in actual_df.groupby("SVC_ENGINEER_CODE"):
-        engineer_code = str(engineer_code)
-        if engineer_code in roster_codes:
-            continue
-        center_type = _first_mode(group["SVC_CENTER_TYPE"], DMS_CENTER_TYPE)
-        assigned_region_seq = pd.to_numeric(group["region_seq"], errors="coerce").dropna()
-        assigned_region = int(assigned_region_seq.mode().iloc[0]) if not assigned_region_seq.empty else pd.NA
-        supplemental_rows.append(
-            {
-                "SVC_ENGINEER_CODE": engineer_code,
-                "assigned_region_seq": assigned_region,
-                "zip_overlap_count": 0,
-                "zip_overlap_ratio": 0.0,
-                "AREA_NAME": f"{engineer_code}_ACTUAL",
-                "SVC_CENTER_TYPE": center_type,
-                "assigned_region_name": f"Atlanta New Region {int(assigned_region)}" if pd.notna(assigned_region) else "Atlanta Floating",
-                "preferred_region_rank_1": pd.NA,
-                "preferred_region_rank_2": pd.NA,
-                "preferred_region_rank_3": pd.NA,
-                "anchor_region_seq": assigned_region,
-                "anchor_region_name": f"Atlanta New Region {int(assigned_region)}" if pd.notna(assigned_region) else "Atlanta Floating",
-                "Name": _first_mode(group["SVC_ENGINEER_NAME"], engineer_code),
-                "normalized_slot": 8,
-                "REF_HEAVY_REPAIR_FLAG": "Y",
-                "latitude": pd.to_numeric(group["latitude"], errors="coerce").median(),
-                "longitude": pd.to_numeric(group["longitude"], errors="coerce").median(),
-            }
+    roster_codes = set(attendance_master_df["SVC_ENGINEER_CODE"].astype(str))
+    attendance_by_date: dict[str, set[str]] = {}
+
+    def _rank_replacements(
+        candidates_df: pd.DataFrame,
+        desired_center_type: str,
+        desired_region_seq: int | None,
+    ) -> pd.DataFrame:
+        ranked = candidates_df.copy()
+        ranked["_center_match"] = (ranked["SVC_CENTER_TYPE"].astype(str).str.upper() == desired_center_type).astype(int)
+        if desired_region_seq is None:
+            ranked["_assigned_region_match"] = 0
+            ranked["_anchor_region_match"] = 0
+        else:
+            ranked["_assigned_region_match"] = (
+                pd.to_numeric(ranked["assigned_region_seq"], errors="coerce") == int(desired_region_seq)
+            ).astype(int)
+            anchor_region_series = pd.to_numeric(ranked.get("anchor_region_seq"), errors="coerce")
+            ranked["_anchor_region_match"] = (anchor_region_series == int(desired_region_seq)).astype(int)
+        ranked["zip_overlap_count"] = pd.to_numeric(ranked["zip_overlap_count"], errors="coerce").fillna(0)
+        ranked["zip_overlap_ratio"] = pd.to_numeric(ranked["zip_overlap_ratio"], errors="coerce").fillna(0)
+        return ranked.sort_values(
+            [
+                "_center_match",
+                "_assigned_region_match",
+                "_anchor_region_match",
+                "zip_overlap_count",
+                "zip_overlap_ratio",
+                "SVC_ENGINEER_CODE",
+            ],
+            ascending=[False, False, False, False, False, True],
         )
 
-    attendance_master_df = engineer_master_df.copy()
-    if supplemental_rows:
-        supplemental_df = pd.DataFrame(supplemental_rows)
-        for col in attendance_master_df.columns:
-            if col not in supplemental_df.columns:
-                supplemental_df[col] = pd.NA
-        supplemental_df = supplemental_df[attendance_master_df.columns]
-        attendance_master_df = pd.concat([attendance_master_df, supplemental_df], ignore_index=True)
+    for service_date_key, group in actual_df.groupby("service_date_key"):
+        actual_codes = [str(code) for code in group["SVC_ENGINEER_CODE"].dropna().astype(str).unique().tolist()]
+        selected_codes: set[str] = {code for code in actual_codes if code in roster_codes}
+
+        missing_codes = [code for code in actual_codes if code not in roster_codes]
+        available_df = attendance_master_df[
+            ~attendance_master_df["SVC_ENGINEER_CODE"].astype(str).isin(selected_codes)
+        ].copy()
+
+        for missing_code in missing_codes:
+            if available_df.empty:
+                break
+            missing_group = group[group["SVC_ENGINEER_CODE"].astype(str) == missing_code].copy()
+            desired_center_type = _first_mode(missing_group["SVC_CENTER_TYPE"], DMS_CENTER_TYPE).upper()
+            desired_region_series = pd.to_numeric(missing_group["region_seq"], errors="coerce").dropna()
+            desired_region_seq = int(desired_region_series.mode().iloc[0]) if not desired_region_series.empty else None
+
+            ranked_df = _rank_replacements(available_df, desired_center_type, desired_region_seq)
+            replacement_row = ranked_df.iloc[0]
+            replacement_code = str(replacement_row["SVC_ENGINEER_CODE"])
+            selected_codes.add(replacement_code)
+            available_df = available_df[
+                available_df["SVC_ENGINEER_CODE"].astype(str) != replacement_code
+            ].copy()
+
+        target_count = len(actual_codes)
+        if len(selected_codes) < target_count and not available_df.empty:
+            fallback_ranked_df = _rank_replacements(available_df, DMS_CENTER_TYPE, None)
+            for replacement_code in fallback_ranked_df["SVC_ENGINEER_CODE"].astype(str).tolist():
+                if len(selected_codes) >= target_count:
+                    break
+                selected_codes.add(replacement_code)
+
+        attendance_by_date[str(service_date_key)] = selected_codes
 
     attendance_master_df = attendance_master_df.drop_duplicates(subset=["SVC_ENGINEER_CODE"]).reset_index(drop=True)
     return attendance_master_df, attendance_by_date
@@ -604,6 +649,22 @@ def _build_summary_from_assignment(
     region_centers: dict[int, tuple[float, float]],
     service_date_key: str,
 ) -> pd.DataFrame:
+    if assignment_df is None or assignment_df.empty or "assigned_sm_code" not in assignment_df.columns:
+        return pd.DataFrame(
+            columns=[
+                "service_date_key",
+                "SVC_ENGINEER_CODE",
+                "SVC_ENGINEER_NAME",
+                "assigned_center_type",
+                "assigned_region_seq",
+                "job_count",
+                "service_time_min",
+                "travel_time_min",
+                "travel_distance_km",
+                "total_work_min",
+                "overflow_480",
+            ]
+        )
     summary_rows: list[dict[str, Any]] = []
     for _, engineer in engineer_master_df.iterrows():
         code = str(engineer["SVC_ENGINEER_CODE"])
@@ -628,6 +689,209 @@ def _build_summary_from_assignment(
             }
         )
     return pd.DataFrame(summary_rows)
+
+
+def _order_jobs_nearest_neighbor(
+    job_df: pd.DataFrame,
+    start_coord: tuple[float, float] | None,
+) -> pd.DataFrame:
+    if job_df.empty:
+        return job_df.copy()
+    remaining = job_df.copy().reset_index(drop=True)
+    ordered_rows: list[dict[str, Any]] = []
+    current_coord = start_coord
+    if current_coord is None:
+        mean_lon = pd.to_numeric(remaining["longitude"], errors="coerce").mean()
+        mean_lat = pd.to_numeric(remaining["latitude"], errors="coerce").mean()
+        if pd.notna(mean_lon) and pd.notna(mean_lat):
+            current_coord = (float(mean_lon), float(mean_lat))
+    while not remaining.empty:
+        if current_coord is None:
+            chosen_idx = 0
+        else:
+            distance_series = remaining.apply(
+                lambda row: _estimate_incremental_travel(
+                    current_coord,
+                    (float(row["longitude"]), float(row["latitude"])),
+                    None,
+                )[0],
+                axis=1,
+            )
+            chosen_idx = int(distance_series.idxmin())
+        chosen_row = remaining.loc[chosen_idx]
+        ordered_rows.append(chosen_row.to_dict())
+        current_coord = (float(chosen_row["longitude"]), float(chosen_row["latitude"]))
+        remaining = remaining.drop(index=[chosen_idx]).reset_index(drop=True)
+    return pd.DataFrame(ordered_rows)
+
+
+def _split_jobs_into_weighted_chunks(
+    ordered_df: pd.DataFrame,
+    chunk_count: int,
+) -> list[pd.DataFrame]:
+    if ordered_df.empty or chunk_count <= 0:
+        return []
+    total_weight = float(_weighted_job_units(ordered_df).sum())
+    target_weight = total_weight / float(chunk_count) if chunk_count > 0 else total_weight
+    weighted_df = ordered_df.copy().reset_index(drop=True)
+    weighted_df["_weighted_unit"] = _weighted_job_units(weighted_df).values
+    chunks: list[pd.DataFrame] = []
+    start = 0
+    remaining_chunks = chunk_count
+    while start < len(weighted_df) and remaining_chunks > 0:
+        if remaining_chunks == 1:
+            chunks.append(weighted_df.iloc[start:].drop(columns=["_weighted_unit"], errors="ignore").reset_index(drop=True))
+            break
+        running_weight = 0.0
+        end = start
+        min_remaining_rows = remaining_chunks - 1
+        while end < len(weighted_df) - min_remaining_rows:
+            running_weight += float(weighted_df.iloc[end]["_weighted_unit"])
+            end += 1
+            if running_weight >= target_weight:
+                break
+        chunks.append(weighted_df.iloc[start:end].drop(columns=["_weighted_unit"], errors="ignore").reset_index(drop=True))
+        start = end
+        remaining_chunks -= 1
+    return [chunk for chunk in chunks if not chunk.empty]
+
+
+def _sequence_assign_jobs(
+    job_df: pd.DataFrame,
+    candidate_engineers_df: pd.DataFrame,
+    states: dict[str, dict[str, Any]],
+    region_centers: dict[int, tuple[float, float]],
+) -> list[dict[str, Any]]:
+    if job_df.empty or candidate_engineers_df.empty:
+        return []
+    engineer_df = candidate_engineers_df.drop_duplicates(subset=["SVC_ENGINEER_CODE"]).copy().reset_index(drop=True)
+    start_coords = []
+    for _, engineer in engineer_df.iterrows():
+        start_coord = _get_engineer_start_coord(engineer, region_centers)
+        if start_coord is not None:
+            start_coords.append(start_coord)
+    global_start = None
+    if start_coords:
+        global_start = (
+            float(sum(coord[0] for coord in start_coords) / len(start_coords)),
+            float(sum(coord[1] for coord in start_coords) / len(start_coords)),
+        )
+    ordered_df = _order_jobs_nearest_neighbor(_job_priority(job_df), global_start)
+    chunk_count = min(len(engineer_df), len(ordered_df))
+    chunks = _split_jobs_into_weighted_chunks(ordered_df, chunk_count)
+    remaining_engineers = engineer_df.copy()
+    assignments: list[dict[str, Any]] = []
+
+    for chunk_df in chunks:
+        centroid_lon = pd.to_numeric(chunk_df["longitude"], errors="coerce").mean()
+        centroid_lat = pd.to_numeric(chunk_df["latitude"], errors="coerce").mean()
+        if pd.isna(centroid_lon) or pd.isna(centroid_lat) or remaining_engineers.empty:
+            break
+        chunk_centroid = (float(centroid_lon), float(centroid_lat))
+        ranked = remaining_engineers.copy()
+        ranked["_centroid_km"] = ranked.apply(
+            lambda row: _estimate_incremental_travel(
+                _get_engineer_start_coord(row, region_centers),
+                chunk_centroid,
+                None,
+            )[0],
+            axis=1,
+        )
+        ranked = ranked.sort_values(
+            ["_centroid_km", "zip_overlap_count", "zip_overlap_ratio", "SVC_ENGINEER_CODE"],
+            ascending=[True, False, False, True],
+        )
+        chosen_engineer = ranked.iloc[0]
+        engineer_code = str(chosen_engineer["SVC_ENGINEER_CODE"])
+        state = states[engineer_code]
+        start_coord = state["start_coord"]
+        ordered_chunk_df = _order_jobs_nearest_neighbor(chunk_df, start_coord)
+        last_coord = start_coord
+        for _, job_row in ordered_chunk_df.iterrows():
+            job_coord = (float(job_row["longitude"]), float(job_row["latitude"]))
+            inc_km, inc_min = _estimate_incremental_travel(last_coord, job_coord, None)
+            state["travel_distance_km"] += float(inc_km)
+            state["travel_time_min"] += float(inc_min)
+            state["service_time_min"] += float(job_row["service_time_min"])
+            state["job_count"] += 1
+            state["current_coord"] = job_coord
+            job_dict = job_row.to_dict()
+            job_dict["assigned_sm_code"] = engineer_code
+            job_dict["assigned_sm_name"] = state["engineer_name"]
+            job_dict["assigned_center_type"] = state["center_type"]
+            job_dict["home_start_longitude"] = state["start_coord"][0] if state["start_coord"] is not None else pd.NA
+            job_dict["home_start_latitude"] = state["start_coord"][1] if state["start_coord"] is not None else pd.NA
+            state["assigned_rows"].append(job_dict)
+            assignments.append(job_dict)
+            last_coord = job_coord
+        remaining_engineers = remaining_engineers[
+            remaining_engineers["SVC_ENGINEER_CODE"].astype(str) != engineer_code
+        ].copy()
+    return assignments
+
+
+def _assignment_objective(
+    assignment_df: pd.DataFrame,
+    engineer_master_df: pd.DataFrame,
+    region_centers: dict[int, tuple[float, float]],
+    service_date_key: str,
+) -> tuple[float, float, float]:
+    summary_df = _build_summary_from_assignment(assignment_df, engineer_master_df, region_centers, service_date_key)
+    max_total = float(pd.to_numeric(summary_df["total_work_min"], errors="coerce").fillna(0).max()) if not summary_df.empty else 0.0
+    total_travel = float(pd.to_numeric(summary_df["travel_distance_km"], errors="coerce").fillna(0).sum()) if not summary_df.empty else 0.0
+    weighted_std = 0.0
+    if not assignment_df.empty:
+        weighted_df = assignment_df.copy()
+        weighted_df["weighted_job_unit"] = _weighted_job_units(weighted_df)
+        weighted_series = weighted_df.groupby(weighted_df["assigned_sm_code"].astype(str))["weighted_job_unit"].sum()
+        weighted_std = float(weighted_series.std(ddof=0)) if not weighted_series.empty else 0.0
+    return round(max_total, 4), round(weighted_std, 4), round(total_travel, 4)
+
+
+def _iterative_improve_assignment_df(
+    assignment_df: pd.DataFrame,
+    engineer_master_df: pd.DataFrame,
+    region_centers: dict[int, tuple[float, float]],
+) -> pd.DataFrame:
+    if assignment_df.empty:
+        return assignment_df
+
+    improved_df = assignment_df.copy().reset_index(drop=True)
+    service_date_key = str(improved_df["service_date_key"].iloc[0])
+    baseline_objective = _assignment_objective(improved_df, engineer_master_df, region_centers, service_date_key)
+
+    for _ in range(2):
+        changed = False
+        for idx, job_row in improved_df.copy().iterrows():
+            current_code = str(job_row["assigned_sm_code"])
+            source_group = improved_df[improved_df["assigned_sm_code"].astype(str) == current_code]
+            if source_group["GSFS_RECEIPT_NO"].astype(str).nunique() <= 1:
+                continue
+            candidates_df = _candidate_engineers(job_row, engineer_master_df)
+            if candidates_df.empty:
+                continue
+            for _, candidate in candidates_df.iterrows():
+                candidate_code = str(candidate["SVC_ENGINEER_CODE"])
+                if candidate_code == current_code:
+                    continue
+                trial_df = improved_df.copy()
+                trial_df.loc[idx, "assigned_sm_code"] = candidate_code
+                trial_df.loc[idx, "assigned_sm_name"] = str(candidate.get("Name", ""))
+                trial_df.loc[idx, "assigned_center_type"] = str(candidate.get("SVC_CENTER_TYPE", ""))
+                candidate_start = _get_engineer_start_coord(candidate, region_centers)
+                trial_df.loc[idx, "home_start_longitude"] = candidate_start[0] if candidate_start is not None else pd.NA
+                trial_df.loc[idx, "home_start_latitude"] = candidate_start[1] if candidate_start is not None else pd.NA
+                trial_objective = _assignment_objective(trial_df, engineer_master_df, region_centers, service_date_key)
+                if trial_objective < baseline_objective:
+                    improved_df = trial_df
+                    baseline_objective = trial_objective
+                    changed = True
+                    break
+            if changed:
+                break
+        if not changed:
+            break
+    return improved_df
 
 
 def _local_rebalance_assignment_df(
@@ -1087,6 +1351,62 @@ def _assign_day(
     return assignment_df, summary_df
 
 
+def _assign_day_sequence(
+    service_day_df: pd.DataFrame,
+    engineer_master_df: pd.DataFrame,
+    region_centers: dict[int, tuple[float, float]],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    states: dict[str, dict[str, Any]] = {}
+    for _, row in engineer_master_df.iterrows():
+        code = str(row["SVC_ENGINEER_CODE"])
+        home_coord = _get_engineer_start_coord(row, region_centers)
+        states[code] = {
+            "engineer_code": code,
+            "engineer_name": str(row.get("Name", "")),
+            "center_type": str(row.get("SVC_CENTER_TYPE", "")),
+            "assigned_region_seq": row.get("assigned_region_seq"),
+            "anchor_region_seq": row.get("anchor_region_seq"),
+            "current_coord": home_coord,
+            "service_time_min": 0.0,
+            "travel_time_min": 0.0,
+            "travel_distance_km": 0.0,
+            "job_count": 0,
+            "assigned_rows": [],
+            "start_coord": home_coord,
+        }
+
+    assignments: list[dict[str, Any]] = []
+    dms2_df = engineer_master_df[engineer_master_df["SVC_CENTER_TYPE"] == DMS2_CENTER_TYPE].copy()
+    ref_heavy_engineers_df = engineer_master_df[engineer_master_df["REF_HEAVY_REPAIR_FLAG"] == "Y"].copy()
+
+    tv_jobs_df = service_day_df[service_day_df["is_tv_job"]].copy()
+    heavy_jobs_df = service_day_df[
+        (~service_day_df["is_tv_job"])
+        & (service_day_df["is_heavy_repair"].fillna(False).astype(bool))
+        & (service_day_df["SERVICE_PRODUCT_GROUP_CODE"].astype(str).str.upper() == REF_PRODUCT_GROUP)
+    ].copy()
+    remaining_jobs_df = service_day_df[
+        ~service_day_df["GSFS_RECEIPT_NO"].astype(str).isin(
+            pd.concat([tv_jobs_df, heavy_jobs_df], ignore_index=True)["GSFS_RECEIPT_NO"].astype(str).tolist()
+            if not pd.concat([tv_jobs_df, heavy_jobs_df], ignore_index=True).empty
+            else []
+        )
+    ].copy()
+
+    assignments.extend(_sequence_assign_jobs(tv_jobs_df, dms2_df, states, region_centers))
+    assignments.extend(_sequence_assign_jobs(heavy_jobs_df, ref_heavy_engineers_df, states, region_centers))
+    assignments.extend(_sequence_assign_jobs(remaining_jobs_df, engineer_master_df, states, region_centers))
+
+    assignment_df = pd.DataFrame(assignments)
+    summary_df = _build_summary_from_assignment(
+        assignment_df,
+        engineer_master_df,
+        region_centers,
+        str(service_day_df["service_date_key"].iloc[0]),
+    )
+    return assignment_df, summary_df
+
+
 def _fmt_dt(value: pd.Timestamp) -> str:
     return value.strftime("%H:%M")
 
@@ -1165,6 +1485,7 @@ def build_atlanta_production_assignment(
     output_suffix: str = "",
     attendance_limited: bool = False,
     date_keys: list[str] | None = None,
+    assignment_strategy: str = "grow",
 ) -> AtlantaProductionAssignmentResult:
     _, engineer_region_df, home_df, service_df = _load_inputs()
     if date_keys:
@@ -1190,13 +1511,32 @@ def build_atlanta_production_assignment(
             ].copy()
             if day_engineer_master_df.empty:
                 continue
-        assignment_df, summary_df = _assign_day(
-            service_day_df.copy(),
-            day_engineer_master_df.copy(),
-            region_centers,
-            route_client,
-            border_expansion_zip_map,
-        )
+        if assignment_strategy == "sequence":
+            assignment_df, summary_df = _assign_day_sequence(
+                service_day_df.copy(),
+                day_engineer_master_df.copy(),
+                region_centers,
+            )
+        else:
+            assignment_df, summary_df = _assign_day(
+                service_day_df.copy(),
+                day_engineer_master_df.copy(),
+                region_centers,
+                route_client,
+                border_expansion_zip_map,
+            )
+            if assignment_strategy == "iteration":
+                assignment_df = _iterative_improve_assignment_df(
+                    assignment_df,
+                    day_engineer_master_df.copy(),
+                    region_centers,
+                )
+                summary_df = _build_summary_from_assignment(
+                    assignment_df,
+                    day_engineer_master_df.copy(),
+                    region_centers,
+                    str(service_date_key),
+                )
         if assignment_df.empty:
             continue
         assignment_frames.append(assignment_df)

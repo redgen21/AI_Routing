@@ -1,8 +1,30 @@
-D:\python\合固 扼快泼\smart_routing\production_assign_atlanta.py:248: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
-  attendance_master_df = pd.concat([attendance_master_df, supplemental_df], ignore_index=True)
-D:\python\合固 扼快泼\smart_routing\production_assign_atlanta.py:248: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
-  attendance_master_df = pd.concat([attendance_master_df, supplemental_df], ignore_index=True)
-D:\python\合固 扼快泼\smart_routing\production_assign_atlanta.py:248: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
-  attendance_master_df = pd.concat([attendance_master_df, supplemental_df], ignore_index=True)
-D:\python\合固 扼快泼\smart_routing\production_assign_atlanta.py:248: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
-  attendance_master_df = pd.concat([attendance_master_df, supplemental_df], ignore_index=True)
+Traceback (most recent call last):
+  File "D:\python\合固 扼快泼\sr_production_atlanta_assign_osrm_actual_attendance_chunks.py", line 135, in <module>
+    main()
+    ~~~~^^
+  File "D:\python\合固 扼快泼\sr_production_atlanta_assign_osrm_actual_attendance_chunks.py", line 116, in main
+    line_assignment_df = pd.read_csv(OUT_DIR / "atlanta_assignment_result_actual_attendance.csv", low_memory=False)
+  File "C:\Users\yongbae.park\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\io\parsers\readers.py", line 1026, in read_csv
+    return _read(filepath_or_buffer, kwds)
+  File "C:\Users\yongbae.park\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\io\parsers\readers.py", line 620, in _read
+    parser = TextFileReader(filepath_or_buffer, **kwds)
+  File "C:\Users\yongbae.park\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\io\parsers\readers.py", line 1620, in __init__
+    self._engine = self._make_engine(f, self.engine)
+                   ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\yongbae.park\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\io\parsers\readers.py", line 1880, in _make_engine
+    self.handles = get_handle(
+                   ~~~~~~~~~~^
+        f,
+        ^^
+    ...<6 lines>...
+        storage_options=self.options.get("storage_options", None),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\yongbae.park\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\io\common.py", line 873, in get_handle
+    handle = open(
+        handle,
+    ...<3 lines>...
+        newline="",
+    )
+FileNotFoundError: [Errno 2] No such file or directory: '260310\\production_output\\atlanta_assignment_result_actual_attendance.csv'

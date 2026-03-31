@@ -30,6 +30,24 @@ SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule.csv")
 LINE_ACTUAL_ASSIGNMENT_PATH = Path("260310/production_output/atlanta_assignment_result_actual_attendance.csv")
 LINE_ACTUAL_ENGINEER_DAY_SUMMARY_PATH = Path("260310/production_output/atlanta_engineer_day_summary_actual_attendance.csv")
 LINE_ACTUAL_SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule_actual_attendance.csv")
+SEQUENCE_ACTUAL_ASSIGNMENT_PATH = Path("260310/production_output/atlanta_assignment_result_actual_attendance_sequence.csv")
+SEQUENCE_ACTUAL_ENGINEER_DAY_SUMMARY_PATH = Path("260310/production_output/atlanta_engineer_day_summary_actual_attendance_sequence.csv")
+SEQUENCE_ACTUAL_SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule_actual_attendance_sequence.csv")
+ITERATION_ACTUAL_ASSIGNMENT_PATH = Path("260310/production_output/atlanta_assignment_result_actual_attendance_iteration.csv")
+ITERATION_ACTUAL_ENGINEER_DAY_SUMMARY_PATH = Path("260310/production_output/atlanta_engineer_day_summary_actual_attendance_iteration.csv")
+ITERATION_ACTUAL_SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule_actual_attendance_iteration.csv")
+SEQUENCE_OSRM_ACTUAL_ASSIGNMENT_PATH = Path("260310/production_output/atlanta_assignment_result_osrm_actual_attendance_sequence.csv")
+SEQUENCE_OSRM_ACTUAL_ENGINEER_DAY_SUMMARY_PATH = Path("260310/production_output/atlanta_engineer_day_summary_osrm_actual_attendance_sequence.csv")
+SEQUENCE_OSRM_ACTUAL_SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule_osrm_actual_attendance_sequence.csv")
+ITERATION_OSRM_ACTUAL_ASSIGNMENT_PATH = Path("260310/production_output/atlanta_assignment_result_osrm_actual_attendance_iteration.csv")
+ITERATION_OSRM_ACTUAL_ENGINEER_DAY_SUMMARY_PATH = Path("260310/production_output/atlanta_engineer_day_summary_osrm_actual_attendance_iteration.csv")
+ITERATION_OSRM_ACTUAL_SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule_osrm_actual_attendance_iteration.csv")
+LNS_ACTUAL_3DAYS_ASSIGNMENT_PATH = Path("260310/production_output/atlanta_assignment_result_lns_actual_3days.csv")
+LNS_ACTUAL_3DAYS_ENGINEER_DAY_SUMMARY_PATH = Path("260310/production_output/atlanta_engineer_day_summary_lns_actual_3days.csv")
+LNS_ACTUAL_3DAYS_SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule_lns_actual_3days.csv")
+VRP_ACTUAL_3DAYS_ASSIGNMENT_PATH = Path("260310/production_output/atlanta_assignment_result_vrp_actual_3days.csv")
+VRP_ACTUAL_3DAYS_ENGINEER_DAY_SUMMARY_PATH = Path("260310/production_output/atlanta_engineer_day_summary_vrp_actual_3days.csv")
+VRP_ACTUAL_3DAYS_SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule_vrp_actual_3days.csv")
 OSRM_ASSIGNMENT_PATH = Path("260310/production_output/atlanta_assignment_result_osrm.csv")
 OSRM_ENGINEER_DAY_SUMMARY_PATH = Path("260310/production_output/atlanta_engineer_day_summary_osrm.csv")
 OSRM_SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule_osrm.csv")
@@ -90,6 +108,48 @@ def load_inputs():
         else pd.DataFrame()
     )
     line_actual_schedule_df = pd.read_csv(LINE_ACTUAL_SCHEDULE_PATH, encoding="utf-8-sig", low_memory=False) if LINE_ACTUAL_SCHEDULE_PATH.exists() else pd.DataFrame()
+    sequence_actual_assignment_df = pd.read_csv(SEQUENCE_ACTUAL_ASSIGNMENT_PATH, encoding="utf-8-sig", low_memory=False) if SEQUENCE_ACTUAL_ASSIGNMENT_PATH.exists() else pd.DataFrame()
+    sequence_actual_engineer_day_summary_df = (
+        pd.read_csv(SEQUENCE_ACTUAL_ENGINEER_DAY_SUMMARY_PATH, encoding="utf-8-sig", low_memory=False)
+        if SEQUENCE_ACTUAL_ENGINEER_DAY_SUMMARY_PATH.exists()
+        else pd.DataFrame()
+    )
+    sequence_actual_schedule_df = pd.read_csv(SEQUENCE_ACTUAL_SCHEDULE_PATH, encoding="utf-8-sig", low_memory=False) if SEQUENCE_ACTUAL_SCHEDULE_PATH.exists() else pd.DataFrame()
+    iteration_actual_assignment_df = pd.read_csv(ITERATION_ACTUAL_ASSIGNMENT_PATH, encoding="utf-8-sig", low_memory=False) if ITERATION_ACTUAL_ASSIGNMENT_PATH.exists() else pd.DataFrame()
+    iteration_actual_engineer_day_summary_df = (
+        pd.read_csv(ITERATION_ACTUAL_ENGINEER_DAY_SUMMARY_PATH, encoding="utf-8-sig", low_memory=False)
+        if ITERATION_ACTUAL_ENGINEER_DAY_SUMMARY_PATH.exists()
+        else pd.DataFrame()
+    )
+    iteration_actual_schedule_df = pd.read_csv(ITERATION_ACTUAL_SCHEDULE_PATH, encoding="utf-8-sig", low_memory=False) if ITERATION_ACTUAL_SCHEDULE_PATH.exists() else pd.DataFrame()
+    sequence_osrm_actual_assignment_df = pd.read_csv(SEQUENCE_OSRM_ACTUAL_ASSIGNMENT_PATH, encoding="utf-8-sig", low_memory=False) if SEQUENCE_OSRM_ACTUAL_ASSIGNMENT_PATH.exists() else pd.DataFrame()
+    sequence_osrm_actual_engineer_day_summary_df = (
+        pd.read_csv(SEQUENCE_OSRM_ACTUAL_ENGINEER_DAY_SUMMARY_PATH, encoding="utf-8-sig", low_memory=False)
+        if SEQUENCE_OSRM_ACTUAL_ENGINEER_DAY_SUMMARY_PATH.exists()
+        else pd.DataFrame()
+    )
+    sequence_osrm_actual_schedule_df = pd.read_csv(SEQUENCE_OSRM_ACTUAL_SCHEDULE_PATH, encoding="utf-8-sig", low_memory=False) if SEQUENCE_OSRM_ACTUAL_SCHEDULE_PATH.exists() else pd.DataFrame()
+    iteration_osrm_actual_assignment_df = pd.read_csv(ITERATION_OSRM_ACTUAL_ASSIGNMENT_PATH, encoding="utf-8-sig", low_memory=False) if ITERATION_OSRM_ACTUAL_ASSIGNMENT_PATH.exists() else pd.DataFrame()
+    iteration_osrm_actual_engineer_day_summary_df = (
+        pd.read_csv(ITERATION_OSRM_ACTUAL_ENGINEER_DAY_SUMMARY_PATH, encoding="utf-8-sig", low_memory=False)
+        if ITERATION_OSRM_ACTUAL_ENGINEER_DAY_SUMMARY_PATH.exists()
+        else pd.DataFrame()
+    )
+    iteration_osrm_actual_schedule_df = pd.read_csv(ITERATION_OSRM_ACTUAL_SCHEDULE_PATH, encoding="utf-8-sig", low_memory=False) if ITERATION_OSRM_ACTUAL_SCHEDULE_PATH.exists() else pd.DataFrame()
+    lns_actual_3days_assignment_df = pd.read_csv(LNS_ACTUAL_3DAYS_ASSIGNMENT_PATH, encoding="utf-8-sig", low_memory=False) if LNS_ACTUAL_3DAYS_ASSIGNMENT_PATH.exists() else pd.DataFrame()
+    lns_actual_3days_engineer_day_summary_df = (
+        pd.read_csv(LNS_ACTUAL_3DAYS_ENGINEER_DAY_SUMMARY_PATH, encoding="utf-8-sig", low_memory=False)
+        if LNS_ACTUAL_3DAYS_ENGINEER_DAY_SUMMARY_PATH.exists()
+        else pd.DataFrame()
+    )
+    lns_actual_3days_schedule_df = pd.read_csv(LNS_ACTUAL_3DAYS_SCHEDULE_PATH, encoding="utf-8-sig", low_memory=False) if LNS_ACTUAL_3DAYS_SCHEDULE_PATH.exists() else pd.DataFrame()
+    vrp_actual_3days_assignment_df = pd.read_csv(VRP_ACTUAL_3DAYS_ASSIGNMENT_PATH, encoding="utf-8-sig", low_memory=False) if VRP_ACTUAL_3DAYS_ASSIGNMENT_PATH.exists() else pd.DataFrame()
+    vrp_actual_3days_engineer_day_summary_df = (
+        pd.read_csv(VRP_ACTUAL_3DAYS_ENGINEER_DAY_SUMMARY_PATH, encoding="utf-8-sig", low_memory=False)
+        if VRP_ACTUAL_3DAYS_ENGINEER_DAY_SUMMARY_PATH.exists()
+        else pd.DataFrame()
+    )
+    vrp_actual_3days_schedule_df = pd.read_csv(VRP_ACTUAL_3DAYS_SCHEDULE_PATH, encoding="utf-8-sig", low_memory=False) if VRP_ACTUAL_3DAYS_SCHEDULE_PATH.exists() else pd.DataFrame()
     osrm_assignment_df = pd.read_csv(OSRM_ASSIGNMENT_PATH, encoding="utf-8-sig", low_memory=False) if OSRM_ASSIGNMENT_PATH.exists() else pd.DataFrame()
     osrm_engineer_day_summary_df = (
         pd.read_csv(OSRM_ENGINEER_DAY_SUMMARY_PATH, encoding="utf-8-sig", low_memory=False)
@@ -112,6 +172,12 @@ def load_inputs():
     )
 
     region_zip_df["POSTAL_CODE"] = region_zip_df["POSTAL_CODE"].astype(str).str.zfill(5)
+    if "SVC_CENTER_TYPE" in engineer_region_df.columns:
+        engineer_region_df["SVC_CENTER_TYPE"] = engineer_region_df["SVC_CENTER_TYPE"].astype(str).str.upper()
+        engineer_region_df = engineer_region_df[engineer_region_df["SVC_CENTER_TYPE"] == "DMS"].copy()
+    if "SVC_CENTER_TYPE" in home_df.columns:
+        home_df["SVC_CENTER_TYPE"] = home_df["SVC_CENTER_TYPE"].astype(str).str.upper()
+        home_df = home_df[home_df["SVC_CENTER_TYPE"] == "DMS"].copy()
     engineer_region_df["engineer_label"] = engineer_region_df["SVC_ENGINEER_CODE"].astype(str) + " | " + engineer_region_df["Name"].astype(str)
     if "POSTAL_CODE" in base_service_df.columns:
         base_service_df["POSTAL_CODE"] = base_service_df["POSTAL_CODE"].astype(str).str.zfill(5)
@@ -128,6 +194,18 @@ def load_inputs():
         schedule_df,
         line_actual_assignment_df,
         line_actual_schedule_df,
+        sequence_actual_assignment_df,
+        sequence_actual_schedule_df,
+        iteration_actual_assignment_df,
+        iteration_actual_schedule_df,
+        sequence_osrm_actual_assignment_df,
+        sequence_osrm_actual_schedule_df,
+        iteration_osrm_actual_assignment_df,
+        iteration_osrm_actual_schedule_df,
+        lns_actual_3days_assignment_df,
+        lns_actual_3days_schedule_df,
+        vrp_actual_3days_assignment_df,
+        vrp_actual_3days_schedule_df,
         osrm_assignment_df,
         osrm_schedule_df,
         osrm_actual_assignment_df,
@@ -146,10 +224,22 @@ def load_inputs():
             df["longitude"] = pd.to_numeric(df["longitude"], errors="coerce")
         if "service_time_min" in df.columns:
             df["service_time_min"] = pd.to_numeric(df["service_time_min"], errors="coerce").fillna(45)
+        if "assigned_center_type" in df.columns:
+            df["assigned_center_type"] = df["assigned_center_type"].astype(str).str.upper()
+            df.drop(df[df["assigned_center_type"] != "DMS"].index, inplace=True)
+        elif "SVC_CENTER_TYPE" in df.columns:
+            df["SVC_CENTER_TYPE"] = df["SVC_CENTER_TYPE"].astype(str).str.upper()
+            df.drop(df[df["SVC_CENTER_TYPE"] != "DMS"].index, inplace=True)
 
     for df in [
         engineer_day_summary_df,
         line_actual_engineer_day_summary_df,
+        sequence_actual_engineer_day_summary_df,
+        iteration_actual_engineer_day_summary_df,
+        sequence_osrm_actual_engineer_day_summary_df,
+        iteration_osrm_actual_engineer_day_summary_df,
+        lns_actual_3days_engineer_day_summary_df,
+        vrp_actual_3days_engineer_day_summary_df,
         osrm_engineer_day_summary_df,
         osrm_actual_engineer_day_summary_df,
         daily_compare_df,
@@ -174,6 +264,24 @@ def load_inputs():
         line_actual_assignment_df,
         line_actual_engineer_day_summary_df,
         line_actual_schedule_df,
+        sequence_actual_assignment_df,
+        sequence_actual_engineer_day_summary_df,
+        sequence_actual_schedule_df,
+        iteration_actual_assignment_df,
+        iteration_actual_engineer_day_summary_df,
+        iteration_actual_schedule_df,
+        sequence_osrm_actual_assignment_df,
+        sequence_osrm_actual_engineer_day_summary_df,
+        sequence_osrm_actual_schedule_df,
+        iteration_osrm_actual_assignment_df,
+        iteration_osrm_actual_engineer_day_summary_df,
+        iteration_osrm_actual_schedule_df,
+        lns_actual_3days_assignment_df,
+        lns_actual_3days_engineer_day_summary_df,
+        lns_actual_3days_schedule_df,
+        vrp_actual_3days_assignment_df,
+        vrp_actual_3days_engineer_day_summary_df,
+        vrp_actual_3days_schedule_df,
         osrm_assignment_df,
         osrm_engineer_day_summary_df,
         osrm_schedule_df,
@@ -240,7 +348,7 @@ def _build_actual_mode_frames(
 
     actual_df = service_df.copy()
     actual_df["SVC_CENTER_TYPE"] = actual_df["SVC_CENTER_TYPE"].astype(str).str.upper()
-    actual_df = actual_df[actual_df["SVC_CENTER_TYPE"].isin(["DMS", "DMS2"])].copy()
+    actual_df = actual_df[actual_df["SVC_CENTER_TYPE"].isin(["DMS"])].copy()
     if actual_df.empty:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
@@ -322,7 +430,7 @@ def _build_actual_summary_only(service_df: pd.DataFrame) -> tuple[pd.DataFrame, 
         return pd.DataFrame(), pd.DataFrame()
     actual_df = service_df.copy()
     actual_df["SVC_CENTER_TYPE"] = actual_df["SVC_CENTER_TYPE"].astype(str).str.upper()
-    actual_df = actual_df[actual_df["SVC_CENTER_TYPE"].isin(["DMS", "DMS2"])].copy()
+    actual_df = actual_df[actual_df["SVC_CENTER_TYPE"].isin(["DMS"])].copy()
     if actual_df.empty:
         return pd.DataFrame(), pd.DataFrame()
     actual_df["assigned_sm_code"] = actual_df["SVC_ENGINEER_CODE"].astype(str)
@@ -399,10 +507,62 @@ def _build_route_groups(schedule_df: pd.DataFrame):
     return route_groups
 
 
+def _build_region_staffing_view(service_df: pd.DataFrame) -> pd.DataFrame:
+    if service_df.empty:
+        return pd.DataFrame(columns=["region", "dms_count", "dms_service_count", "service_count"])
+
+    working_df = service_df.copy()
+    if "assigned_sm_code" not in working_df.columns and "SVC_ENGINEER_CODE" in working_df.columns:
+        working_df["assigned_sm_code"] = working_df["SVC_ENGINEER_CODE"].astype(str)
+    if "assigned_center_type" not in working_df.columns and "SVC_CENTER_TYPE" in working_df.columns:
+        working_df["assigned_center_type"] = working_df["SVC_CENTER_TYPE"].astype(str)
+
+    if "new_region_name" not in working_df.columns and "region_seq" in working_df.columns:
+        region_seq_series = pd.to_numeric(working_df["region_seq"], errors="coerce")
+        working_df["new_region_name"] = region_seq_series.map(
+            lambda v: f"Atlanta New Region {int(v)}" if pd.notna(v) else ""
+        )
+
+    staffing_df = (
+        working_df[["new_region_name", "assigned_sm_code", "assigned_center_type", "GSFS_RECEIPT_NO"]]
+        .dropna(subset=["new_region_name", "assigned_sm_code"])
+        .copy()
+    )
+    staffing_df["assigned_center_type"] = staffing_df["assigned_center_type"].astype(str).str.upper()
+
+    summary_rows: list[dict[str, object]] = []
+    for region_name, group in staffing_df.groupby("new_region_name", dropna=False):
+        dms_count = int(
+            group.loc[group["assigned_center_type"] == "DMS", "assigned_sm_code"].astype(str).nunique()
+        )
+        dms_service_count = int(
+            group.loc[group["assigned_center_type"] == "DMS", "GSFS_RECEIPT_NO"].dropna().astype(str).nunique()
+        )
+        service_count = int(group["GSFS_RECEIPT_NO"].dropna().astype(str).nunique())
+        summary_rows.append(
+            {
+                "region": str(region_name),
+                "dms_count": dms_count,
+                "dms_service_count": dms_service_count,
+                "service_count": service_count,
+            }
+        )
+
+    view_df = pd.DataFrame(summary_rows)
+    if view_df.empty:
+        return pd.DataFrame(columns=["region", "dms_count", "dms_service_count", "service_count"])
+    return view_df.sort_values("region").reset_index(drop=True)
+
+
 def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.DataFrame, route_groups: list[dict]):
     zip_layer, region_layer = build_region_layers()
     region_colors = _region_color_map()
     engineer_colors = _generate_color_map([group["engineer_code"] for group in route_groups])
+    home_region_lookup = {
+        str(row.get("SVC_ENGINEER_CODE", "")).strip(): str(row.get("assigned_region_name", "")).strip()
+        for _, row in home_df.iterrows()
+        if str(row.get("SVC_ENGINEER_CODE", "")).strip()
+    }
 
     if region_name != "ALL":
         zip_layer = zip_layer[zip_layer["new_region_name"] == region_name].copy()
@@ -437,8 +597,8 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
         style_function=lambda feature: {
             "color": region_colors.get(feature["properties"].get("new_region_name", ""), "#333333"),
             "weight": 3,
-            "fillColor": region_colors.get(feature["properties"].get("new_region_name", ""), "#dddddd"),
-            "fillOpacity": 0.15,
+            "fillColor": "none",
+            "fillOpacity": 0.0,
         },
         tooltip=folium.GeoJsonTooltip(fields=["new_region_name"], aliases=["Region"]),
     ).add_to(fmap)
@@ -482,12 +642,21 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
                 lat = float(row["latitude"])
                 lon = float(row["longitude"])
                 seq = int(row.get("visit_seq", 0))
+                marker_bg = "#ffffff"
+                marker_fg = engineer_color
+                home_region_name = str(row.get("assigned_region_name", "")).strip()
+                if not home_region_name:
+                    home_region_name = home_region_lookup.get(str(row.get("assigned_sm_code", "")).strip(), "")
+                if not home_region_name:
+                    region_seq = pd.to_numeric(pd.Series([row.get("assigned_region_seq")]), errors="coerce").iloc[0]
+                    if pd.notna(region_seq):
+                        home_region_name = f"Atlanta New Region {int(region_seq)}"
                 folium.Marker(
                     location=[lat, lon],
                     icon=folium.DivIcon(
                         html=(
-                            f"<div style=\"font-size:11px;font-weight:700;color:{engineer_color};"
-                            f"background:#fff;border:2px solid {engineer_color};border-radius:12px;"
+                            f"<div style=\"font-size:11px;font-weight:700;color:{marker_fg};"
+                            f"background:{marker_bg};border:2px solid {engineer_color};border-radius:12px;"
                             "width:22px;height:22px;line-height:18px;text-align:center;\">"
                             f"{seq}</div>"
                         )
@@ -496,6 +665,14 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
                         f"<b>Engineer</b>: {row.get('assigned_sm_code', '')} | "
                         f"<b>Receipt</b>: {row.get('GSFS_RECEIPT_NO', '')} | "
                         f"<b>Seq</b>: {seq}<br>"
+                        f"<b>Home Region</b>: {home_region_name}<br>"
+                        f"<b>Product Group</b>: {row.get('SERVICE_PRODUCT_GROUP_CODE', '')}"
+                        + (
+                            f" | <b>REF Heavy</b>: {'Y' if bool(row.get('is_heavy_repair')) else 'N'}"
+                            if str(row.get('SERVICE_PRODUCT_GROUP_CODE', '')).strip().upper() == 'REF'
+                            else ""
+                        )
+                        + "<br>"
                         f"<b>Start</b>: {row.get('visit_start_time', '')} | "
                         f"<b>End</b>: {row.get('visit_end_time', '')} | "
                         f"<b>Travel</b>: {row.get('travel_time_from_prev_min', 0)} min | "
@@ -532,7 +709,7 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
         if pd.isna(row.get("latitude")) or pd.isna(row.get("longitude")):
             continue
         code = str(row.get("SVC_ENGINEER_CODE", ""))
-        border_color = engineer_colors.get(code, "#000000" if str(row.get("SVC_CENTER_TYPE", "")).strip().upper() == "DMS2" else "#444444")
+        border_color = engineer_colors.get(code, "#444444")
         popup = (
             f"<b>Engineer</b>: {row.get('SVC_ENGINEER_CODE', '')} | "
             f"<b>Name</b>: {row.get('Name', '')}<br>"
@@ -571,6 +748,24 @@ def main():
         line_actual_assignment_df,
         line_actual_engineer_day_summary_df,
         line_actual_schedule_df,
+        sequence_actual_assignment_df,
+        sequence_actual_engineer_day_summary_df,
+        sequence_actual_schedule_df,
+        iteration_actual_assignment_df,
+        iteration_actual_engineer_day_summary_df,
+        iteration_actual_schedule_df,
+        sequence_osrm_actual_assignment_df,
+        sequence_osrm_actual_engineer_day_summary_df,
+        sequence_osrm_actual_schedule_df,
+        iteration_osrm_actual_assignment_df,
+        iteration_osrm_actual_engineer_day_summary_df,
+        iteration_osrm_actual_schedule_df,
+        lns_actual_3days_assignment_df,
+        lns_actual_3days_engineer_day_summary_df,
+        lns_actual_3days_schedule_df,
+        vrp_actual_3days_assignment_df,
+        vrp_actual_3days_engineer_day_summary_df,
+        vrp_actual_3days_schedule_df,
         osrm_assignment_df,
         osrm_engineer_day_summary_df,
         osrm_schedule_df,
@@ -590,7 +785,7 @@ def main():
     actual_engineer_source = base_service_df.copy()
     if not actual_engineer_source.empty:
         actual_engineer_source["SVC_CENTER_TYPE"] = actual_engineer_source["SVC_CENTER_TYPE"].astype(str).str.upper()
-        actual_engineer_source = actual_engineer_source[actual_engineer_source["SVC_CENTER_TYPE"].isin(["DMS", "DMS2"])].copy()
+        actual_engineer_source = actual_engineer_source[actual_engineer_source["SVC_CENTER_TYPE"].isin(["DMS"])].copy()
     if not actual_engineer_source.empty:
         actual_labels = (
             actual_engineer_source[["SVC_ENGINEER_CODE", "SVC_ENGINEER_NAME"]]
@@ -603,13 +798,14 @@ def main():
     assignment_mode_options = []
     if not actual_engineer_source.empty:
         assignment_mode_options.append("Actual Routes")
-    assignment_mode_options.append("Line Assign")
-    if not line_actual_assignment_df.empty:
-        assignment_mode_options.append("Line Assign (Actual Attendance)")
-    if not osrm_assignment_df.empty:
-        assignment_mode_options.append("OSRM Assign")
-    if not osrm_actual_assignment_df.empty:
-        assignment_mode_options.append("OSRM Assign (Actual Attendance)")
+    if not iteration_actual_assignment_df.empty:
+        assignment_mode_options.append("Iteration Assign (Actual Attendance)")
+    if not iteration_osrm_actual_assignment_df.empty:
+        assignment_mode_options.append("Iteration OSRM Assign (Actual Attendance)")
+    if not lns_actual_3days_assignment_df.empty:
+        assignment_mode_options.append("LNS Assign (Actual Attendance, 3 Days)")
+    if not vrp_actual_3days_assignment_df.empty:
+        assignment_mode_options.append("VRP Assign (Actual Attendance, 3 Days)")
 
     left, right = st.columns([1, 2.25])
     with left:
@@ -622,22 +818,26 @@ def main():
         if selected_mode == "Actual Routes" and not actual_engineer_source.empty:
             active_service_df, active_summary_df = _build_actual_summary_only(base_service_df)
             active_schedule_df = pd.DataFrame()
-        elif selected_mode == "Line Assign (Actual Attendance)" and not line_actual_assignment_df.empty:
-            active_service_df = line_actual_assignment_df.copy()
-            active_summary_df = line_actual_engineer_day_summary_df.copy()
-            active_schedule_df = line_actual_schedule_df.copy()
-        elif selected_mode == "OSRM Assign" and not osrm_assignment_df.empty:
-            active_service_df = osrm_assignment_df.copy()
-            active_summary_df = osrm_engineer_day_summary_df.copy()
-            active_schedule_df = osrm_schedule_df.copy()
-        elif selected_mode == "OSRM Assign (Actual Attendance)" and not osrm_actual_assignment_df.empty:
-            active_service_df = osrm_actual_assignment_df.copy()
-            active_summary_df = osrm_actual_engineer_day_summary_df.copy()
-            active_schedule_df = osrm_actual_schedule_df.copy()
+        elif selected_mode == "Iteration Assign (Actual Attendance)" and not iteration_actual_assignment_df.empty:
+            active_service_df = iteration_actual_assignment_df.copy()
+            active_summary_df = iteration_actual_engineer_day_summary_df.copy()
+            active_schedule_df = iteration_actual_schedule_df.copy()
+        elif selected_mode == "Iteration OSRM Assign (Actual Attendance)" and not iteration_osrm_actual_assignment_df.empty:
+            active_service_df = iteration_osrm_actual_assignment_df.copy()
+            active_summary_df = iteration_osrm_actual_engineer_day_summary_df.copy()
+            active_schedule_df = iteration_osrm_actual_schedule_df.copy()
+        elif selected_mode == "LNS Assign (Actual Attendance, 3 Days)" and not lns_actual_3days_assignment_df.empty:
+            active_service_df = lns_actual_3days_assignment_df.copy()
+            active_summary_df = lns_actual_3days_engineer_day_summary_df.copy()
+            active_schedule_df = lns_actual_3days_schedule_df.copy()
+        elif selected_mode == "VRP Assign (Actual Attendance, 3 Days)" and not vrp_actual_3days_assignment_df.empty:
+            active_service_df = vrp_actual_3days_assignment_df.copy()
+            active_summary_df = vrp_actual_3days_engineer_day_summary_df.copy()
+            active_schedule_df = vrp_actual_3days_schedule_df.copy()
         else:
-            active_service_df = line_service_df.copy()
-            active_summary_df = engineer_day_summary_df.copy()
-            active_schedule_df = schedule_df.copy()
+            active_service_df = base_service_df.copy()
+            active_summary_df = pd.DataFrame()
+            active_schedule_df = pd.DataFrame()
 
         filtered_service = active_service_df.copy()
         filtered_home = home_df.copy()
@@ -679,7 +879,6 @@ def main():
         service_count = int(filtered_service["GSFS_RECEIPT_NO"].dropna().astype(str).nunique()) if not filtered_service.empty else 0
         heavy_count = int(filtered_service["is_heavy_repair"].fillna(False).astype(bool).sum()) if not filtered_service.empty else 0
         total_service_time = int(filtered_service["service_time_min"].sum()) if not filtered_service.empty else 0
-        tv_count = int(filtered_service["is_tv_job"].fillna(False).astype(bool).sum()) if not filtered_service.empty else 0
         active_summary = filtered_summary.copy()
         if not active_summary.empty and "job_count" in active_summary.columns:
             active_summary = active_summary[pd.to_numeric(active_summary["job_count"], errors="coerce").fillna(0) > 0].copy()
@@ -689,11 +888,9 @@ def main():
             else filtered_service["SVC_ENGINEER_CODE"].dropna().astype(str).nunique() if not filtered_service.empty else 0
         )
         dms_count = 0
-        dms2_count = 0
         if not active_summary.empty and "assigned_center_type" in active_summary.columns:
             center_counts = active_summary["assigned_center_type"].astype(str).str.upper().value_counts()
             dms_count = int(center_counts.get("DMS", 0))
-            dms2_count = int(center_counts.get("DMS2", 0))
         if display_date != "ALL" and route_groups:
             avg_distance = sum(group["route_payload"]["distance_km"] for group in route_groups) / len(route_groups)
             avg_duration = sum(group["route_payload"]["duration_min"] for group in route_groups) / len(route_groups)
@@ -720,41 +917,17 @@ def main():
             jobs_std = float(weighted_jobs.std(ddof=0)) if not weighted_jobs.empty else 0.0
 
         st.metric("Service Count", service_count)
-        st.metric("Assigned Engineer Count", f"{engineer_count} (DMS {dms_count}, DMS2 {dms2_count})")
+        st.metric("Assigned Engineer Count", f"{engineer_count} (DMS {dms_count})")
         st.metric("Heavy Repair Count", heavy_count)
-        st.metric("TV Job Count", tv_count)
         st.metric("Total Service Time (min)", total_service_time)
         st.metric("Average Distance (km)", f"{avg_distance:.2f}")
         st.metric("Average Duration (min)", f"{avg_duration:.2f}")
         st.metric("Jobs per Engineer Std", f"{jobs_std:.2f}")
 
-        compare_df = daily_compare_actual_df.copy() if "Actual Attendance" in selected_mode else daily_compare_df.copy()
-        if selected_mode != "Actual Routes" and selected_date != "ALL" and not compare_df.empty:
-            compare_row = compare_df[compare_df["service_date_key"] == selected_date].copy()
-            if not compare_row.empty:
-                compare_row = compare_row.iloc[0]
-                compare_view = pd.DataFrame(
-                    [
-                        {
-                            "mode": "Line Assign",
-                            "distance_km": compare_row.get("line_total_distance_km"),
-                            "duration_min": compare_row.get("line_total_duration_min"),
-                            "service_count": compare_row.get("line_service_count"),
-                            "assigned_engineers": compare_row.get("line_assigned_engineer_count"),
-                            "jobs_std": compare_row.get("line_jobs_std"),
-                        },
-                        {
-                            "mode": "OSRM Assign",
-                            "distance_km": compare_row.get("osrm_total_distance_km"),
-                            "duration_min": compare_row.get("osrm_total_duration_min"),
-                            "service_count": compare_row.get("osrm_service_count"),
-                            "assigned_engineers": compare_row.get("osrm_assigned_engineer_count"),
-                            "jobs_std": compare_row.get("osrm_jobs_std"),
-                        },
-                    ]
-                )
-                st.markdown("**Daily Compare**")
-                st.dataframe(compare_view, width="stretch", hide_index=True)
+        region_staffing_view = _build_region_staffing_view(filtered_service)
+        if not region_staffing_view.empty:
+            st.markdown("**Regional Staffing / Jobs**")
+            st.dataframe(region_staffing_view, width="stretch", hide_index=True)
 
         st.markdown("**Assigned Service Count by Engineer**")
         if not filtered_summary.empty:
