@@ -11,6 +11,8 @@ from google.oauth2 import service_account
 
 
 DEFAULT_SQL_PATH = Path("smart_routing/select_data.sql")
+DEFAULT_REGION_ZIP_PATH = Path("260310/production_input/atlanta_fixed_region_zip_3.csv")
+FALLBACK_REGION_ZIP_PATH = Path("260310/production_input/atlanta_fixed_region_zip_3_manual320.csv")
 PROMISE_RANGE_PATTERN = re.compile(
     r"FORMAT_DATETIME\('%Y%m%d',\s*T1\.PROMISE_TIMESTAMP\)\s+BETWEEN\s+'(?P<start>\d{8})'\s+AND\s+'(?P<end>\d{8})'",
     re.IGNORECASE,
@@ -35,9 +37,29 @@ def render_service_query(sql_text: str, start_date: date, end_date: date) -> str
     start_yyyymm = _date_to_yyyymm(start_date)
     end_yyyymm = _date_to_yyyymm(end_date)
 
+    rendered = sql_text
+    rendered = rendered.replace("{{START_DATE_YYYYMMDD}}", start_yyyymmdd)
+    rendered = rendered.replace("{{END_DATE_YYYYMMDD}}", end_yyyymmdd)
+    rendered = rendered.replace("{{START_DATE_YYYYMM}}", start_yyyymm)
+    rendered = rendered.replace("{{END_DATE_YYYYMM}}", end_yyyymm)
+
+    region_zip_path = DEFAULT_REGION_ZIP_PATH if DEFAULT_REGION_ZIP_PATH.exists() else FALLBACK_REGION_ZIP_PATH
+    if "{{ATLANTA_ZIP_LIST}}" in rendered and region_zip_path.exists():
+        zip_df = pd.read_csv(region_zip_path, dtype={"POSTAL_CODE": str}, encoding="utf-8-sig")
+        zip_values = (
+            zip_df["POSTAL_CODE"]
+            .dropna()
+            .astype(str)
+            .str.strip()
+            .str.zfill(5)
+            .drop_duplicates()
+            .tolist()
+        )
+        rendered = rendered.replace("{{ATLANTA_ZIP_LIST}}", ", ".join(f"'{zip_code}'" for zip_code in zip_values))
+
     rendered = PROMISE_RANGE_PATTERN.sub(
         f"FORMAT_DATETIME('%Y%m%d', T1.PROMISE_TIMESTAMP) BETWEEN '{start_yyyymmdd}' AND '{end_yyyymmdd}'",
-        sql_text,
+        rendered,
     )
     for pattern in MONTH_RANGE_PATTERNS:
         rendered = pattern.sub(

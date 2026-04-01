@@ -7,9 +7,13 @@ from typing import Any
 import pandas as pd
 
 import smart_routing.production_assign_atlanta as base
+from smart_routing.routing_compare import _build_region_day_cluster_labels
 
 
 PRODUCTION_OUTPUT_DIR = Path("260310/production_output")
+CLUSTER_PRIMARY_PENALTY_KM = 0.0
+CLUSTER_SECONDARY_PENALTY_KM = 8.0
+CLUSTER_OUTSIDE_PENALTY_KM = 28.0
 
 
 @dataclass
@@ -18,6 +22,74 @@ class AtlantaProductionOSRMAssignmentResult:
     engineer_day_summary_path: Path
     schedule_path: Path
     daily_compare_path: Path
+
+
+def _preference_penalty_km(job_row: pd.Series, engineer_code: str) -> float:
+    preferred_code = str(job_row.get("preferred_engineer_code", "")).strip()
+    secondary_code = str(job_row.get("secondary_engineer_code", "")).strip()
+    engineer_code = str(engineer_code).strip()
+    if preferred_code and engineer_code == preferred_code:
+        return CLUSTER_PRIMARY_PENALTY_KM
+    if secondary_code and engineer_code == secondary_code:
+        return CLUSTER_SECONDARY_PENALTY_KM
+    if preferred_code or secondary_code:
+        return CLUSTER_OUTSIDE_PENALTY_KM
+    return 0.0
+
+
+def _apply_micro_cluster_preferences(
+    service_day_df: pd.DataFrame,
+    engineer_master_df: pd.DataFrame,
+    region_centers: dict[int, tuple[float, float]],
+) -> pd.DataFrame:
+    if service_day_df.empty or engineer_master_df.empty:
+        return service_day_df.copy()
+
+    working_df = service_day_df.copy()
+    working_df["micro_cluster_id"] = ""
+    working_df["preferred_engineer_code"] = ""
+    working_df["secondary_engineer_code"] = ""
+
+    for region_seq, group_df in working_df.groupby("region_seq", dropna=False):
+        region_engineers = engineer_master_df[
+            pd.to_numeric(engineer_master_df["assigned_region_seq"], errors="coerce") == pd.to_numeric(pd.Series([region_seq]), errors="coerce").iloc[0]
+        ].copy()
+        if region_engineers.empty:
+            region_engineers = engineer_master_df.copy()
+        if region_engineers.empty:
+            continue
+
+        cluster_count = max(1, min(len(group_df), len(region_engineers)))
+        labels = _build_region_day_cluster_labels(group_df, cluster_count)
+        temp_group = group_df.copy()
+        temp_group["_micro_cluster_seq"] = labels.astype(int)
+
+        for cluster_seq, cluster_df in temp_group.groupby("_micro_cluster_seq", dropna=False):
+            centroid_lon = pd.to_numeric(cluster_df["longitude"], errors="coerce").mean()
+            centroid_lat = pd.to_numeric(cluster_df["latitude"], errors="coerce").mean()
+            if pd.isna(centroid_lon) or pd.isna(centroid_lat):
+                continue
+            cluster_coord = (float(centroid_lon), float(centroid_lat))
+            ranked_rows: list[tuple[tuple[int, float, str], str]] = []
+            for _, engineer in engineer_master_df.iterrows():
+                engineer_code = str(engineer["SVC_ENGINEER_CODE"])
+                start_coord = base._get_engineer_start_coord(engineer, region_centers)
+                if start_coord is None:
+                    continue
+                home_km = base._haversine_distance_km(start_coord, cluster_coord)
+                same_region_rank = 0 if engineer_code in set(region_engineers["SVC_ENGINEER_CODE"].astype(str)) else 1
+                ranked_rows.append(((same_region_rank, round(float(home_km), 4), engineer_code), engineer_code))
+            if not ranked_rows:
+                continue
+            ranked_rows.sort(key=lambda item: item[0])
+            preferred_code = ranked_rows[0][1]
+            secondary_code = ranked_rows[1][1] if len(ranked_rows) > 1 else ""
+            cluster_id = f"R{int(pd.to_numeric(pd.Series([region_seq]), errors='coerce').fillna(0).iloc[0]):02d}_C{int(cluster_seq) + 1:02d}"
+            working_df.loc[cluster_df.index, "micro_cluster_id"] = cluster_id
+            working_df.loc[cluster_df.index, "preferred_engineer_code"] = preferred_code
+            working_df.loc[cluster_df.index, "secondary_engineer_code"] = secondary_code
+
+    return working_df
 
 
 def _matrix_seed_assign_jobs(
@@ -85,8 +157,9 @@ def _matrix_seed_assign_jobs(
                         if engineer_center_type == base.DMS2_CENTER_TYPE
                         else base.SOFT_REGION_DMS_PENALTY_KM
                     )
+                cluster_penalty = _preference_penalty_km(row, engineer_code)
                 score = (
-                    round(seed_km + region_penalty, 4),
+                    round(seed_km + region_penalty + cluster_penalty, 4),
                     -float(pd.to_numeric(pd.Series([row.get("service_time_min")]), errors="coerce").fillna(0).iloc[0]),
                     str(row.get("GSFS_RECEIPT_NO", "")),
                 )
@@ -127,6 +200,52 @@ def _matrix_seed_assign_jobs(
     return unassigned, assignments
 
 
+def _state_ordered_route_coords(
+    state: dict[str, Any],
+    route_client,
+) -> list[tuple[float, float]]:
+    stop_coords = [
+        (float(row["longitude"]), float(row["latitude"]))
+        for row in state.get("assigned_rows", [])
+        if pd.notna(row.get("longitude")) and pd.notna(row.get("latitude"))
+    ]
+    start_coord = state.get("start_coord")
+    if not stop_coords:
+        return [start_coord] if start_coord is not None else []
+    coord_chain = [start_coord] + stop_coords if start_coord is not None else stop_coords
+    payload = route_client.build_ordered_route(coord_chain, preserve_first=start_coord is not None)
+    return [(float(lon), float(lat)) for lon, lat in payload.get("ordered_coords", [])]
+
+
+def _route_insertion_delta_from_matrix(
+    route_count: int,
+    job_idx: int,
+    distance_mat_km: list[list[float]],
+    duration_mat_min: list[list[float]],
+) -> tuple[float, float]:
+    if route_count <= 0:
+        return 0.0, 0.0
+    if route_count == 1:
+        return float(distance_mat_km[0][job_idx]), float(duration_mat_min[0][job_idx])
+
+    best_delta_km = None
+    best_delta_min = None
+
+    for insert_pos in range(1, route_count + 1):
+        prev_idx = insert_pos - 1
+        next_idx = insert_pos if insert_pos < route_count else None
+        delta_km = float(distance_mat_km[prev_idx][job_idx])
+        delta_min = float(duration_mat_min[prev_idx][job_idx])
+        if next_idx is not None:
+            delta_km += float(distance_mat_km[job_idx][next_idx]) - float(distance_mat_km[prev_idx][next_idx])
+            delta_min += float(duration_mat_min[job_idx][next_idx]) - float(duration_mat_min[prev_idx][next_idx])
+        if best_delta_km is None or delta_km < best_delta_km:
+            best_delta_km = delta_km
+            best_delta_min = delta_min
+
+    return max(float(best_delta_km or 0.0), 0.0), max(float(best_delta_min or 0.0), 0.0)
+
+
 def _matrix_grow_assign_jobs(
     remaining_df: pd.DataFrame,
     active_engineers_df: pd.DataFrame,
@@ -137,63 +256,48 @@ def _matrix_grow_assign_jobs(
     assignments: list[dict[str, Any]] = []
     unassigned = remaining_df.copy().reset_index(drop=True)
 
-    def _state_anchor_records(state: dict[str, Any]) -> list[tuple[float, float]]:
-        anchors: list[tuple[float, float]] = []
-        start_coord = state.get("start_coord")
-        if start_coord is not None:
-            anchors.append((float(start_coord[0]), float(start_coord[1])))
-        for row in state.get("assigned_rows", []):
-            if pd.notna(row.get("longitude")) and pd.notna(row.get("latitude")):
-                anchors.append((float(row["longitude"]), float(row["latitude"])))
-        return anchors
-
     while not unassigned.empty and not active_engineers_df.empty:
         active_codes = [str(row["SVC_ENGINEER_CODE"]) for _, row in active_engineers_df.iterrows()]
         current_job_counts = {code: int(states[code]["job_count"]) for code in active_codes}
         min_job_count = min(current_job_counts.values()) if current_job_counts else 0
 
-        anchor_records: list[tuple[str, tuple[float, float]]] = []
+        route_coords_by_engineer: dict[str, list[tuple[float, float]]] = {}
         for _, engineer in active_engineers_df.iterrows():
             engineer_code = str(engineer["SVC_ENGINEER_CODE"])
-            for coord in _state_anchor_records(states[engineer_code]):
-                anchor_records.append((engineer_code, coord))
-        if not anchor_records:
+            route_coords = _state_ordered_route_coords(states[engineer_code], route_client)
+            if route_coords:
+                route_coords_by_engineer[engineer_code] = route_coords
+        if not route_coords_by_engineer:
             break
 
-        candidate_rows = list(unassigned.iterrows())
-        candidate_coords = [(float(row["longitude"]), float(row["latitude"])) for _, row in candidate_rows]
-        coords = [coord for _, coord in anchor_records] + candidate_coords
-        distance_mat_km, duration_mat_min = route_client.get_distance_duration_matrix(coords)
-
         best_move: dict[str, Any] | None = None
-        anchor_count = len(anchor_records)
+        candidate_rows = list(unassigned.iterrows())
         for _, engineer in active_engineers_df.iterrows():
             engineer_code = str(engineer["SVC_ENGINEER_CODE"])
-            engineer_anchor_indices = [i for i, (code, _) in enumerate(anchor_records) if code == engineer_code]
-            if not engineer_anchor_indices:
+            ordered_route_coords = route_coords_by_engineer.get(engineer_code)
+            if not ordered_route_coords:
                 continue
 
             state = states[engineer_code]
             engineer_region = pd.to_numeric(pd.Series([engineer.get("assigned_region_seq")]), errors="coerce").iloc[0]
             engineer_center_type = str(engineer.get("SVC_CENTER_TYPE", "")).upper()
+            candidate_coords = [(float(row["longitude"]), float(row["latitude"])) for _, row in candidate_rows]
+            coords = ordered_route_coords + candidate_coords
+            distance_mat_km, duration_mat_min = route_client.get_distance_duration_matrix(coords)
+            route_count = len(ordered_route_coords)
 
             scored_candidates: list[tuple[tuple[float, float, float, int], int, pd.Series, float, float]] = []
             for candidate_offset, (idx, row) in enumerate(candidate_rows):
-                matrix_col = anchor_count + candidate_offset
-                best_anchor_km = None
-                best_anchor_min = None
-                for anchor_idx in engineer_anchor_indices:
-                    inc_km = float(distance_mat_km[anchor_idx][matrix_col])
-                    inc_min = float(duration_mat_min[anchor_idx][matrix_col])
-                    if best_anchor_km is None or inc_km < best_anchor_km:
-                        best_anchor_km = inc_km
-                        best_anchor_min = inc_min
-
-                if best_anchor_km is None or best_anchor_min is None:
-                    continue
+                job_idx = route_count + candidate_offset
+                inc_km, inc_min = _route_insertion_delta_from_matrix(
+                    route_count,
+                    job_idx,
+                    distance_mat_km,
+                    duration_mat_min,
+                )
 
                 projected_service = state["service_time_min"] + float(row["service_time_min"])
-                projected_travel = state["travel_time_min"] + best_anchor_min
+                projected_travel = state["travel_time_min"] + inc_min
                 projected_total = projected_service + projected_travel
                 target_jobs = int(target_jobs_per_engineer.get(engineer_code, 4))
                 projected_jobs = int(state["job_count"]) + 1
@@ -205,6 +309,7 @@ def _matrix_grow_assign_jobs(
                         if engineer_center_type == base.DMS2_CENTER_TYPE
                         else base.SOFT_REGION_DMS_PENALTY_KM
                     )
+                cluster_penalty = _preference_penalty_km(row, engineer_code)
                 over_target_penalty = 0.0
                 if projected_jobs > target_jobs:
                     over_target_penalty += 500.0 + ((projected_jobs - target_jobs) * 250.0)
@@ -217,12 +322,12 @@ def _matrix_grow_assign_jobs(
                     fairness_penalty += max(int(state["job_count"]) - min_job_count, 0) * 8.0
                 overflow_penalty = max(projected_total - base.MAX_WORK_MIN, 0.0) * 10.0
                 score = (
-                    round(float(best_anchor_km) + region_penalty + over_target_penalty + fairness_penalty + overflow_penalty, 4),
-                    round(float(best_anchor_min), 4),
+                    round(float(inc_km) + region_penalty + cluster_penalty + over_target_penalty + fairness_penalty + overflow_penalty, 4),
+                    round(float(inc_min), 4),
                     round(float(projected_total), 4),
                     projected_jobs,
                 )
-                scored_candidates.append((score, idx, row, float(best_anchor_km), float(best_anchor_min)))
+                scored_candidates.append((score, idx, row, float(inc_km), float(inc_min)))
 
             if not scored_candidates:
                 continue
@@ -371,7 +476,6 @@ def build_atlanta_production_assignment_osrm_from_frames(
     route_client = base._build_route_client()
 
     orig_estimate = base._estimate_incremental_travel
-    orig_targeted = base._targeted_region_worst_move_rebalance
     orig_seed_assign = base._seed_assign_jobs
     orig_grow_assign = base._grow_assign_jobs
 
@@ -381,7 +485,6 @@ def build_atlanta_production_assignment_osrm_from_frames(
         return route_client.pair_distance(prev_coord, next_coord)
 
     base._estimate_incremental_travel = osrm_estimate
-    base._targeted_region_worst_move_rebalance = lambda assignment_df, engineer_master_df, region_centers, route_client: assignment_df
     base._seed_assign_jobs = _matrix_seed_assign_jobs
     base._grow_assign_jobs = _matrix_grow_assign_jobs
 
@@ -399,31 +502,42 @@ def build_atlanta_production_assignment_osrm_from_frames(
                 ].copy()
                 if day_engineer_master_df.empty:
                     continue
+            day_service_df = service_day_df.copy()
+            if assignment_strategy == "cluster_iteration":
+                day_service_df = _apply_micro_cluster_preferences(
+                    day_service_df,
+                    day_engineer_master_df.copy(),
+                    region_centers,
+                )
             if assignment_strategy == "sequence":
                 assignment_df, summary_df = base._assign_day_sequence(
-                    service_day_df.copy(),
+                    day_service_df.copy(),
                     day_engineer_master_df.copy(),
                     region_centers,
                 )
             else:
                 assignment_df, summary_df = base._assign_day(
-                    service_day_df.copy(),
+                    day_service_df.copy(),
                     day_engineer_master_df.copy(),
                     region_centers,
                     route_client,
                     border_expansion_zip_map,
                 )
-                if assignment_strategy == "iteration":
+                if assignment_strategy in {"iteration", "cluster_iteration"}:
                     assignment_df = base._iterative_improve_assignment_df(
                         assignment_df,
                         day_engineer_master_df.copy(),
                         region_centers,
+                        route_client=route_client,
+                        iterations=4,
+                        priority_mode="travel_first",
                     )
                     summary_df = base._build_summary_from_assignment(
                         assignment_df,
                         day_engineer_master_df.copy(),
                         region_centers,
-                        str(service_day_df["service_date_key"].iloc[0]),
+                        str(day_service_df["service_date_key"].iloc[0]),
+                        route_client=route_client,
                     )
             if assignment_df.empty:
                 continue
@@ -439,7 +553,6 @@ def build_atlanta_production_assignment_osrm_from_frames(
                 schedule_frames.append(schedule_df)
     finally:
         base._estimate_incremental_travel = orig_estimate
-        base._targeted_region_worst_move_rebalance = orig_targeted
         base._seed_assign_jobs = orig_seed_assign
         base._grow_assign_jobs = orig_grow_assign
 
@@ -495,7 +608,6 @@ def build_atlanta_production_assignment_osrm(
         service_df = service_df[service_df["service_date_key"].astype(str).isin(wanted)].copy()
 
     orig_estimate = base._estimate_incremental_travel
-    orig_targeted = base._targeted_region_worst_move_rebalance
     orig_seed_assign = base._seed_assign_jobs
     orig_grow_assign = base._grow_assign_jobs
 
@@ -505,7 +617,6 @@ def build_atlanta_production_assignment_osrm(
         return route_client.pair_distance(prev_coord, next_coord)
 
     base._estimate_incremental_travel = osrm_estimate
-    base._targeted_region_worst_move_rebalance = lambda assignment_df, engineer_master_df, region_centers, route_client: assignment_df
     base._seed_assign_jobs = _matrix_seed_assign_jobs
     base._grow_assign_jobs = _matrix_grow_assign_jobs
 
@@ -523,31 +634,42 @@ def build_atlanta_production_assignment_osrm(
                 ].copy()
                 if day_engineer_master_df.empty:
                     continue
+            day_service_df = service_day_df.copy()
+            if assignment_strategy == "cluster_iteration":
+                day_service_df = _apply_micro_cluster_preferences(
+                    day_service_df,
+                    day_engineer_master_df.copy(),
+                    region_centers,
+                )
             if assignment_strategy == "sequence":
                 assignment_df, summary_df = base._assign_day_sequence(
-                    service_day_df.copy(),
+                    day_service_df.copy(),
                     day_engineer_master_df.copy(),
                     region_centers,
                 )
             else:
                 assignment_df, summary_df = base._assign_day(
-                    service_day_df.copy(),
+                    day_service_df.copy(),
                     day_engineer_master_df.copy(),
                     region_centers,
                     route_client,
                     border_expansion_zip_map,
                 )
-                if assignment_strategy == "iteration":
+                if assignment_strategy in {"iteration", "cluster_iteration"}:
                     assignment_df = base._iterative_improve_assignment_df(
                         assignment_df,
                         day_engineer_master_df.copy(),
                         region_centers,
+                        route_client=route_client,
+                        iterations=4,
+                        priority_mode="travel_first",
                     )
                     summary_df = base._build_summary_from_assignment(
                         assignment_df,
                         day_engineer_master_df.copy(),
                         region_centers,
-                        str(service_day_df["service_date_key"].iloc[0]),
+                        str(day_service_df["service_date_key"].iloc[0]),
+                        route_client=route_client,
                     )
             if assignment_df.empty:
                 continue
@@ -563,7 +685,6 @@ def build_atlanta_production_assignment_osrm(
                 schedule_frames.append(schedule_df)
     finally:
         base._estimate_incremental_travel = orig_estimate
-        base._targeted_region_worst_move_rebalance = orig_targeted
         base._seed_assign_jobs = orig_seed_assign
         base._grow_assign_jobs = orig_grow_assign
 

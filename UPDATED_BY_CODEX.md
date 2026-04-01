@@ -365,4 +365,37 @@
   - added `build_atlanta_production_assignment_vrp_from_frames()` in `smart_routing/production_assign_atlanta_vrp.py`
   - updated `sr_live_atlanta_routing.py` to use VRP assignment for live queried service data
   - updated progress text and download filenames to reflect VRP routing
+- Replaced the live BigQuery service query with an Atlanta source-query version in `smart_routing/select_data.sql`.
+  - source now reads from `pjt-lge-edl-ob`.OB_00105 service views instead of the EDW mart views
+  - query is Atlanta-only through the current Atlanta ZIP list
+  - EDW query was preserved as `smart_routing/select_data_edw_backup.sql`
+- Updated `smart_routing/bigquery_runtime.py` to render placeholder tokens for:
+  - start/end dates in `YYYYMMDD`
+  - start/end months in `YYYYMM`
+  - Atlanta ZIP lists for the source query
+- Updated `smart_routing/live_atlanta_runtime.py` so missing engineer names can be filled from the current engineer assignment file and the new source-query output continues to flow into the live prep path.
+- Verified the new source query against the EDW backup query for `2026-01-12` Atlanta:
+  - output file: `260310/production_output/select_data_source_compare_20260112.txt`
+  - receipt count matched exactly: `43 vs 43`
+  - receipt intersection matched exactly: `43 / 43`
+  - engineer, promise date, postal code, state, city, address, symptom code, product code, city label, and center type all matched for the 43 shared receipts
+- Tightened the source query with an HS-equivalent product-group filter:
+  - `sp.SERVICE_PRODUCT_GROUP_CODE IN ('WM', 'REF', 'COK')`
+  - kept `SVC_CENTER_TYPE_CODE = '02'` for DMS-only source filtering
+  - rechecked `2026-01-12` Atlanta and the source query still matched the EDW backup exactly at the receipt level
+
+2026-04-01 (OSRM iteration simulation refinement)
+- Updated `smart_routing/production_assign_atlanta.py` so summary/objective paths can optionally use OSRM route metrics via `route_client` instead of the default haversine estimate.
+- Updated `smart_routing/production_assign_atlanta_osrm.py`:
+  - removed the forced no-op override of `_targeted_region_worst_move_rebalance`
+  - changed grow-step scoring from nearest-anchor matching to route insertion delta against each engineer's ordered route
+  - changed OSRM iteration improvement to use OSRM-backed objective evaluation with `travel_first` priority and 4 improvement passes
+- Rebuilt `Iteration OSRM Assign (Actual Attendance)` simulation outputs for:
+  - `2026-01-12`
+  - `2026-01-19`
+  - `2026-01-20`
+- Refreshed files:
+  - `260310/production_output/atlanta_assignment_result_osrm_actual_attendance_iteration.csv`
+  - `260310/production_output/atlanta_engineer_day_summary_osrm_actual_attendance_iteration.csv`
+  - `260310/production_output/atlanta_schedule_osrm_actual_attendance_iteration.csv`
 

@@ -42,6 +42,9 @@ SEQUENCE_OSRM_ACTUAL_SCHEDULE_PATH = Path("260310/production_output/atlanta_sche
 ITERATION_OSRM_ACTUAL_ASSIGNMENT_PATH = Path("260310/production_output/atlanta_assignment_result_osrm_actual_attendance_iteration.csv")
 ITERATION_OSRM_ACTUAL_ENGINEER_DAY_SUMMARY_PATH = Path("260310/production_output/atlanta_engineer_day_summary_osrm_actual_attendance_iteration.csv")
 ITERATION_OSRM_ACTUAL_SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule_osrm_actual_attendance_iteration.csv")
+CLUSTER_ITERATION_OSRM_ACTUAL_3DAYS_ASSIGNMENT_PATH = Path("260310/production_output/atlanta_assignment_result_osrm_actual_attendance_cluster_iteration_3days.csv")
+CLUSTER_ITERATION_OSRM_ACTUAL_3DAYS_ENGINEER_DAY_SUMMARY_PATH = Path("260310/production_output/atlanta_engineer_day_summary_osrm_actual_attendance_cluster_iteration_3days.csv")
+CLUSTER_ITERATION_OSRM_ACTUAL_3DAYS_SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule_osrm_actual_attendance_cluster_iteration_3days.csv")
 LNS_ACTUAL_3DAYS_ASSIGNMENT_PATH = Path("260310/production_output/atlanta_assignment_result_lns_actual_3days.csv")
 LNS_ACTUAL_3DAYS_ENGINEER_DAY_SUMMARY_PATH = Path("260310/production_output/atlanta_engineer_day_summary_lns_actual_3days.csv")
 LNS_ACTUAL_3DAYS_SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule_lns_actual_3days.csv")
@@ -136,6 +139,13 @@ def load_inputs():
         else pd.DataFrame()
     )
     iteration_osrm_actual_schedule_df = pd.read_csv(ITERATION_OSRM_ACTUAL_SCHEDULE_PATH, encoding="utf-8-sig", low_memory=False) if ITERATION_OSRM_ACTUAL_SCHEDULE_PATH.exists() else pd.DataFrame()
+    cluster_iteration_osrm_actual_3days_assignment_df = pd.read_csv(CLUSTER_ITERATION_OSRM_ACTUAL_3DAYS_ASSIGNMENT_PATH, encoding="utf-8-sig", low_memory=False) if CLUSTER_ITERATION_OSRM_ACTUAL_3DAYS_ASSIGNMENT_PATH.exists() else pd.DataFrame()
+    cluster_iteration_osrm_actual_3days_engineer_day_summary_df = (
+        pd.read_csv(CLUSTER_ITERATION_OSRM_ACTUAL_3DAYS_ENGINEER_DAY_SUMMARY_PATH, encoding="utf-8-sig", low_memory=False)
+        if CLUSTER_ITERATION_OSRM_ACTUAL_3DAYS_ENGINEER_DAY_SUMMARY_PATH.exists()
+        else pd.DataFrame()
+    )
+    cluster_iteration_osrm_actual_3days_schedule_df = pd.read_csv(CLUSTER_ITERATION_OSRM_ACTUAL_3DAYS_SCHEDULE_PATH, encoding="utf-8-sig", low_memory=False) if CLUSTER_ITERATION_OSRM_ACTUAL_3DAYS_SCHEDULE_PATH.exists() else pd.DataFrame()
     lns_actual_3days_assignment_df = pd.read_csv(LNS_ACTUAL_3DAYS_ASSIGNMENT_PATH, encoding="utf-8-sig", low_memory=False) if LNS_ACTUAL_3DAYS_ASSIGNMENT_PATH.exists() else pd.DataFrame()
     lns_actual_3days_engineer_day_summary_df = (
         pd.read_csv(LNS_ACTUAL_3DAYS_ENGINEER_DAY_SUMMARY_PATH, encoding="utf-8-sig", low_memory=False)
@@ -202,6 +212,8 @@ def load_inputs():
         sequence_osrm_actual_schedule_df,
         iteration_osrm_actual_assignment_df,
         iteration_osrm_actual_schedule_df,
+        cluster_iteration_osrm_actual_3days_assignment_df,
+        cluster_iteration_osrm_actual_3days_schedule_df,
         lns_actual_3days_assignment_df,
         lns_actual_3days_schedule_df,
         vrp_actual_3days_assignment_df,
@@ -238,6 +250,7 @@ def load_inputs():
         iteration_actual_engineer_day_summary_df,
         sequence_osrm_actual_engineer_day_summary_df,
         iteration_osrm_actual_engineer_day_summary_df,
+        cluster_iteration_osrm_actual_3days_engineer_day_summary_df,
         lns_actual_3days_engineer_day_summary_df,
         vrp_actual_3days_engineer_day_summary_df,
         osrm_engineer_day_summary_df,
@@ -276,6 +289,9 @@ def load_inputs():
         iteration_osrm_actual_assignment_df,
         iteration_osrm_actual_engineer_day_summary_df,
         iteration_osrm_actual_schedule_df,
+        cluster_iteration_osrm_actual_3days_assignment_df,
+        cluster_iteration_osrm_actual_3days_engineer_day_summary_df,
+        cluster_iteration_osrm_actual_3days_schedule_df,
         lns_actual_3days_assignment_df,
         lns_actual_3days_engineer_day_summary_df,
         lns_actual_3days_schedule_df,
@@ -780,6 +796,9 @@ def main():
         iteration_osrm_actual_assignment_df,
         iteration_osrm_actual_engineer_day_summary_df,
         iteration_osrm_actual_schedule_df,
+        cluster_iteration_osrm_actual_3days_assignment_df,
+        cluster_iteration_osrm_actual_3days_engineer_day_summary_df,
+        cluster_iteration_osrm_actual_3days_schedule_df,
         lns_actual_3days_assignment_df,
         lns_actual_3days_engineer_day_summary_df,
         lns_actual_3days_schedule_df,
@@ -812,6 +831,8 @@ def main():
         assignment_mode_options.append("Actual Routes")
     if not iteration_osrm_actual_assignment_df.empty:
         assignment_mode_options.append("Iteration OSRM Assign (Actual Attendance)")
+    if not cluster_iteration_osrm_actual_3days_assignment_df.empty:
+        assignment_mode_options.append("Clustered Iteration OSRM Assign (Actual Attendance, 3 Days)")
     if not vrp_actual_3days_assignment_df.empty:
         assignment_mode_options.append("VRP Assign (Actual Attendance, 3 Days)")
 
@@ -830,6 +851,10 @@ def main():
             active_service_df = iteration_osrm_actual_assignment_df.copy()
             active_summary_df = iteration_osrm_actual_engineer_day_summary_df.copy()
             active_schedule_df = iteration_osrm_actual_schedule_df.copy()
+        elif selected_mode == "Clustered Iteration OSRM Assign (Actual Attendance, 3 Days)" and not cluster_iteration_osrm_actual_3days_assignment_df.empty:
+            active_service_df = cluster_iteration_osrm_actual_3days_assignment_df.copy()
+            active_summary_df = cluster_iteration_osrm_actual_3days_engineer_day_summary_df.copy()
+            active_schedule_df = cluster_iteration_osrm_actual_3days_schedule_df.copy()
         elif selected_mode == "VRP Assign (Actual Attendance, 3 Days)" and not vrp_actual_3days_assignment_df.empty:
             active_service_df = vrp_actual_3days_assignment_df.copy()
             active_summary_df = vrp_actual_3days_engineer_day_summary_df.copy()

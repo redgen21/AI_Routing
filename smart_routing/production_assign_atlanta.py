@@ -106,11 +106,22 @@ def _load_inputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFra
     if not ENABLE_DMS2:
         service_df["is_tv_job"] = False
 
-    service_df = service_df.merge(
-        region_zip_df[["POSTAL_CODE", "region_seq", "new_region_name"]],
-        on="POSTAL_CODE",
-        how="left",
-    )
+    if "region_seq" not in service_df.columns or "new_region_name" not in service_df.columns:
+        service_df = service_df.merge(
+            region_zip_df[["POSTAL_CODE", "region_seq", "new_region_name"]],
+            on="POSTAL_CODE",
+            how="left",
+        )
+    else:
+        missing_region_mask = service_df["region_seq"].isna() | (service_df["region_seq"].astype(str).str.strip() == "")
+        if missing_region_mask.any():
+            fill_df = service_df.loc[missing_region_mask, ["POSTAL_CODE"]].merge(
+                region_zip_df[["POSTAL_CODE", "region_seq", "new_region_name"]],
+                on="POSTAL_CODE",
+                how="left",
+            )
+            service_df.loc[missing_region_mask, "region_seq"] = fill_df["region_seq"].values
+            service_df.loc[missing_region_mask, "new_region_name"] = fill_df["new_region_name"].values
     service_df = service_df[service_df["region_seq"].notna()].copy()
     service_df["region_seq"] = service_df["region_seq"].astype(int)
     return region_zip_df, engineer_region_df, home_df, service_df
@@ -648,6 +659,7 @@ def _build_summary_from_assignment(
     engineer_master_df: pd.DataFrame,
     region_centers: dict[int, tuple[float, float]],
     service_date_key: str,
+    route_client: OSRMTripClient | None = None,
 ) -> pd.DataFrame:
     if assignment_df is None or assignment_df.empty or "assigned_sm_code" not in assignment_df.columns:
         return pd.DataFrame(
@@ -670,7 +682,10 @@ def _build_summary_from_assignment(
         code = str(engineer["SVC_ENGINEER_CODE"])
         group_df = assignment_df[assignment_df["assigned_sm_code"].astype(str) == code].copy()
         start_coord = _get_engineer_start_coord(engineer, region_centers)
-        travel_distance_km, travel_time_min = _estimate_group_metrics(group_df, start_coord)
+        if route_client is None:
+            travel_distance_km, travel_time_min = _estimate_group_metrics(group_df, start_coord)
+        else:
+            travel_distance_km, travel_time_min = _estimate_group_metrics_osrm(group_df, start_coord, route_client)
         service_time_min = float(pd.to_numeric(group_df.get("service_time_min"), errors="coerce").fillna(0).sum()) if not group_df.empty else 0.0
         total_work = service_time_min + travel_time_min
         summary_rows.append(
@@ -835,32 +850,63 @@ def _assignment_objective(
     engineer_master_df: pd.DataFrame,
     region_centers: dict[int, tuple[float, float]],
     service_date_key: str,
-) -> tuple[float, float, float]:
-    summary_df = _build_summary_from_assignment(assignment_df, engineer_master_df, region_centers, service_date_key)
+    route_client: OSRMTripClient | None = None,
+    priority_mode: str = "balance_first",
+) -> tuple[float, ...]:
+    summary_df = _build_summary_from_assignment(
+        assignment_df,
+        engineer_master_df,
+        region_centers,
+        service_date_key,
+        route_client=route_client,
+    )
     max_total = float(pd.to_numeric(summary_df["total_work_min"], errors="coerce").fillna(0).max()) if not summary_df.empty else 0.0
     total_travel = float(pd.to_numeric(summary_df["travel_distance_km"], errors="coerce").fillna(0).sum()) if not summary_df.empty else 0.0
+    overflow_count = int(pd.to_numeric(summary_df["overflow_480"], errors="coerce").fillna(0).astype(int).sum()) if not summary_df.empty else 0
     weighted_std = 0.0
     if not assignment_df.empty:
         weighted_df = assignment_df.copy()
         weighted_df["weighted_job_unit"] = _weighted_job_units(weighted_df)
         weighted_series = weighted_df.groupby(weighted_df["assigned_sm_code"].astype(str))["weighted_job_unit"].sum()
         weighted_std = float(weighted_series.std(ddof=0)) if not weighted_series.empty else 0.0
-    return round(max_total, 4), round(weighted_std, 4), round(total_travel, 4)
+    if str(priority_mode).strip().lower() == "travel_first":
+        return (
+            int(overflow_count),
+            round(total_travel, 4),
+            round(max_total, 4),
+            round(weighted_std, 4),
+        )
+    return (
+        int(overflow_count),
+        round(max_total, 4),
+        round(weighted_std, 4),
+        round(total_travel, 4),
+    )
 
 
 def _iterative_improve_assignment_df(
     assignment_df: pd.DataFrame,
     engineer_master_df: pd.DataFrame,
     region_centers: dict[int, tuple[float, float]],
+    route_client: OSRMTripClient | None = None,
+    iterations: int = 2,
+    priority_mode: str = "balance_first",
 ) -> pd.DataFrame:
     if assignment_df.empty:
         return assignment_df
 
     improved_df = assignment_df.copy().reset_index(drop=True)
     service_date_key = str(improved_df["service_date_key"].iloc[0])
-    baseline_objective = _assignment_objective(improved_df, engineer_master_df, region_centers, service_date_key)
+    baseline_objective = _assignment_objective(
+        improved_df,
+        engineer_master_df,
+        region_centers,
+        service_date_key,
+        route_client=route_client,
+        priority_mode=priority_mode,
+    )
 
-    for _ in range(2):
+    for _ in range(max(int(iterations), 1)):
         changed = False
         for idx, job_row in improved_df.copy().iterrows():
             current_code = str(job_row["assigned_sm_code"])
@@ -881,7 +927,14 @@ def _iterative_improve_assignment_df(
                 candidate_start = _get_engineer_start_coord(candidate, region_centers)
                 trial_df.loc[idx, "home_start_longitude"] = candidate_start[0] if candidate_start is not None else pd.NA
                 trial_df.loc[idx, "home_start_latitude"] = candidate_start[1] if candidate_start is not None else pd.NA
-                trial_objective = _assignment_objective(trial_df, engineer_master_df, region_centers, service_date_key)
+                trial_objective = _assignment_objective(
+                    trial_df,
+                    engineer_master_df,
+                    region_centers,
+                    service_date_key,
+                    route_client=route_client,
+                    priority_mode=priority_mode,
+                )
                 if trial_objective < baseline_objective:
                     improved_df = trial_df
                     baseline_objective = trial_objective
@@ -1023,6 +1076,7 @@ def _targeted_region_worst_move_rebalance(
             engineer_master_df,
             region_centers,
             str(rebalanced_df["service_date_key"].iloc[0]),
+            route_client=route_client,
         )
         job_counts = summary_df.set_index("SVC_ENGINEER_CODE")["job_count"].to_dict()
         total_work = summary_df.set_index("SVC_ENGINEER_CODE")["total_work_min"].to_dict()

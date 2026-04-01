@@ -65,6 +65,11 @@ def _normalize_service_columns(raw_df: pd.DataFrame) -> pd.DataFrame:
     ]:
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip()
+    if "SVC_ENGINEER_NAME" not in df.columns and "SVC_ENGINEER_CODE" in df.columns:
+        df["SVC_ENGINEER_NAME"] = df["SVC_ENGINEER_CODE"].astype(str).str.strip()
+    elif "SVC_ENGINEER_NAME" in df.columns and "SVC_ENGINEER_CODE" in df.columns:
+        missing_name_mask = df["SVC_ENGINEER_NAME"].astype(str).str.strip().eq("")
+        df.loc[missing_name_mask, "SVC_ENGINEER_NAME"] = df.loc[missing_name_mask, "SVC_ENGINEER_CODE"].astype(str).str.strip()
     if "POSTAL_CODE" in df.columns:
         df["POSTAL_CODE"] = df["POSTAL_CODE"].astype(str).str.strip().str.zfill(5)
     if "GSFS_RECEIPT_NO" in df.columns:
@@ -210,6 +215,20 @@ def build_runtime_atlanta_inputs(
 
     engineer_region_df["SVC_CENTER_TYPE"] = engineer_region_df["SVC_CENTER_TYPE"].astype(str).str.upper()
     engineer_region_df = engineer_region_df[engineer_region_df["SVC_CENTER_TYPE"] == prod.DMS_CENTER_TYPE].copy()
+    engineer_name_col = "SVC_ENGINEER_NAME" if "SVC_ENGINEER_NAME" in engineer_region_df.columns else "Name"
+    engineer_name_lookup = (
+        engineer_region_df[["SVC_ENGINEER_CODE", engineer_name_col]]
+        .dropna(subset=["SVC_ENGINEER_CODE"])
+        .drop_duplicates(subset=["SVC_ENGINEER_CODE"], keep="first")
+        .rename(columns={engineer_name_col: "lookup_engineer_name"})
+    )
+    service_enriched_df = service_enriched_df.merge(engineer_name_lookup, on="SVC_ENGINEER_CODE", how="left")
+    if "SVC_ENGINEER_NAME" not in service_enriched_df.columns:
+        service_enriched_df["SVC_ENGINEER_NAME"] = service_enriched_df["lookup_engineer_name"]
+    else:
+        missing_name_mask = service_enriched_df["SVC_ENGINEER_NAME"].astype(str).str.strip().eq("")
+        service_enriched_df.loc[missing_name_mask, "SVC_ENGINEER_NAME"] = service_enriched_df.loc[missing_name_mask, "lookup_engineer_name"]
+    service_enriched_df = service_enriched_df.drop(columns=["lookup_engineer_name"], errors="ignore")
     if "SVC_CENTER_TYPE" in home_geocode_df.columns:
         home_geocode_df["SVC_CENTER_TYPE"] = home_geocode_df["SVC_CENTER_TYPE"].astype(str).str.upper()
         home_geocode_df = home_geocode_df[home_geocode_df["SVC_CENTER_TYPE"] == prod.DMS_CENTER_TYPE].copy()

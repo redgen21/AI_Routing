@@ -16,6 +16,7 @@ from smart_routing.area_map import load_city_map_data
 from smart_routing.bigquery_runtime import query_service_data
 from smart_routing.live_atlanta_runtime import build_runtime_atlanta_inputs
 from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
+import smart_routing.production_assign_atlanta as production_assign_atlanta
 from smart_routing.production_assign_atlanta_vrp import build_atlanta_production_assignment_vrp_from_frames
 
 
@@ -161,6 +162,91 @@ def _build_region_staffing_view(service_df: pd.DataFrame) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows).sort_values("region").reset_index(drop=True)
+
+
+def _build_actual_mode_frames(
+    service_df: pd.DataFrame,
+    home_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    if service_df.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    actual_df = service_df.copy()
+    actual_df["SVC_CENTER_TYPE"] = actual_df["SVC_CENTER_TYPE"].astype(str).str.upper()
+    actual_df = actual_df[actual_df["SVC_CENTER_TYPE"].isin(["DMS"])].copy()
+    if actual_df.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    home_lookup = (
+        home_df[["SVC_ENGINEER_CODE", "latitude", "longitude"]]
+        .drop_duplicates(subset=["SVC_ENGINEER_CODE"])
+        .rename(columns={"latitude": "home_latitude", "longitude": "home_longitude"})
+    )
+    labeled_df = actual_df.merge(home_lookup, on="SVC_ENGINEER_CODE", how="left")
+    labeled_df["assigned_sm_code"] = labeled_df["SVC_ENGINEER_CODE"].astype(str)
+    labeled_df["assigned_sm_name"] = labeled_df["SVC_ENGINEER_NAME"].astype(str)
+    labeled_df["assigned_center_type"] = labeled_df["SVC_CENTER_TYPE"].astype(str)
+    labeled_df["home_start_longitude"] = labeled_df["home_longitude"]
+    labeled_df["home_start_latitude"] = labeled_df["home_latitude"]
+
+    route_client = get_route_client()
+    schedule_frames: list[pd.DataFrame] = []
+    for _, group_df in labeled_df.groupby(["service_date_key", "assigned_sm_code"], dropna=False):
+        schedule_df, route_payload = production_assign_atlanta._build_schedule_for_group(group_df.copy(), route_client)
+        if schedule_df.empty:
+            continue
+        schedule_df["route_distance_km"] = round(float(route_payload["distance_km"]), 2)
+        schedule_df["route_duration_min"] = round(float(route_payload["duration_min"]), 2)
+        schedule_frames.append(schedule_df)
+
+    schedule_result_df = pd.concat(schedule_frames, ignore_index=True) if schedule_frames else pd.DataFrame()
+
+    service_counts = (
+        labeled_df.groupby(["service_date_key", "assigned_sm_code"], dropna=False)["GSFS_RECEIPT_NO"]
+        .nunique()
+        .rename("job_count")
+        .reset_index()
+    )
+    service_time = (
+        labeled_df.groupby(["service_date_key", "assigned_sm_code"], dropna=False)["service_time_min"]
+        .sum()
+        .rename("service_time_min")
+        .reset_index()
+    )
+    meta = (
+        labeled_df.groupby(["service_date_key", "assigned_sm_code"], dropna=False)
+        .agg(
+            SVC_ENGINEER_NAME=("assigned_sm_name", "first"),
+            assigned_center_type=("assigned_center_type", "first"),
+            assigned_region_seq=("region_seq", lambda s: pd.to_numeric(s, errors="coerce").mode().iloc[0] if not pd.to_numeric(s, errors="coerce").dropna().empty else pd.NA),
+        )
+        .reset_index()
+        .rename(columns={"assigned_sm_code": "SVC_ENGINEER_CODE"})
+    )
+    route_summary = pd.DataFrame()
+    if not schedule_result_df.empty:
+        route_summary = (
+            schedule_result_df.groupby(["service_date_key", "assigned_sm_code"], dropna=False)
+            .agg(route_distance_km=("route_distance_km", "max"), route_duration_min=("route_duration_min", "max"))
+            .reset_index()
+            .rename(columns={"assigned_sm_code": "SVC_ENGINEER_CODE"})
+        )
+
+    summary_df = (
+        meta.merge(service_counts.rename(columns={"assigned_sm_code": "SVC_ENGINEER_CODE"}), on=["service_date_key", "SVC_ENGINEER_CODE"], how="left")
+        .merge(service_time.rename(columns={"assigned_sm_code": "SVC_ENGINEER_CODE"}), on=["service_date_key", "SVC_ENGINEER_CODE"], how="left")
+        .merge(route_summary, on=["service_date_key", "SVC_ENGINEER_CODE"], how="left")
+    )
+    summary_df["job_count"] = pd.to_numeric(summary_df["job_count"], errors="coerce").fillna(0).astype(int)
+    summary_df["service_time_min"] = pd.to_numeric(summary_df["service_time_min"], errors="coerce").fillna(0)
+    summary_df["route_distance_km"] = pd.to_numeric(summary_df.get("route_distance_km"), errors="coerce").fillna(0)
+    summary_df["route_duration_min"] = pd.to_numeric(summary_df.get("route_duration_min"), errors="coerce").fillna(0)
+    summary_df["travel_time_min"] = summary_df["route_duration_min"]
+    summary_df["travel_distance_km"] = summary_df["route_distance_km"]
+    summary_df["total_work_min"] = (summary_df["service_time_min"] + summary_df["travel_time_min"]).round(2)
+    summary_df["overflow_480"] = summary_df["total_work_min"] > 480
+
+    return labeled_df, summary_df, schedule_result_df
 
 
 def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.DataFrame, route_groups: list[dict], region_zip_df: pd.DataFrame):
@@ -369,8 +455,9 @@ def main():
 
     sidebar_left, sidebar_right = st.columns([1, 2.3])
     with sidebar_left:
-        start_date = st.date_input("Start Date", value=date(2026, 1, 1))
-        end_date = st.date_input("End Date", value=date(2026, 1, 31))
+        today = date.today()
+        start_date = st.date_input("Start Date", value=today)
+        end_date = st.date_input("End Date", value=today)
         progress_placeholder = st.empty()
         progress_bar_placeholder = st.empty()
         run_clicked = st.button("Load And Route", type="primary", use_container_width=True)
@@ -479,17 +566,24 @@ def main():
 
     date_options = ["ALL"] + sorted(assignment_df["service_date_key"].dropna().astype(str).unique().tolist()) if not assignment_df.empty else ["ALL"]
     region_options = ["ALL"] + sorted(region_zip_df["new_region_name"].dropna().astype(str).unique().tolist())
-    engineer_options, engineer_label_to_code = _build_engineer_options(assignment_df)
+    assignment_mode_options = ["VRP Assign", "Actual Routes"]
 
     left, right = st.columns([1, 2.25])
     with left:
+        selected_mode = st.selectbox("Assignment Mode", assignment_mode_options, index=0)
         selected_date = st.selectbox("Date", date_options, index=0)
         selected_region = st.selectbox("Production Region", region_options, index=0)
+        active_assignment = assignment_df.copy()
+        active_summary = summary_df.copy()
+        active_schedule = schedule_df.copy()
+        if selected_mode == "Actual Routes":
+            active_assignment, active_summary, active_schedule = _build_actual_mode_frames(service_df.copy(), home_df.copy())
+        engineer_options, engineer_label_to_code = _build_engineer_options(active_assignment)
         selected_engineer = st.selectbox("Engineer", engineer_options, index=0)
 
-        filtered_assignment = assignment_df.copy()
-        filtered_summary = summary_df.copy()
-        filtered_schedule = schedule_df.copy()
+        filtered_assignment = active_assignment.copy()
+        filtered_summary = active_summary.copy()
+        filtered_schedule = active_schedule.copy()
         filtered_home = home_df.copy()
 
         if selected_date != "ALL":
@@ -550,7 +644,8 @@ def main():
             )
 
         st.markdown("**Downloads**")
-        st.download_button("Download Schedule CSV", data=_to_csv_bytes(state["schedule_df"]), file_name="atlanta_live_schedule_vrp.csv", mime="text/csv", use_container_width=True)
+        download_name = "atlanta_live_schedule_actual_routes.csv" if selected_mode == "Actual Routes" else "atlanta_live_schedule_vrp.csv"
+        st.download_button("Download Schedule CSV", data=_to_csv_bytes(filtered_schedule), file_name=download_name, mime="text/csv", use_container_width=True)
 
     with right:
         map_obj = build_map(selected_region, filtered_assignment, filtered_home, route_groups, region_zip_df)
