@@ -19,6 +19,7 @@ DEFAULT_SERVICE_FILE = Path("260310/input/Service_202603181109_geocoded.csv")
 DEFAULT_SYMPTOM_FILE = Path("data/Notification_Symptom_mapping_20241120_3depth.xlsx")
 DEFAULT_PRODUCTION_INPUT_DIR = Path("260310/production_input")
 DEFAULT_PRODUCTION_OUTPUT_DIR = Path("260310/production_output")
+MANUAL_BUCKET_FILE = Path("data/ATL Three Markets 2.xlsx")
 ATLANTA_CITY = "Atlanta, GA"
 EXCLUDED_CENTER_TYPES = {"MAJOR DEALER", "REGIONAL DEALER"}
 TV_PRODUCT_GROUP = "TV"
@@ -28,10 +29,16 @@ DMS_CENTER_TYPE = "DMS"
 DMS2_CENTER_TYPE = "DMS2"
 ENABLE_DMS2 = False
 FLOATING_REGION_NAME = "Atlanta Floating DMS2"
-MANUAL_DMS_REGION_OVERRIDES = {
-    "AI102448": 1,
-    "AI103264": 2,
-    "AI103317": 3,
+MANUAL_DMS_REGION_OVERRIDES = {}
+MANUAL_BUCKET_TO_REGION = {
+    "ATL West": 1,
+    "ATL East": 2,
+    "ATL South": 3,
+}
+REGION_TARGET_ENGINEER_COUNT = {
+    1: 5,
+    2: 6,
+    3: 4,
 }
 DMS2_ANCHOR_REGION_OVERRIDES = {
     "40324200": 1,
@@ -96,6 +103,24 @@ def _load_service_df(service_file: Path | None) -> pd.DataFrame:
 
 
 def _build_region_zip_df(service_df: pd.DataFrame, region_count: int = 3) -> pd.DataFrame:
+    if MANUAL_BUCKET_FILE.exists():
+        manual_df = pd.read_excel(MANUAL_BUCKET_FILE, sheet_name="Sheet1")
+        manual_df["POSTAL_CODE"] = manual_df["Zip Code"].astype(str).str.zfill(5)
+        manual_df["Bucket"] = manual_df["Bucket"].astype(str).str.strip()
+        manual_df = manual_df[manual_df["Bucket"].isin(MANUAL_BUCKET_TO_REGION)].copy()
+        manual_df["region_seq"] = manual_df["Bucket"].map(MANUAL_BUCKET_TO_REGION).astype(int)
+        manual_df["region_id"] = manual_df["Bucket"].map(
+            {
+                "ATL West": "atlanta_manual_west",
+                "ATL East": "atlanta_manual_east",
+                "ATL South": "atlanta_manual_south",
+            }
+        )
+        manual_df["new_region_name"] = manual_df["region_seq"].apply(lambda n: f"Atlanta New Region {int(n)}")
+        region_zip_df = manual_df[["POSTAL_CODE", "region_id", "region_seq", "new_region_name"]].drop_duplicates().sort_values(
+            ["region_seq", "POSTAL_CODE"]
+        ).reset_index(drop=True)
+        return region_zip_df
     assigned_df = _assign_city_regions(service_df, ATLANTA_CITY, region_count).copy()
     region_zip_df = (
         assigned_df[["POSTAL_CODE", "region_id", "region_seq"]]
@@ -124,11 +149,20 @@ def _pick_best_dms_assignment(engineer_overlap_df: pd.DataFrame) -> pd.DataFrame
     best_rows: list[dict] | None = None
     best_score: tuple[int, float] | None = None
     region1, region2, region3 = [int(r) for r in regions]
+    target1 = int(REGION_TARGET_ENGINEER_COUNT.get(region1, 5))
+    target2 = int(REGION_TARGET_ENGINEER_COUNT.get(region2, 5))
+    target3 = int(REGION_TARGET_ENGINEER_COUNT.get(region3, 5))
+    if target1 + target2 + target3 != len(engineers):
+        raise RuntimeError(
+            f"Region target engineer counts must sum to {len(engineers)}; got {target1}+{target2}+{target3}."
+        )
     engineer_set = set(engineers)
-    for region1_group in itertools.combinations(engineers, 5):
+    for region1_group in itertools.combinations(engineers, target1):
         remaining_after_region1 = sorted(engineer_set.difference(region1_group))
-        for region2_group in itertools.combinations(remaining_after_region1, 5):
+        for region2_group in itertools.combinations(remaining_after_region1, target2):
             region3_group = sorted(set(remaining_after_region1).difference(region2_group))
+            if len(region3_group) != target3:
+                continue
             rows: list[dict] = []
             total_overlap = 0
             total_ratio = 0.0
@@ -154,7 +188,7 @@ def _pick_best_dms_assignment(engineer_overlap_df: pd.DataFrame) -> pd.DataFrame
                 best_rows = rows
 
     if best_rows is None:
-        raise RuntimeError("Failed to build fixed 5-per-region DMS allocation for Atlanta.")
+        raise RuntimeError("Failed to build fixed DMS allocation for Atlanta.")
     return pd.DataFrame(best_rows)
 
 
@@ -173,8 +207,9 @@ def _apply_manual_dms_region_overrides(dms_assignment_df: pd.DataFrame) -> pd.Da
         .value_counts()
         .to_dict()
     )
-    if region_counts != {1: 5, 2: 5, 3: 5}:
-        raise RuntimeError(f"Manual DMS overrides broke the 5/5/5 allocation: {region_counts}")
+    expected_counts = {int(k): int(v) for k, v in REGION_TARGET_ENGINEER_COUNT.items()}
+    if region_counts != expected_counts:
+        raise RuntimeError(f"Manual DMS overrides broke the target allocation {expected_counts}: {region_counts}")
     return updated_df
 
 

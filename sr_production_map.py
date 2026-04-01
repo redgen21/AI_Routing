@@ -479,6 +479,24 @@ def _popup(content: str, width: int = 360) -> folium.Popup:
     return folium.Popup(wrapped, max_width=width + 40)
 
 
+def _build_engineer_options(service_df: pd.DataFrame) -> tuple[list[str], dict[str, str]]:
+    if service_df.empty or "assigned_sm_code" not in service_df.columns or "assigned_sm_name" not in service_df.columns:
+        return ["ALL"], {}
+    engineer_df = service_df[["assigned_sm_code", "assigned_sm_name"]].drop_duplicates().copy()
+    engineer_df["assigned_sm_code"] = engineer_df["assigned_sm_code"].astype(str).str.strip()
+    engineer_df["assigned_sm_name"] = engineer_df["assigned_sm_name"].astype(str).str.strip()
+    name_counts = engineer_df["assigned_sm_name"].value_counts()
+    labels = ["ALL"]
+    label_to_code: dict[str, str] = {}
+    for _, row in engineer_df.sort_values(["assigned_sm_name", "assigned_sm_code"]).iterrows():
+        code = str(row["assigned_sm_code"])
+        name = str(row["assigned_sm_name"])
+        label = name if int(name_counts.get(name, 0)) <= 1 else f"{name} ({code})"
+        labels.append(label)
+        label_to_code[label] = code
+    return labels, label_to_code
+
+
 def _build_route_groups(schedule_df: pd.DataFrame):
     route_groups: list[dict] = []
     if schedule_df.empty:
@@ -615,7 +633,8 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
                     weight=3,
                     opacity=0.85,
                     popup=_popup(
-                        f"<b>Engineer</b>: {group['engineer_code']} | {group['engineer_name']}<br>"
+                        f"<b>Engineer</b>: {group['engineer_name']}<br>"
+                        f"<b>Engineer Code</b>: {group['engineer_code']}<br>"
                         f"<b>Service Count</b>: {group['service_count']} | "
                         f"<b>Distance</b>: {group['route_payload']['distance_km']:.2f} km | "
                         f"<b>Duration</b>: {group['route_payload']['duration_min']:.2f} min",
@@ -635,7 +654,7 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
                             "Home</div>"
                         )
                     ),
-                    popup=_popup(f"<b>Home Start</b>: {group['engineer_code']}", width=260),
+                    popup=_popup(f"<b>Home Start</b>: {group['engineer_name']}<br><b>Engineer Code</b>: {group['engineer_code']}", width=280),
                 ).add_to(route_layer)
 
             for row in group["scheduled_rows"]:
@@ -662,7 +681,8 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
                         )
                     ),
                     popup=_popup(
-                        f"<b>Engineer</b>: {row.get('assigned_sm_code', '')} | "
+                        f"<b>Engineer</b>: {row.get('assigned_sm_name', '')}<br>"
+                        f"<b>Engineer Code</b>: {row.get('assigned_sm_code', '')} | "
                         f"<b>Receipt</b>: {row.get('GSFS_RECEIPT_NO', '')} | "
                         f"<b>Seq</b>: {seq}<br>"
                         f"<b>Home Region</b>: {home_region_name}<br>"
@@ -711,8 +731,8 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
         code = str(row.get("SVC_ENGINEER_CODE", ""))
         border_color = engineer_colors.get(code, "#444444")
         popup = (
-            f"<b>Engineer</b>: {row.get('SVC_ENGINEER_CODE', '')} | "
-            f"<b>Name</b>: {row.get('Name', '')}<br>"
+            f"<b>Engineer</b>: {row.get('Name', '')}<br>"
+            f"<b>Engineer Code</b>: {row.get('SVC_ENGINEER_CODE', '')}<br>"
             f"<b>Center Type</b>: {row.get('SVC_CENTER_TYPE', '')} | "
             f"<b>Assigned Region</b>: {row.get('assigned_region_name', '')}<br>"
             f"<b>REF Heavy Repair</b>: {row.get('REF_HEAVY_REPAIR_FLAG', '')}"
@@ -779,33 +799,19 @@ def main():
     line_service_df = assignment_df.copy() if not assignment_df.empty else base_service_df.copy()
     date_options = ["ALL"] + sorted(line_service_df["service_date_key"].dropna().unique().tolist())
     region_options = ["ALL"] + sorted(region_zip_df["new_region_name"].dropna().unique().tolist())
-    engineer_label_parts = []
-    if "engineer_label" in engineer_region_df.columns:
-        engineer_label_parts.extend(engineer_region_df["engineer_label"].dropna().astype(str).tolist())
     actual_engineer_source = base_service_df.copy()
     if not actual_engineer_source.empty:
         actual_engineer_source["SVC_CENTER_TYPE"] = actual_engineer_source["SVC_CENTER_TYPE"].astype(str).str.upper()
         actual_engineer_source = actual_engineer_source[actual_engineer_source["SVC_CENTER_TYPE"].isin(["DMS"])].copy()
-    if not actual_engineer_source.empty:
-        actual_labels = (
-            actual_engineer_source[["SVC_ENGINEER_CODE", "SVC_ENGINEER_NAME"]]
-            .drop_duplicates()
-            .astype(str)
-            .assign(engineer_label=lambda df: df["SVC_ENGINEER_CODE"] + " | " + df["SVC_ENGINEER_NAME"])
-        )
-        engineer_label_parts.extend(actual_labels["engineer_label"].tolist())
-    engineer_options = ["ALL"] + sorted({label for label in engineer_label_parts if str(label).strip()})
+    engineer_source_df = line_service_df.copy()
+    if engineer_source_df.empty and not actual_engineer_source.empty:
+        engineer_source_df = actual_engineer_source.rename(columns={"SVC_ENGINEER_CODE": "assigned_sm_code", "SVC_ENGINEER_NAME": "assigned_sm_name"})
+    engineer_options, engineer_label_to_code = _build_engineer_options(engineer_source_df)
     assignment_mode_options = []
     if not actual_engineer_source.empty:
         assignment_mode_options.append("Actual Routes")
-    if not iteration_actual_assignment_df.empty:
-        assignment_mode_options.append("Iteration Assign (Actual Attendance)")
     if not iteration_osrm_actual_assignment_df.empty:
         assignment_mode_options.append("Iteration OSRM Assign (Actual Attendance)")
-    if not lns_actual_3days_assignment_df.empty:
-        assignment_mode_options.append("LNS Assign (Actual Attendance, 3 Days)")
-    if not vrp_actual_3days_assignment_df.empty:
-        assignment_mode_options.append("VRP Assign (Actual Attendance, 3 Days)")
 
     left, right = st.columns([1, 2.25])
     with left:
@@ -818,22 +824,10 @@ def main():
         if selected_mode == "Actual Routes" and not actual_engineer_source.empty:
             active_service_df, active_summary_df = _build_actual_summary_only(base_service_df)
             active_schedule_df = pd.DataFrame()
-        elif selected_mode == "Iteration Assign (Actual Attendance)" and not iteration_actual_assignment_df.empty:
-            active_service_df = iteration_actual_assignment_df.copy()
-            active_summary_df = iteration_actual_engineer_day_summary_df.copy()
-            active_schedule_df = iteration_actual_schedule_df.copy()
         elif selected_mode == "Iteration OSRM Assign (Actual Attendance)" and not iteration_osrm_actual_assignment_df.empty:
             active_service_df = iteration_osrm_actual_assignment_df.copy()
             active_summary_df = iteration_osrm_actual_engineer_day_summary_df.copy()
             active_schedule_df = iteration_osrm_actual_schedule_df.copy()
-        elif selected_mode == "LNS Assign (Actual Attendance, 3 Days)" and not lns_actual_3days_assignment_df.empty:
-            active_service_df = lns_actual_3days_assignment_df.copy()
-            active_summary_df = lns_actual_3days_engineer_day_summary_df.copy()
-            active_schedule_df = lns_actual_3days_schedule_df.copy()
-        elif selected_mode == "VRP Assign (Actual Attendance, 3 Days)" and not vrp_actual_3days_assignment_df.empty:
-            active_service_df = vrp_actual_3days_assignment_df.copy()
-            active_summary_df = vrp_actual_3days_engineer_day_summary_df.copy()
-            active_schedule_df = vrp_actual_3days_schedule_df.copy()
         else:
             active_service_df = base_service_df.copy()
             active_summary_df = pd.DataFrame()
@@ -864,7 +858,7 @@ def main():
                     | (pd.to_numeric(filtered_summary["assigned_region_seq"], errors="coerce") == region_seq)
                 ].copy()
         if selected_engineer != "ALL":
-            engineer_code = selected_engineer.split("|", 1)[0].strip()
+            engineer_code = engineer_label_to_code.get(selected_engineer, "")
             code_str = str(engineer_code)
             service_engineer_col = "assigned_sm_code" if "assigned_sm_code" in filtered_service.columns else "SVC_ENGINEER_CODE"
             filtered_service = filtered_service[filtered_service[service_engineer_col].astype(str) == code_str].copy()
@@ -932,7 +926,6 @@ def main():
         st.markdown("**Assigned Service Count by Engineer**")
         if not filtered_summary.empty:
             summary_cols = [
-                "SVC_ENGINEER_CODE",
                 "SVC_ENGINEER_NAME",
                 "assigned_center_type",
                 "job_count",
@@ -944,7 +937,9 @@ def main():
                 "overflow_480",
             ]
             use_cols = [col for col in summary_cols if col in filtered_summary.columns]
-            st.dataframe(filtered_summary[use_cols].sort_values(["job_count", "SVC_ENGINEER_CODE"], ascending=[False, True]), width="stretch", hide_index=True)
+            sort_cols = [col for col in ["job_count", "SVC_ENGINEER_NAME"] if col in filtered_summary.columns]
+            ascending = [False, True][: len(sort_cols)]
+            st.dataframe(filtered_summary[use_cols].sort_values(sort_cols, ascending=ascending), width="stretch", hide_index=True)
         else:
             st.info("No assignment summary for the current selection.")
 

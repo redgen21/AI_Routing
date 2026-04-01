@@ -167,6 +167,13 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
     zip_layer, region_layer = _build_region_layers(region_zip_df, display_service_df)
     region_colors = _region_color_map()
     engineer_colors = _generate_color_map([group["engineer_code"] for group in route_groups])
+    home_region_lookup: dict[str, str] = {}
+    if not home_df.empty and "SVC_ENGINEER_CODE" in home_df.columns:
+        for _, home_row in home_df.drop_duplicates(subset=["SVC_ENGINEER_CODE"]).iterrows():
+            code = str(home_row.get("SVC_ENGINEER_CODE", "")).strip()
+            region = str(home_row.get("assigned_region_name", "")).strip()
+            if code and region:
+                home_region_lookup[code] = region
 
     if region_name != "ALL":
         zip_layer = zip_layer[zip_layer["new_region_name"] == region_name].copy()
@@ -217,7 +224,8 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
                     weight=3,
                     opacity=0.85,
                     popup=_popup(
-                        f"<b>Engineer</b>: {group['engineer_code']} | {group['engineer_name']}<br>"
+                        f"<b>Engineer</b>: {group['engineer_name']}<br>"
+                        f"<b>Engineer Code</b>: {group['engineer_code']}<br>"
                         f"<b>Service Count</b>: {group['service_count']} | "
                         f"<b>Distance</b>: {group['route_payload']['distance_km']:.2f} km | "
                         f"<b>Duration</b>: {group['route_payload']['duration_min']:.2f} min",
@@ -235,11 +243,18 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
                             "padding:2px 6px;text-align:center;white-space:nowrap;\">Home</div>"
                         )
                     ),
-                    popup=_popup(f"<b>Home Start</b>: {group['engineer_code']}", width=260),
+                    popup=_popup(f"<b>Home Start</b>: {group['engineer_name']}<br><b>Engineer Code</b>: {group['engineer_code']}", width=280),
                 ).add_to(route_layer)
             for row in group["scheduled_rows"]:
                 seq = int(row.get("visit_seq", 0))
+                engineer_code = str(row.get("assigned_sm_code", "")).strip()
                 home_region_name = str(row.get("assigned_region_name", "")).strip()
+                if not home_region_name:
+                    home_region_name = home_region_lookup.get(engineer_code, "")
+                if not home_region_name:
+                    region_seq = pd.to_numeric(pd.Series([row.get("assigned_region_seq")]), errors="coerce").iloc[0]
+                    if pd.notna(region_seq):
+                        home_region_name = f"Atlanta New Region {int(region_seq)}"
                 folium.Marker(
                     location=[float(row["latitude"]), float(row["longitude"])],
                     icon=folium.DivIcon(
@@ -251,7 +266,8 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
                         )
                     ),
                     popup=_popup(
-                        f"<b>Engineer</b>: {row.get('assigned_sm_code', '')} | "
+                        f"<b>Engineer</b>: {row.get('assigned_sm_name', '')}<br>"
+                        f"<b>Engineer Code</b>: {engineer_code} | "
                         f"<b>Receipt</b>: {row.get('GSFS_RECEIPT_NO', '')} | "
                         f"<b>Seq</b>: {seq}<br>"
                         f"<b>Home Region</b>: {home_region_name}<br>"
@@ -308,8 +324,8 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
                 )
             ),
             popup=_popup(
-                f"<b>Engineer</b>: {row.get('SVC_ENGINEER_CODE', '')} | "
-                f"<b>Name</b>: {row.get('Name', '')}<br>"
+                f"<b>Engineer</b>: {row.get('Name', '')}<br>"
+                f"<b>Engineer Code</b>: {row.get('SVC_ENGINEER_CODE', '')}<br>"
                 f"<b>Assigned Region</b>: {row.get('assigned_region_name', '')}<br>"
                 f"<b>REF Heavy Repair</b>: {row.get('REF_HEAVY_REPAIR_FLAG', '')}",
                 width=440,
@@ -324,10 +340,27 @@ def _to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
 
 
-def _render_stage_status(stage_box, progress_bar, current_step: int, lines: list[str], state: str = "running") -> None:
+def _build_engineer_options(assignment_df: pd.DataFrame) -> tuple[list[str], dict[str, str]]:
+    if assignment_df.empty:
+        return ["ALL"], {}
+    engineer_df = assignment_df[["assigned_sm_code", "assigned_sm_name"]].drop_duplicates().copy()
+    engineer_df["assigned_sm_code"] = engineer_df["assigned_sm_code"].astype(str).str.strip()
+    engineer_df["assigned_sm_name"] = engineer_df["assigned_sm_name"].astype(str).str.strip()
+    name_counts = engineer_df["assigned_sm_name"].value_counts()
+    labels = ["ALL"]
+    label_to_code: dict[str, str] = {}
+    for _, row in engineer_df.sort_values(["assigned_sm_name", "assigned_sm_code"]).iterrows():
+        code = str(row["assigned_sm_code"])
+        name = str(row["assigned_sm_name"])
+        label = name if int(name_counts.get(name, 0)) <= 1 else f"{name} ({code})"
+        labels.append(label)
+        label_to_code[label] = code
+    return labels, label_to_code
+
+
+def _render_stage_status(stage_box, progress_bar, current_step: int, message: str) -> None:
     progress_bar.progress(min(max(current_step / len(LIVE_STAGE_LABELS), 0.0), 1.0))
-    body = "\n".join(f"- {line}" for line in lines)
-    stage_box.markdown(f"**Status:** {state.capitalize()}\n\n{body}")
+    stage_box.caption(message)
 
 
 def main():
@@ -348,14 +381,12 @@ def main():
             else:
                 stage_box = progress_placeholder.container()
                 progress_bar = progress_bar_placeholder.progress(0.0)
-                timeline: list[str] = []
                 run_start = time.perf_counter()
                 _render_stage_status(
                     stage_box,
                     progress_bar,
                     0,
-                    ["Preparing runtime request."],
-                    state="running",
+                    "Preparing runtime request.",
                 )
                 try:
                     step_start = time.perf_counter()
@@ -363,37 +394,27 @@ def main():
                         stage_box,
                         progress_bar,
                         0,
-                        timeline + [f"{LIVE_STAGE_LABELS[0]}..."],
-                        state="running",
+                        f"{LIVE_STAGE_LABELS[0]}...",
                     )
                     queried_service_df, rendered_sql = query_service_data(start_date, end_date, st.secrets)
-                    timeline.append(
-                        f"{LIVE_STAGE_LABELS[0]} completed in {time.perf_counter() - step_start:.1f}s "
-                        f"({len(queried_service_df):,} rows)."
-                    )
+                    query_elapsed = time.perf_counter() - step_start
 
                     step_start = time.perf_counter()
                     _render_stage_status(
                         stage_box,
                         progress_bar,
                         1,
-                        timeline + [f"{LIVE_STAGE_LABELS[1]} and {LIVE_STAGE_LABELS[2]}..."],
-                        state="running",
+                        f"{LIVE_STAGE_LABELS[1]} and {LIVE_STAGE_LABELS[2]}...",
                     )
                     runtime = build_runtime_atlanta_inputs(queried_service_df)
                     prep_elapsed = time.perf_counter() - step_start
-                    timeline.append(
-                        f"{LIVE_STAGE_LABELS[1]} and {LIVE_STAGE_LABELS[2]} completed in {prep_elapsed:.1f}s "
-                        f"({len(runtime.service_enriched_df):,} Atlanta service rows)."
-                    )
 
                     step_start = time.perf_counter()
                     _render_stage_status(
                         stage_box,
                         progress_bar,
                         3,
-                        timeline + [f"{LIVE_STAGE_LABELS[3]}..."],
-                        state="running",
+                        f"{LIVE_STAGE_LABELS[3]}...",
                     )
                     assignment_df, summary_df, schedule_df = build_atlanta_production_assignment_vrp_from_frames(
                         engineer_region_df=runtime.engineer_region_df,
@@ -401,18 +422,14 @@ def main():
                         service_df=runtime.service_enriched_df,
                         attendance_limited=True,
                     )
-                    timeline.append(
-                        f"{LIVE_STAGE_LABELS[3]} completed in {time.perf_counter() - step_start:.1f}s "
-                        f"({len(assignment_df):,} assigned rows, {len(summary_df):,} engineer summaries)."
-                    )
+                    route_elapsed = time.perf_counter() - step_start
 
                     step_start = time.perf_counter()
                     _render_stage_status(
                         stage_box,
                         progress_bar,
                         4,
-                        timeline + [f"{LIVE_STAGE_LABELS[4]}..."],
-                        state="running",
+                        f"{LIVE_STAGE_LABELS[4]}...",
                     )
                     st.session_state["live_runtime"] = {
                         "queried_service_df": queried_service_df,
@@ -426,26 +443,25 @@ def main():
                         "summary_df": summary_df,
                         "schedule_df": schedule_df,
                     }
-                    timeline.append(
-                        f"{LIVE_STAGE_LABELS[4]} completed in {time.perf_counter() - step_start:.1f}s "
-                        f"({len(schedule_df):,} schedule rows)."
-                    )
+                    finalize_elapsed = time.perf_counter() - step_start
                     total_elapsed = time.perf_counter() - run_start
                     _render_stage_status(
                         stage_box,
                         progress_bar,
                         len(LIVE_STAGE_LABELS),
-                        timeline + [f"Total runtime: {total_elapsed:.1f}s"],
-                        state="complete",
+                        (
+                            f"Completed in {total_elapsed:.1f}s "
+                            f"(query {query_elapsed:.1f}s, prep {prep_elapsed:.1f}s, "
+                            f"routing {route_elapsed:.1f}s, finalize {finalize_elapsed:.1f}s)."
+                        ),
                     )
                 except Exception as exc:
                     total_elapsed = time.perf_counter() - run_start
                     _render_stage_status(
                         stage_box,
                         progress_bar,
-                        max(len(timeline), 1),
-                        timeline + [f"Failed after {total_elapsed:.1f}s: {exc}"],
-                        state="error",
+                        1,
+                        f"Failed after {total_elapsed:.1f}s: {exc}",
                     )
                     raise
 
@@ -463,13 +479,7 @@ def main():
 
     date_options = ["ALL"] + sorted(assignment_df["service_date_key"].dropna().astype(str).unique().tolist()) if not assignment_df.empty else ["ALL"]
     region_options = ["ALL"] + sorted(region_zip_df["new_region_name"].dropna().astype(str).unique().tolist())
-    engineer_labels = (
-        assignment_df[["assigned_sm_code", "assigned_sm_name"]]
-        .drop_duplicates()
-        .astype(str)
-        .assign(engineer_label=lambda df: df["assigned_sm_code"] + " | " + df["assigned_sm_name"])
-    ) if not assignment_df.empty else pd.DataFrame(columns=["engineer_label"])
-    engineer_options = ["ALL"] + sorted(engineer_labels["engineer_label"].tolist())
+    engineer_options, engineer_label_to_code = _build_engineer_options(assignment_df)
 
     left, right = st.columns([1, 2.25])
     with left:
@@ -494,7 +504,7 @@ def main():
                 filtered_summary = filtered_summary[pd.to_numeric(filtered_summary["assigned_region_seq"], errors="coerce") == region_seq].copy()
             filtered_home = filtered_home[filtered_home["assigned_region_name"] == selected_region].copy()
         if selected_engineer != "ALL":
-            engineer_code = selected_engineer.split("|", 1)[0].strip()
+            engineer_code = engineer_label_to_code.get(selected_engineer, "")
             filtered_assignment = filtered_assignment[filtered_assignment["assigned_sm_code"].astype(str) == engineer_code].copy()
             filtered_summary = filtered_summary[filtered_summary["SVC_ENGINEER_CODE"].astype(str) == engineer_code].copy()
             filtered_schedule = filtered_schedule[filtered_schedule["assigned_sm_code"].astype(str) == engineer_code].copy()
@@ -525,7 +535,6 @@ def main():
             st.dataframe(
                 filtered_summary[
                     [
-                        "SVC_ENGINEER_CODE",
                         "SVC_ENGINEER_NAME",
                         "job_count",
                         "service_time_min",
@@ -535,15 +544,12 @@ def main():
                         "total_work_min",
                         "overflow_480",
                     ]
-                ].sort_values(["job_count", "SVC_ENGINEER_CODE"], ascending=[False, True]),
+                ].sort_values(["job_count", "SVC_ENGINEER_NAME"], ascending=[False, True]),
                 width="stretch",
                 hide_index=True,
             )
 
         st.markdown("**Downloads**")
-        st.download_button("Download Queried Service CSV", data=_to_csv_bytes(state["queried_service_df"]), file_name="queried_service.csv", mime="text/csv", use_container_width=True)
-        st.download_button("Download Geocoded Service CSV", data=_to_csv_bytes(state["geocoded_service_df"]), file_name="queried_service_geocoded.csv", mime="text/csv", use_container_width=True)
-        st.download_button("Download Assignment CSV", data=_to_csv_bytes(state["assignment_df"]), file_name="atlanta_live_assignment_vrp.csv", mime="text/csv", use_container_width=True)
         st.download_button("Download Schedule CSV", data=_to_csv_bytes(state["schedule_df"]), file_name="atlanta_live_schedule_vrp.csv", mime="text/csv", use_container_width=True)
 
     with right:
@@ -555,7 +561,6 @@ def main():
                 filtered_schedule[
                     [
                         "service_date_key",
-                        "assigned_sm_code",
                         "assigned_sm_name",
                         "GSFS_RECEIPT_NO",
                         "visit_seq",
@@ -565,7 +570,7 @@ def main():
                         "service_time_min",
                         "new_region_name",
                     ]
-                ].sort_values(["assigned_sm_code", "visit_seq"]),
+                ].sort_values(["assigned_sm_name", "visit_seq"]),
                 width="stretch",
                 hide_index=True,
             )
