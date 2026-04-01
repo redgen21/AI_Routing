@@ -16,7 +16,7 @@ from smart_routing.area_map import load_city_map_data
 from smart_routing.bigquery_runtime import query_service_data
 from smart_routing.live_atlanta_runtime import build_runtime_atlanta_inputs
 from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
-from smart_routing.production_assign_atlanta_osrm import build_atlanta_production_assignment_osrm_from_frames
+from smart_routing.production_assign_atlanta_vrp import build_atlanta_production_assignment_vrp_from_frames
 
 
 st.set_page_config(page_title="Atlanta Live Routing", layout="wide")
@@ -28,7 +28,7 @@ LIVE_STAGE_LABELS = [
     "Querying BigQuery",
     "Merging geocode cache",
     "Preparing Atlanta runtime inputs",
-    "Running OSRM iteration assignment",
+    "Running VRP assignment",
     "Finalizing schedules and map data",
 ]
 
@@ -332,7 +332,7 @@ def _render_stage_status(stage_box, progress_bar, current_step: int, lines: list
 
 def main():
     st.title("Atlanta Live Routing")
-    st.caption("BigQuery query -> geocode/cache merge -> Atlanta preprocessing -> OSRM iteration assignment")
+    st.caption("BigQuery query -> geocode/cache merge -> Atlanta preprocessing -> VRP assignment")
 
     sidebar_left, sidebar_right = st.columns([1, 2.3])
     with sidebar_left:
@@ -395,12 +395,11 @@ def main():
                         timeline + [f"{LIVE_STAGE_LABELS[3]}..."],
                         state="running",
                     )
-                    assignment_df, summary_df, schedule_df = build_atlanta_production_assignment_osrm_from_frames(
+                    assignment_df, summary_df, schedule_df = build_atlanta_production_assignment_vrp_from_frames(
                         engineer_region_df=runtime.engineer_region_df,
                         home_df=runtime.home_geocode_df,
                         service_df=runtime.service_enriched_df,
                         attendance_limited=True,
-                        assignment_strategy="iteration",
                     )
                     timeline.append(
                         f"{LIVE_STAGE_LABELS[3]} completed in {time.perf_counter() - step_start:.1f}s "
@@ -452,7 +451,7 @@ def main():
 
     state = st.session_state.get("live_runtime")
     if not state:
-        st.info("Select a start date and end date, then click `Load And Route` to query BigQuery and build OSRM iteration routes.")
+        st.info("Select a start date and end date, then click `Load And Route` to query BigQuery and build VRP routes.")
         return
 
     assignment_df = state["assignment_df"].copy()
@@ -544,8 +543,8 @@ def main():
         st.markdown("**Downloads**")
         st.download_button("Download Queried Service CSV", data=_to_csv_bytes(state["queried_service_df"]), file_name="queried_service.csv", mime="text/csv", use_container_width=True)
         st.download_button("Download Geocoded Service CSV", data=_to_csv_bytes(state["geocoded_service_df"]), file_name="queried_service_geocoded.csv", mime="text/csv", use_container_width=True)
-        st.download_button("Download Assignment CSV", data=_to_csv_bytes(state["assignment_df"]), file_name="atlanta_live_assignment_osrm_iteration.csv", mime="text/csv", use_container_width=True)
-        st.download_button("Download Schedule CSV", data=_to_csv_bytes(state["schedule_df"]), file_name="atlanta_live_schedule_osrm_iteration.csv", mime="text/csv", use_container_width=True)
+        st.download_button("Download Assignment CSV", data=_to_csv_bytes(state["assignment_df"]), file_name="atlanta_live_assignment_vrp.csv", mime="text/csv", use_container_width=True)
+        st.download_button("Download Schedule CSV", data=_to_csv_bytes(state["schedule_df"]), file_name="atlanta_live_schedule_vrp.csv", mime="text/csv", use_container_width=True)
 
     with right:
         map_obj = build_map(selected_region, filtered_assignment, filtered_home, route_groups, region_zip_df)

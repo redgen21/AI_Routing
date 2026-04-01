@@ -361,4 +361,8 @@
   - documents current live / production routing architecture
   - records DMS-only and PROMISE_DATE-based live routing assumptions
   - compares Sequence, line iteration, OSRM iteration, LNS direction, and VRP solver approaches with detailed pros and cons
+- Switched the live operational Streamlit app from OSRM iteration to VRP:
+  - added `build_atlanta_production_assignment_vrp_from_frames()` in `smart_routing/production_assign_atlanta_vrp.py`
+  - updated `sr_live_atlanta_routing.py` to use VRP assignment for live queried service data
+  - updated progress text and download filenames to reflect VRP routing
 

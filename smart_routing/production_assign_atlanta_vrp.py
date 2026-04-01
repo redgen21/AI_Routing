@@ -347,3 +347,57 @@ def build_atlanta_production_assignment_vrp(
         engineer_day_summary_path=summary_path,
         schedule_path=schedule_path,
     )
+
+
+def build_atlanta_production_assignment_vrp_from_frames(
+    engineer_region_df: pd.DataFrame,
+    home_df: pd.DataFrame,
+    service_df: pd.DataFrame,
+    attendance_limited: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    working_service_df = service_df.copy()
+    if not working_service_df.empty:
+        if "service_date" in working_service_df.columns:
+            working_service_df["service_date"] = pd.to_datetime(working_service_df["service_date"], errors="coerce")
+        if "service_date_key" not in working_service_df.columns and "service_date" in working_service_df.columns:
+            working_service_df["service_date_key"] = working_service_df["service_date"].dt.strftime("%Y-%m-%d")
+        working_service_df["latitude"] = pd.to_numeric(working_service_df["latitude"], errors="coerce")
+        working_service_df["longitude"] = pd.to_numeric(working_service_df["longitude"], errors="coerce")
+        working_service_df["service_time_min"] = pd.to_numeric(working_service_df["service_time_min"], errors="coerce").fillna(45)
+        working_service_df["is_heavy_repair"] = working_service_df["is_heavy_repair"].fillna(False).astype(bool)
+        working_service_df["is_tv_job"] = working_service_df["is_tv_job"].fillna(False).astype(bool)
+
+    engineer_master_df = base._build_engineer_master(engineer_region_df.copy(), home_df.copy())
+    region_centers = base._region_centers(working_service_df)
+    attendance_master_df, attendance_by_date = base._build_actual_attendance_master(working_service_df, engineer_master_df)
+    route_client = base._build_route_client()
+
+    assignment_frames: list[pd.DataFrame] = []
+    summary_frames: list[pd.DataFrame] = []
+    schedule_frames: list[pd.DataFrame] = []
+    for service_date_key, service_day_df in working_service_df.groupby("service_date_key"):
+        day_engineer_master_df = engineer_master_df.copy()
+        if attendance_limited:
+            allowed_codes = attendance_by_date.get(str(service_date_key), set())
+            day_engineer_master_df = attendance_master_df[
+                attendance_master_df["SVC_ENGINEER_CODE"].astype(str).isin(allowed_codes)
+            ].copy()
+            if day_engineer_master_df.empty:
+                continue
+        assignment_df, summary_df, schedule_df = _solve_vrp_day(
+            service_day_df.copy(),
+            day_engineer_master_df.copy(),
+            route_client,
+            region_centers,
+        )
+        if assignment_df.empty:
+            continue
+        assignment_frames.append(assignment_df)
+        summary_frames.append(summary_df)
+        if not schedule_df.empty:
+            schedule_frames.append(schedule_df)
+
+    assignment_result_df = pd.concat(assignment_frames, ignore_index=True) if assignment_frames else pd.DataFrame()
+    summary_result_df = pd.concat(summary_frames, ignore_index=True) if summary_frames else pd.DataFrame()
+    schedule_result_df = pd.concat(schedule_frames, ignore_index=True) if schedule_frames else pd.DataFrame()
+    return assignment_result_df, summary_result_df, schedule_result_df
