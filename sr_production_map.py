@@ -812,6 +812,8 @@ def main():
         assignment_mode_options.append("Actual Routes")
     if not iteration_osrm_actual_assignment_df.empty:
         assignment_mode_options.append("Iteration OSRM Assign (Actual Attendance)")
+    if not vrp_actual_3days_assignment_df.empty:
+        assignment_mode_options.append("VRP Assign (Actual Attendance, 3 Days)")
 
     left, right = st.columns([1, 2.25])
     with left:
@@ -828,6 +830,10 @@ def main():
             active_service_df = iteration_osrm_actual_assignment_df.copy()
             active_summary_df = iteration_osrm_actual_engineer_day_summary_df.copy()
             active_schedule_df = iteration_osrm_actual_schedule_df.copy()
+        elif selected_mode == "VRP Assign (Actual Attendance, 3 Days)" and not vrp_actual_3days_assignment_df.empty:
+            active_service_df = vrp_actual_3days_assignment_df.copy()
+            active_summary_df = vrp_actual_3days_engineer_day_summary_df.copy()
+            active_schedule_df = vrp_actual_3days_schedule_df.copy()
         else:
             active_service_df = base_service_df.copy()
             active_summary_df = pd.DataFrame()
