@@ -399,3 +399,43 @@
   - `260310/production_output/atlanta_engineer_day_summary_osrm_actual_attendance_iteration.csv`
   - `260310/production_output/atlanta_schedule_osrm_actual_attendance_iteration.csv`
 
+2026-04-02 (Simulation compare refactor: Actual / VRP / OSRM / OSRM Iteration)
+- Reworked `smart_routing/production_assign_atlanta_osrm.py` to support the new algorithm definitions:
+  - `routing`: first seed job per engineer from home-distance minimization, then full-route insertion assignment
+  - `iteration`: route-insertion assignment followed by relocate/swap iterative improvement
+- Added 3-day output runner scripts:
+  - `sr_production_atlanta_assign_osrm_actual_3days.py`
+  - `sr_production_atlanta_assign_osrm_iteration_actual_3days.py`
+  - `sr_production_atlanta_compare_actual_vrp_osrm_3days.py`
+- Updated `sr_production_map.py` comparison modes to target:
+  - `Actual Routes`
+  - `OSRM Assign (Actual Attendance, 3 Days)`
+  - `OSRM Iteration Assign (Actual Attendance, 3 Days)`
+  - `VRP Assign (Actual Attendance, 3 Days)`
+- Started background generation for the new 3-day OSRM and OSRM Iteration outputs.
+
+2026-04-03 (Salesforce-style VRP API client/server)
+- Added a reusable VRP API service layer:
+  - `smart_routing/vrp_api_service.py`
+  - converts Salesforce-style routing JSON into internal engineer/home/service DataFrames
+  - runs VRP routing via `build_atlanta_production_assignment_vrp_from_frames()`
+  - stores asynchronous job status/result files under `260310/vrp_api_jobs`
+- Added a local REST server implementation:
+  - `smart_routing/vrp_api_server.py`
+  - endpoints:
+    - `POST /api/v1/routing/jobs`
+    - `GET /api/v1/routing/jobs/{job_id}`
+    - `GET /api/v1/routing/jobs/{job_id}/result`
+  - implemented with Python standard library `ThreadingHTTPServer` so no FastAPI dependency is required
+- Added a local client module:
+  - `smart_routing/vrp_api_client.py`
+  - helper functions for submit/status/result plus payload construction from current service/engineer/home frames
+- Added runnable entry points:
+  - `sr_vrp_api_server.py`
+  - `sr_vrp_api_client.py`
+- Verified end-to-end HTTP flow locally:
+  - submit job
+  - poll status
+  - fetch result
+  - returned completed summary and assignments successfully
+

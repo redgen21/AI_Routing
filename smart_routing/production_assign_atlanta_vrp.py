@@ -208,10 +208,14 @@ def _solve_vrp_day(
     for job_idx, (_, row) in enumerate(job_df.iterrows()):
         candidates_df = base._candidate_engineers(row, engineer_df)
         allowed_codes = set(candidates_df["SVC_ENGINEER_CODE"].astype(str).tolist())
-        allowed_vehicle_indices = [vehicle_idx for vehicle_idx, code in enumerate(vehicle_codes) if code in allowed_codes]
+        allowed_vehicle_indices = [int(vehicle_idx) for vehicle_idx, code in enumerate(vehicle_codes) if code in allowed_codes]
         if not allowed_vehicle_indices:
             continue
-        routing.SetAllowedVehiclesForIndex(allowed_vehicle_indices, manager.NodeToIndex(job_idx))
+        node_index = manager.NodeToIndex(job_idx)
+        try:
+            routing.SetAllowedVehiclesForIndex(allowed_vehicle_indices, node_index)
+        except TypeError:
+            routing.SetAllowedVehiclesForIndex(node_index, allowed_vehicle_indices)
         routing.AddDisjunction([manager.NodeToIndex(job_idx)], 10_000_000)
 
     search_params = pywrapcp.DefaultRoutingSearchParameters()

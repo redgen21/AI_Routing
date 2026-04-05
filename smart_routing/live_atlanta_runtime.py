@@ -10,6 +10,7 @@ import pandas as pd
 from .census_geocoder import CensusBatchGeocoder, load_geocode_cache, merge_service_with_geocodes
 from .google_geocoder import GoogleGeocoder
 from . import production_atlanta as prod
+from .area_map import get_latest_geocoded_service_file
 
 
 DEFAULT_PROFILE_FILE = Path("260310/Top 10_DMS_DMS2_Profile_20260317.xlsx")
@@ -41,6 +42,7 @@ def _load_config(config_file: Path = DEFAULT_CONFIG_FILE) -> dict:
 
 def _normalize_service_columns(raw_df: pd.DataFrame) -> pd.DataFrame:
     df = raw_df.copy()
+    df = df.loc[:, ~df.columns.astype(str).str.startswith("Unnamed:")].copy()
     rename_map = {
         "SERVICE_CENTER_TYPE": "SVC_CENTER_TYPE",
         "DETAIL_SYMPTOM_CODE": "RECEIPT_DETAIL_SYMPTOM_CODE",
@@ -65,22 +67,96 @@ def _normalize_service_columns(raw_df: pd.DataFrame) -> pd.DataFrame:
     ]:
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip()
+            df[col] = df[col].replace(
+                {
+                    "nan": "",
+                    "None": "",
+                    "none": "",
+                    "NaN": "",
+                    "NAN": "",
+                    "NaT": "",
+                    "nat": "",
+                }
+            )
+    if "COUNTRY_NAME" in df.columns:
+        df["COUNTRY_NAME"] = df["COUNTRY_NAME"].replace(
+            {
+                "US": "USA",
+                "usa": "USA",
+                "United States": "USA",
+                "UNITED STATES": "USA",
+            }
+        )
     if "SVC_ENGINEER_NAME" not in df.columns and "SVC_ENGINEER_CODE" in df.columns:
         df["SVC_ENGINEER_NAME"] = df["SVC_ENGINEER_CODE"].astype(str).str.strip()
     elif "SVC_ENGINEER_NAME" in df.columns and "SVC_ENGINEER_CODE" in df.columns:
         missing_name_mask = df["SVC_ENGINEER_NAME"].astype(str).str.strip().eq("")
         df.loc[missing_name_mask, "SVC_ENGINEER_NAME"] = df.loc[missing_name_mask, "SVC_ENGINEER_CODE"].astype(str).str.strip()
     if "POSTAL_CODE" in df.columns:
-        df["POSTAL_CODE"] = df["POSTAL_CODE"].astype(str).str.strip().str.zfill(5)
+        df["POSTAL_CODE"] = df["POSTAL_CODE"].astype("object")
+        postal_numeric = pd.to_numeric(df["POSTAL_CODE"], errors="coerce")
+        has_postal_numeric = postal_numeric.notna()
+        df["POSTAL_CODE"] = df["POSTAL_CODE"].astype(str).str.replace(r"\.0+$", "", regex=True).str.strip()
+        df["POSTAL_CODE"] = df["POSTAL_CODE"].replace({"nan": "", "None": "", "none": "", "NaN": "", "NAN": ""})
+        df.loc[has_postal_numeric, "POSTAL_CODE"] = postal_numeric.loc[has_postal_numeric].astype("Int64").astype(str)
+        df["POSTAL_CODE"] = df["POSTAL_CODE"].astype(str).str.strip()
+        nonempty_postal = df["POSTAL_CODE"].ne("")
+        df.loc[nonempty_postal, "POSTAL_CODE"] = df.loc[nonempty_postal, "POSTAL_CODE"].str.zfill(5)
+    if "PROMISE_DATE" in df.columns:
+        df["PROMISE_DATE"] = df["PROMISE_DATE"].astype("object")
+        promise_numeric = pd.to_numeric(df["PROMISE_DATE"], errors="coerce")
+        has_numeric = promise_numeric.notna()
+        df.loc[has_numeric, "PROMISE_DATE"] = promise_numeric.loc[has_numeric].astype("Int64").astype(str)
+        df["PROMISE_DATE"] = df["PROMISE_DATE"].astype(str).str.replace(r"\.0+$", "", regex=True).str.strip()
     if "GSFS_RECEIPT_NO" in df.columns:
         sort_cols = [col for col in ["PROMISE_DATE", "PROMISE_TIMESTAMP", "REPAIR_END_DATE_YYYYMMDD", "GSFS_RECEIPT_NO"] if col in df.columns]
         if sort_cols:
             df = df.sort_values(sort_cols).reset_index(drop=True)
         df = df.drop_duplicates(subset=["GSFS_RECEIPT_NO"], keep="first").reset_index(drop=True)
+    required_any = [col for col in ["GSFS_RECEIPT_NO", "ADDRESS_LINE1_INFO", "CITY_NAME", "STATE_NAME", "POSTAL_CODE"] if col in df.columns]
+    if required_any:
+        nonblank_mask = pd.Series(False, index=df.index)
+        for col in required_any:
+            nonblank_mask = nonblank_mask | df[col].astype(str).str.strip().ne("")
+        df = df[nonblank_mask].reset_index(drop=True)
     return df
 
 
 def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
+    merged_input_df = raw_df.copy()
+    latest_geocoded_service = get_latest_geocoded_service_file()
+    if latest_geocoded_service and latest_geocoded_service.exists() and "GSFS_RECEIPT_NO" in merged_input_df.columns:
+        try:
+            receipt_geo_df = pd.read_csv(latest_geocoded_service, encoding="utf-8-sig", low_memory=False)
+            keep_cols = [col for col in ["GSFS_RECEIPT_NO", "latitude", "longitude", "matched_address", "match_indicator", "match_type", "census_state_fips", "census_county_fips", "census_tract", "census_block", "geocoded_date", "source"] if col in receipt_geo_df.columns]
+            if {"GSFS_RECEIPT_NO", "latitude", "longitude"}.issubset(keep_cols):
+                receipt_geo_df = (
+                    receipt_geo_df[keep_cols]
+                    .dropna(subset=["GSFS_RECEIPT_NO"])
+                    .drop_duplicates(subset=["GSFS_RECEIPT_NO"], keep="first")
+                )
+                merged_input_df = merged_input_df.merge(
+                    receipt_geo_df.rename(
+                        columns={
+                            "latitude": "receipt_latitude",
+                            "longitude": "receipt_longitude",
+                            "matched_address": "receipt_matched_address",
+                            "match_indicator": "receipt_match_indicator",
+                            "match_type": "receipt_match_type",
+                            "census_state_fips": "receipt_census_state_fips",
+                            "census_county_fips": "receipt_census_county_fips",
+                            "census_tract": "receipt_census_tract",
+                            "census_block": "receipt_census_block",
+                            "geocoded_date": "receipt_geocoded_date",
+                            "source": "receipt_source",
+                        }
+                    ),
+                    on="GSFS_RECEIPT_NO",
+                    how="left",
+                )
+        except Exception:
+            pass
+
     geocoding_cfg = config.get("geocoding", {})
     census_cache_path = Path(str(geocoding_cfg.get("census_cache_file", "data/geocode_cache_us_census.csv")))
     google_cache_path = Path(str(geocoding_cfg.get("google_cache_file", "data/geocode_cache_google.csv")))
@@ -90,7 +166,28 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
         [load_geocode_cache(census_cache_path), load_geocode_cache(google_cache_path)],
         ignore_index=True,
     ).drop_duplicates(subset=["address_key"], keep="first")
-    merged_df = merge_service_with_geocodes(raw_df, cache_df)
+    merged_df = merge_service_with_geocodes(merged_input_df, cache_df)
+
+    if "receipt_latitude" in merged_df.columns and "receipt_longitude" in merged_df.columns:
+        receipt_mask = merged_df["receipt_latitude"].notna() & merged_df["receipt_longitude"].notna()
+        merged_df.loc[receipt_mask, "latitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_latitude"], errors="coerce")
+        merged_df.loc[receipt_mask, "longitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_longitude"], errors="coerce")
+        for source_col, target_col in [
+            ("receipt_matched_address", "matched_address"),
+            ("receipt_match_indicator", "match_indicator"),
+            ("receipt_match_type", "match_type"),
+            ("receipt_census_state_fips", "census_state_fips"),
+            ("receipt_census_county_fips", "census_county_fips"),
+            ("receipt_census_tract", "census_tract"),
+            ("receipt_census_block", "census_block"),
+            ("receipt_geocoded_date", "geocoded_date"),
+        ]:
+            if source_col in merged_df.columns:
+                merged_df.loc[receipt_mask, target_col] = merged_df.loc[receipt_mask, source_col]
+        if "receipt_source" in merged_df.columns:
+            merged_df.loc[receipt_mask, "source"] = merged_df.loc[receipt_mask, "receipt_source"].fillna("receipt_lookup")
+        else:
+            merged_df.loc[receipt_mask, "source"] = "receipt_lookup"
 
     failed_mask = merged_df["source"].astype(str).eq("failed")
     if failed_mask.any():
@@ -99,7 +196,7 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
             raw_path = tmp_dir / "service_runtime_raw.csv"
             geocoded_path = tmp_dir / "service_runtime_geocoded.csv"
             report_path = tmp_dir / "service_runtime_geocode_report.json"
-            raw_df.to_csv(raw_path, index=False, encoding="utf-8-sig")
+            merged_input_df.to_csv(raw_path, index=False, encoding="utf-8-sig")
             census = CensusBatchGeocoder(
                 cache_path=census_cache_path,
                 log_path=Path(str(geocoding_cfg.get("census_daily_log_file", "data/geocode_daily_log_us_census.json"))),
@@ -117,7 +214,12 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
             [load_geocode_cache(census_cache_path), load_geocode_cache(google_cache_path)],
             ignore_index=True,
         ).drop_duplicates(subset=["address_key"], keep="first")
-        merged_df = merge_service_with_geocodes(raw_df, cache_df)
+        merged_df = merge_service_with_geocodes(merged_input_df, cache_df)
+        if "receipt_latitude" in merged_df.columns and "receipt_longitude" in merged_df.columns:
+            receipt_mask = merged_df["receipt_latitude"].notna() & merged_df["receipt_longitude"].notna()
+            merged_df.loc[receipt_mask, "latitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_latitude"], errors="coerce")
+            merged_df.loc[receipt_mask, "longitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_longitude"], errors="coerce")
+            merged_df.loc[receipt_mask, "source"] = merged_df.get("receipt_source", pd.Series(index=merged_df.index)).fillna("receipt_lookup")
         failed_mask = merged_df["source"].astype(str).eq("failed")
 
     google_api_key = str(geocoding_cfg.get("google_api_key", "")).strip()
@@ -125,7 +227,7 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
         with tempfile.TemporaryDirectory() as tmp_dir_str:
             tmp_dir = Path(tmp_dir_str)
             unmatched_path = tmp_dir / "service_runtime_unmatched.csv"
-            raw_df.loc[failed_mask].to_csv(unmatched_path, index=False, encoding="utf-8-sig")
+            merged_input_df.loc[failed_mask].to_csv(unmatched_path, index=False, encoding="utf-8-sig")
             google = GoogleGeocoder(
                 api_key=google_api_key,
                 cache_path=google_cache_path,
@@ -144,7 +246,17 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
             [load_geocode_cache(census_cache_path), load_geocode_cache(google_cache_path)],
             ignore_index=True,
         ).drop_duplicates(subset=["address_key"], keep="first")
-        merged_df = merge_service_with_geocodes(raw_df, cache_df)
+        merged_df = merge_service_with_geocodes(merged_input_df, cache_df)
+        if "receipt_latitude" in merged_df.columns and "receipt_longitude" in merged_df.columns:
+            receipt_mask = merged_df["receipt_latitude"].notna() & merged_df["receipt_longitude"].notna()
+            merged_df.loc[receipt_mask, "latitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_latitude"], errors="coerce")
+            merged_df.loc[receipt_mask, "longitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_longitude"], errors="coerce")
+            merged_df.loc[receipt_mask, "source"] = merged_df.get("receipt_source", pd.Series(index=merged_df.index)).fillna("receipt_lookup")
+
+    merged_df = merged_df.drop(
+        columns=[col for col in merged_df.columns if col.startswith("receipt_")],
+        errors="ignore",
+    )
 
     return merged_df
 
@@ -173,6 +285,11 @@ def _prepare_service_df_for_atlanta(geocoded_df: pd.DataFrame) -> pd.DataFrame:
         df["service_date"] = pd.to_datetime(df["PROMISE_TIMESTAMP"], errors="coerce").dt.normalize()
     elif "REPAIR_END_DATE_YYYYMMDD" in df.columns:
         df["service_date"] = pd.to_datetime(df["REPAIR_END_DATE_YYYYMMDD"].astype(str), format="%Y%m%d", errors="coerce")
+    if "STRATEGIC_CITY_NAME" not in df.columns:
+        df["STRATEGIC_CITY_NAME"] = prod.ATLANTA_CITY
+    else:
+        missing_city_mask = df["STRATEGIC_CITY_NAME"].astype(str).str.strip().eq("")
+        df.loc[missing_city_mask, "STRATEGIC_CITY_NAME"] = prod.ATLANTA_CITY
     df = df[df["STRATEGIC_CITY_NAME"] == prod.ATLANTA_CITY].copy()
     df = df[~df["SVC_CENTER_TYPE"].isin(prod.EXCLUDED_CENTER_TYPES)].copy()
     df = df[df["latitude"].notna() & df["longitude"].notna()].copy()
@@ -231,7 +348,6 @@ def build_runtime_atlanta_inputs(
     service_enriched_df = service_enriched_df.drop(columns=["lookup_engineer_name"], errors="ignore")
     if "SVC_CENTER_TYPE" in home_geocode_df.columns:
         home_geocode_df["SVC_CENTER_TYPE"] = home_geocode_df["SVC_CENTER_TYPE"].astype(str).str.upper()
-        home_geocode_df = home_geocode_df[home_geocode_df["SVC_CENTER_TYPE"] == prod.DMS_CENTER_TYPE].copy()
 
     return RuntimeAtlantaPrepResult(
         queried_service_df=normalized_raw_df,
