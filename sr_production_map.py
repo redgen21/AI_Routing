@@ -51,9 +51,6 @@ LNS_ACTUAL_3DAYS_SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule
 VRP_ACTUAL_3DAYS_ASSIGNMENT_PATH = Path("260310/production_output/atlanta_assignment_result_vrp_actual_3days.csv")
 VRP_ACTUAL_3DAYS_ENGINEER_DAY_SUMMARY_PATH = Path("260310/production_output/atlanta_engineer_day_summary_vrp_actual_3days.csv")
 VRP_ACTUAL_3DAYS_SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule_vrp_actual_3days.csv")
-HYBRID_ACTUAL_SELECTED_ASSIGNMENT_PATH = Path("260310/production_output/atlanta_assignment_result_hybrid_actual_selected.csv")
-HYBRID_ACTUAL_SELECTED_ENGINEER_DAY_SUMMARY_PATH = Path("260310/production_output/atlanta_engineer_day_summary_hybrid_actual_selected.csv")
-HYBRID_ACTUAL_SELECTED_SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule_hybrid_actual_selected.csv")
 OSRM_ASSIGNMENT_PATH = Path("260310/production_output/atlanta_assignment_result_osrm.csv")
 OSRM_ENGINEER_DAY_SUMMARY_PATH = Path("260310/production_output/atlanta_engineer_day_summary_osrm.csv")
 OSRM_SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule_osrm.csv")
@@ -163,13 +160,6 @@ def load_inputs():
         else pd.DataFrame()
     )
     vrp_actual_3days_schedule_df = pd.read_csv(VRP_ACTUAL_3DAYS_SCHEDULE_PATH, encoding="utf-8-sig", low_memory=False) if VRP_ACTUAL_3DAYS_SCHEDULE_PATH.exists() else pd.DataFrame()
-    hybrid_actual_selected_assignment_df = pd.read_csv(HYBRID_ACTUAL_SELECTED_ASSIGNMENT_PATH, encoding="utf-8-sig", low_memory=False) if HYBRID_ACTUAL_SELECTED_ASSIGNMENT_PATH.exists() else pd.DataFrame()
-    hybrid_actual_selected_engineer_day_summary_df = (
-        pd.read_csv(HYBRID_ACTUAL_SELECTED_ENGINEER_DAY_SUMMARY_PATH, encoding="utf-8-sig", low_memory=False)
-        if HYBRID_ACTUAL_SELECTED_ENGINEER_DAY_SUMMARY_PATH.exists()
-        else pd.DataFrame()
-    )
-    hybrid_actual_selected_schedule_df = pd.read_csv(HYBRID_ACTUAL_SELECTED_SCHEDULE_PATH, encoding="utf-8-sig", low_memory=False) if HYBRID_ACTUAL_SELECTED_SCHEDULE_PATH.exists() else pd.DataFrame()
     osrm_assignment_df = pd.read_csv(OSRM_ASSIGNMENT_PATH, encoding="utf-8-sig", low_memory=False) if OSRM_ASSIGNMENT_PATH.exists() else pd.DataFrame()
     osrm_engineer_day_summary_df = (
         pd.read_csv(OSRM_ENGINEER_DAY_SUMMARY_PATH, encoding="utf-8-sig", low_memory=False)
@@ -228,8 +218,6 @@ def load_inputs():
         lns_actual_3days_schedule_df,
         vrp_actual_3days_assignment_df,
         vrp_actual_3days_schedule_df,
-        hybrid_actual_selected_assignment_df,
-        hybrid_actual_selected_schedule_df,
         osrm_assignment_df,
         osrm_schedule_df,
         osrm_actual_assignment_df,
@@ -265,7 +253,6 @@ def load_inputs():
         cluster_iteration_osrm_actual_3days_engineer_day_summary_df,
         lns_actual_3days_engineer_day_summary_df,
         vrp_actual_3days_engineer_day_summary_df,
-        hybrid_actual_selected_engineer_day_summary_df,
         osrm_engineer_day_summary_df,
         osrm_actual_engineer_day_summary_df,
         daily_compare_df,
@@ -311,9 +298,6 @@ def load_inputs():
         vrp_actual_3days_assignment_df,
         vrp_actual_3days_engineer_day_summary_df,
         vrp_actual_3days_schedule_df,
-        hybrid_actual_selected_assignment_df,
-        hybrid_actual_selected_engineer_day_summary_df,
-        hybrid_actual_selected_schedule_df,
         osrm_assignment_df,
         osrm_engineer_day_summary_df,
         osrm_schedule_df,
@@ -821,9 +805,6 @@ def main():
         vrp_actual_3days_assignment_df,
         vrp_actual_3days_engineer_day_summary_df,
         vrp_actual_3days_schedule_df,
-        hybrid_actual_selected_assignment_df,
-        hybrid_actual_selected_engineer_day_summary_df,
-        hybrid_actual_selected_schedule_df,
         osrm_assignment_df,
         osrm_engineer_day_summary_df,
         osrm_schedule_df,
@@ -846,12 +827,14 @@ def main():
         engineer_source_df = actual_engineer_source.rename(columns={"SVC_ENGINEER_CODE": "assigned_sm_code", "SVC_ENGINEER_NAME": "assigned_sm_name"})
     engineer_options, engineer_label_to_code = _build_engineer_options(engineer_source_df)
     assignment_mode_options = []
-    if not hybrid_actual_selected_assignment_df.empty:
-        assignment_mode_options.append("Hybrid SITS Assign (Actual Attendance, Selected Dates)")
+    if not actual_engineer_source.empty:
+        assignment_mode_options.append("Actual Routes")
+    if not iteration_osrm_actual_assignment_df.empty:
+        assignment_mode_options.append("Iteration OSRM Assign (Actual Attendance)")
+    if not cluster_iteration_osrm_actual_3days_assignment_df.empty:
+        assignment_mode_options.append("Clustered Iteration OSRM Assign (Actual Attendance, 3 Days)")
     if not vrp_actual_3days_assignment_df.empty:
         assignment_mode_options.append("VRP Assign (Actual Attendance, 3 Days)")
-    if not assignment_mode_options:
-        assignment_mode_options.append("No Assignment Data")
 
     left, right = st.columns([1, 2.25])
     with left:
@@ -861,10 +844,17 @@ def main():
         selected_engineer = st.selectbox("Engineer", engineer_options, index=0)
 
         display_date = selected_date
-        if selected_mode == "Hybrid SITS Assign (Actual Attendance, Selected Dates)" and not hybrid_actual_selected_assignment_df.empty:
-            active_service_df = hybrid_actual_selected_assignment_df.copy()
-            active_summary_df = hybrid_actual_selected_engineer_day_summary_df.copy()
-            active_schedule_df = hybrid_actual_selected_schedule_df.copy()
+        if selected_mode == "Actual Routes" and not actual_engineer_source.empty:
+            active_service_df, active_summary_df = _build_actual_summary_only(base_service_df)
+            active_schedule_df = pd.DataFrame()
+        elif selected_mode == "Iteration OSRM Assign (Actual Attendance)" and not iteration_osrm_actual_assignment_df.empty:
+            active_service_df = iteration_osrm_actual_assignment_df.copy()
+            active_summary_df = iteration_osrm_actual_engineer_day_summary_df.copy()
+            active_schedule_df = iteration_osrm_actual_schedule_df.copy()
+        elif selected_mode == "Clustered Iteration OSRM Assign (Actual Attendance, 3 Days)" and not cluster_iteration_osrm_actual_3days_assignment_df.empty:
+            active_service_df = cluster_iteration_osrm_actual_3days_assignment_df.copy()
+            active_summary_df = cluster_iteration_osrm_actual_3days_engineer_day_summary_df.copy()
+            active_schedule_df = cluster_iteration_osrm_actual_3days_schedule_df.copy()
         elif selected_mode == "VRP Assign (Actual Attendance, 3 Days)" and not vrp_actual_3days_assignment_df.empty:
             active_service_df = vrp_actual_3days_assignment_df.copy()
             active_summary_df = vrp_actual_3days_engineer_day_summary_df.copy()
