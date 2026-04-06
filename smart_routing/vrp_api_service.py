@@ -18,6 +18,14 @@ from smart_routing.production_assign_atlanta_vrp import build_atlanta_production
 JOB_ROOT = Path("260310/vrp_api_jobs")
 DEFAULT_TIMEZONE_OFFSET = "-04:00"
 _JOB_LOCK = threading.Lock()
+DEFAULT_ROUTING_MODE = "na_general"
+DEFAULT_ROUTING_CITY = "Atlanta, GA"
+SUPPORTED_ROUTING_MODES = {
+    "na_general",
+    "weekday_general",
+    "z_weekday",
+    "z_weekend",
+}
 
 
 @dataclass
@@ -69,11 +77,15 @@ def create_job_id(request_id: str | None = None) -> str:
 def save_new_job(job_id: str, request_payload: dict[str, Any]) -> None:
     paths = build_job_paths(job_id)
     _write_json(paths.request_path, request_payload)
+    mode = _normalize_mode(request_payload.get("mode"))
+    city = _normalize_city(request_payload.get("city"))
     _write_json(
         paths.status_path,
         {
             "job_id": job_id,
             "status": "queued",
+            "mode": mode,
+            "city": city,
             "created_at": _utc_now_iso(),
             "updated_at": _utc_now_iso(),
         },
@@ -112,6 +124,31 @@ def _load_reference_inputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     home_df = pd.read_csv(base.HOME_GEOCODE_PATH, encoding="utf-8-sig")
     region_zip_df["POSTAL_CODE"] = region_zip_df["POSTAL_CODE"].astype(str).str.zfill(5)
     return region_zip_df, engineer_region_df, home_df
+
+
+def _normalize_mode(mode: str | None) -> str:
+    raw = str(mode or "").strip().lower()
+    if not raw:
+        return DEFAULT_ROUTING_MODE
+    aliases = {
+        "vrp": "na_general",
+        "smart_routing": "na_general",
+        "smart-routing": "na_general",
+        "north_america_general": "na_general",
+        "north-america-general": "na_general",
+        "weekday": "weekday_general",
+        "weekday_general": "weekday_general",
+        "z_weekday": "z_weekday",
+        "z-weekday": "z_weekday",
+        "z_weekend": "z_weekend",
+        "z-weekend": "z_weekend",
+    }
+    return aliases.get(raw, raw)
+
+
+def _normalize_city(city: str | None) -> str:
+    raw = str(city or "").strip()
+    return raw or DEFAULT_ROUTING_CITY
 
 
 def _normalize_shift_time(value: str | None, fallback: str) -> str:
@@ -357,6 +394,8 @@ def _build_response_payload(
     summary_df: pd.DataFrame,
     schedule_df: pd.DataFrame,
 ) -> dict[str, Any]:
+    mode = _normalize_mode(request_payload.get("mode"))
+    city = _normalize_city(request_payload.get("city"))
     planning_date = str(request_payload.get("planning_date", "")).strip()
     timezone_offset = str(request_payload.get("options", {}).get("timezone_offset", DEFAULT_TIMEZONE_OFFSET)).strip() or DEFAULT_TIMEZONE_OFFSET
     jobs = list(request_payload.get("jobs", []))
@@ -400,6 +439,8 @@ def _build_response_payload(
     total_jobs = len(jobs)
     return {
         "request_id": str(request_payload.get("request_id", "")).strip(),
+        "mode": mode,
+        "city": city,
         "status": "completed",
         "summary": {
             "total_jobs": total_jobs,
@@ -412,7 +453,7 @@ def _build_response_payload(
     }
 
 
-def run_vrp_request(request_payload: dict[str, Any]) -> dict[str, Any]:
+def _run_na_general_request(request_payload: dict[str, Any]) -> dict[str, Any]:
     region_zip_df, reference_engineer_region_df, reference_home_df = _load_reference_inputs()
     region_lookup = _build_region_lookup(region_zip_df)
     service_df = _build_service_frame_from_payload(request_payload, region_lookup)
@@ -426,6 +467,8 @@ def run_vrp_request(request_payload: dict[str, Any]) -> dict[str, Any]:
     if engineer_region_df.empty or home_df.empty or service_df.empty:
         return {
             "request_id": str(request_payload.get("request_id", "")).strip(),
+            "mode": _normalize_mode(request_payload.get("mode")),
+            "city": _normalize_city(request_payload.get("city")),
             "status": "completed",
             "summary": {"total_jobs": len(request_payload.get("jobs", [])), "assigned_jobs": 0, "unassigned_jobs": len(request_payload.get("jobs", []))},
             "assignments": [],
@@ -449,21 +492,38 @@ def run_vrp_request(request_payload: dict[str, Any]) -> dict[str, Any]:
     return _build_response_payload(request_payload, assignment_df, summary_df, schedule_df)
 
 
+def run_routing_request(request_payload: dict[str, Any]) -> dict[str, Any]:
+    mode = _normalize_mode(request_payload.get("mode"))
+    if mode not in SUPPORTED_ROUTING_MODES:
+        raise ValueError(f"Unsupported routing mode: {mode}")
+    if mode == "na_general":
+        return _run_na_general_request(request_payload)
+    raise NotImplementedError(f"Routing mode not implemented yet: {mode}")
+
+
+def run_vrp_request(request_payload: dict[str, Any]) -> dict[str, Any]:
+    return run_routing_request(request_payload)
+
+
 def process_job(job_id: str) -> None:
     paths = build_job_paths(job_id)
     request_payload = _read_json(paths.request_path)
+    mode = _normalize_mode(request_payload.get("mode"))
+    city = _normalize_city(request_payload.get("city"))
     _update_status(job_id, status="running", started_at=_utc_now_iso())
     try:
-        result_payload = run_vrp_request(request_payload)
+        result_payload = run_routing_request(request_payload)
         _write_json(paths.result_path, result_payload)
         _update_status(
             job_id,
             status="completed",
             completed_at=_utc_now_iso(),
             request_id=str(request_payload.get("request_id", "")).strip(),
+            mode=mode,
+            city=city,
             summary=result_payload.get("summary", {}),
         )
     except Exception as exc:
         paths.error_path.write_text(str(exc), encoding="utf-8")
-        _update_status(job_id, status="failed", completed_at=_utc_now_iso())
+        _update_status(job_id, status="failed", completed_at=_utc_now_iso(), mode=mode, city=city)
         raise

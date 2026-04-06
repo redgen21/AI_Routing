@@ -51,17 +51,35 @@ def _build_skill_payload(engineer_code: str, service_df: pd.DataFrame) -> list[d
     return skills
 
 
+def _infer_city_from_service_frame(service_df: pd.DataFrame, fallback: str = "Atlanta, GA") -> str:
+    if service_df.empty or "STRATEGIC_CITY_NAME" not in service_df.columns:
+        return str(fallback).strip() or "Atlanta, GA"
+    city_series = (
+        service_df["STRATEGIC_CITY_NAME"]
+        .dropna()
+        .astype(str)
+        .str.strip()
+    )
+    city_series = city_series[city_series != ""]
+    if city_series.empty:
+        return str(fallback).strip() or "Atlanta, GA"
+    return str(city_series.iloc[0]).strip()
+
+
 def build_payload_from_service_frame(
     service_df: pd.DataFrame,
     engineer_region_df: pd.DataFrame,
     home_df: pd.DataFrame,
     planning_date: str,
     request_id: str,
+    mode: str = "na_general",
+    city: str = "",
     respect_fixed_jobs: bool = True,
     objective: str = "min_total_travel_time",
     time_limit_seconds: int = 30,
 ) -> dict:
     service_working = service_df.copy()
+    resolved_city = _infer_city_from_service_frame(service_working, fallback=city)
     service_working["SVC_ENGINEER_CODE"] = service_working["SVC_ENGINEER_CODE"].astype(str).str.strip()
     engineer_working = engineer_region_df.copy()
     engineer_working["SVC_ENGINEER_CODE"] = engineer_working["SVC_ENGINEER_CODE"].astype(str).str.strip()
@@ -124,6 +142,8 @@ def build_payload_from_service_frame(
 
     return {
         "request_id": request_id,
+        "mode": str(mode).strip() or "na_general",
+        "city": resolved_city,
         "planning_date": planning_date,
         "options": {
             "respect_fixed_jobs": bool(respect_fixed_jobs),

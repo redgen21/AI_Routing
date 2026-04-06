@@ -25,6 +25,13 @@ from smart_routing.vrp_api_client import (
 
 st.set_page_config(page_title="Smart Routing API Client", layout="wide")
 
+ROUTING_MODE_OPTIONS = [
+    ("na_general", "North America General"),
+    ("weekday_general", "Weekday General"),
+    ("z_weekday", "Z Weekday"),
+    ("z_weekend", "Z Weekend"),
+]
+
 
 def _read_uploaded_service_csv(uploaded_file) -> pd.DataFrame:
     return pd.read_csv(uploaded_file, encoding="utf-8-sig", low_memory=False)
@@ -461,6 +468,15 @@ def main() -> None:
     left_col, right_col = st.columns([1, 2.2])
 
     with left_col:
+        mode_labels = {value: label for value, label in ROUTING_MODE_OPTIONS}
+        routing_mode = st.selectbox(
+            "Routing Mode",
+            options=[value for value, _ in ROUTING_MODE_OPTIONS],
+            format_func=lambda value: mode_labels.get(value, value),
+            index=0,
+        )
+        if routing_mode != "na_general":
+            st.caption("현재 서버 구현은 `na_general`만 동작합니다. 나머지 모드는 공용 인터페이스만 반영된 상태입니다.")
         source_type = st.radio("Input Source", ["BigQuery", "CSV Upload"], horizontal=True)
         server_url = st.text_input("Smart Routing Server URL", value="http://20.51.244.68:8055")
         st.session_state["smart_routing_server_url"] = server_url
@@ -498,6 +514,7 @@ def main() -> None:
                         runtime.home_geocode_df,
                         planning_date=planning_date,
                         request_id=f"ROUTE-{planning_date}",
+                        mode=routing_mode,
                     )
                     st.session_state["vrp_payload"] = payload
                     st.session_state["vrp_runtime"] = {
