@@ -144,6 +144,7 @@ def _solve_vrp_day(
     engineer_master_df: pd.DataFrame,
     route_client,
     region_centers: dict[int, tuple[float, float]],
+    time_limit_seconds: int = 20,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     job_df = _dedupe_day_jobs(service_day_df)
     if job_df.empty or engineer_master_df.empty:
@@ -208,16 +209,21 @@ def _solve_vrp_day(
     for job_idx, (_, row) in enumerate(job_df.iterrows()):
         candidates_df = base._candidate_engineers(row, engineer_df)
         allowed_codes = set(candidates_df["SVC_ENGINEER_CODE"].astype(str).tolist())
-        allowed_vehicle_indices = [vehicle_idx for vehicle_idx, code in enumerate(vehicle_codes) if code in allowed_codes]
+        allowed_vehicle_indices = [int(vehicle_idx) for vehicle_idx, code in enumerate(vehicle_codes) if code in allowed_codes]
         if not allowed_vehicle_indices:
             continue
-        routing.SetAllowedVehiclesForIndex(allowed_vehicle_indices, manager.NodeToIndex(job_idx))
+        node_index = manager.NodeToIndex(job_idx)
+        disallowed_vehicle_indices = [
+            vehicle_idx for vehicle_idx in range(vehicle_count) if vehicle_idx not in allowed_vehicle_indices
+        ]
+        for vehicle_idx in disallowed_vehicle_indices:
+            routing.VehicleVar(node_index).RemoveValue(vehicle_idx)
         routing.AddDisjunction([manager.NodeToIndex(job_idx)], 10_000_000)
 
     search_params = pywrapcp.DefaultRoutingSearchParameters()
     search_params.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
     search_params.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
-    search_params.time_limit.FromSeconds(20)
+    search_params.time_limit.FromSeconds(int(time_limit_seconds))
     solution = routing.SolveWithParameters(search_params)
     if solution is None:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -354,6 +360,7 @@ def build_atlanta_production_assignment_vrp_from_frames(
     home_df: pd.DataFrame,
     service_df: pd.DataFrame,
     attendance_limited: bool = True,
+    time_limit_seconds: int = 20,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     working_service_df = service_df.copy()
     if not working_service_df.empty:
@@ -389,6 +396,7 @@ def build_atlanta_production_assignment_vrp_from_frames(
             day_engineer_master_df.copy(),
             route_client,
             region_centers,
+            time_limit_seconds=time_limit_seconds,
         )
         if assignment_df.empty:
             continue
