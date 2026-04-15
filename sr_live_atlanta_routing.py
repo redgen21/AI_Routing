@@ -10,7 +10,6 @@ import folium
 import pandas as pd
 import streamlit as st
 from folium.plugins import MarkerCluster
-from streamlit.components.v1 import html
 
 from smart_routing.area_map import load_city_map_data
 from smart_routing.bigquery_runtime import query_service_data
@@ -701,7 +700,7 @@ def main():
 
     with right:
         map_obj = build_map(selected_region, filtered_assignment, filtered_home, route_groups, region_zip_df)
-        html(map_obj._repr_html_(), height=860)
+        st.iframe(map_obj.get_root().render(), height=860)
         if not filtered_schedule.empty:
             st.markdown("**Selected Schedule**")
             st.dataframe(

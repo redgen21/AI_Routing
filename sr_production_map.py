@@ -9,7 +9,6 @@ import folium
 import pandas as pd
 import streamlit as st
 from folium.plugins import MarkerCluster
-from streamlit.components.v1 import html
 
 from smart_routing.area_map import load_city_map_data
 from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
@@ -1018,7 +1017,7 @@ def main():
 
     with right:
         map_obj = build_map(selected_region, filtered_service, filtered_home, route_groups)
-        html(map_obj._repr_html_(), height=860)
+        st.iframe(map_obj.get_root().render(), height=860)
 
 
 if __name__ == "__main__":

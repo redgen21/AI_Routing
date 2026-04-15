@@ -6,7 +6,6 @@ from pathlib import Path
 import folium
 import pandas as pd
 import streamlit as st
-from streamlit.components.v1 import html
 
 from smart_routing.area_map import load_city_map_data
 
@@ -148,10 +147,10 @@ def main():
     left, right = st.columns(2)
     with left:
         st.markdown("**Our Regions**")
-        html(_build_map(our_layer, "our")._repr_html_(), height=760)
+        st.iframe(_build_map(our_layer, "our").get_root().render(), height=760)
     with right:
         st.markdown("**Manual Regions**")
-        html(_build_map(manual_layer, "manual")._repr_html_(), height=760)
+        st.iframe(_build_map(manual_layer, "manual").get_root().render(), height=760)
 
     stats_rows = []
     for bucket, region_seq in BEST_BUCKET_TO_REGION.items():

@@ -212,10 +212,11 @@ def _solve_vrp_day(
         if not allowed_vehicle_indices:
             continue
         node_index = manager.NodeToIndex(job_idx)
-        try:
-            routing.SetAllowedVehiclesForIndex(allowed_vehicle_indices, node_index)
-        except TypeError:
-            routing.SetAllowedVehiclesForIndex(node_index, allowed_vehicle_indices)
+        disallowed_vehicle_indices = [
+            vehicle_idx for vehicle_idx in range(vehicle_count) if vehicle_idx not in allowed_vehicle_indices
+        ]
+        for vehicle_idx in disallowed_vehicle_indices:
+            routing.VehicleVar(node_index).RemoveValue(vehicle_idx)
         routing.AddDisjunction([manager.NodeToIndex(job_idx)], 10_000_000)
 
     search_params = pywrapcp.DefaultRoutingSearchParameters()

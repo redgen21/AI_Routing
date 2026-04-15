@@ -8,7 +8,6 @@ import folium
 import pandas as pd
 import streamlit as st
 from folium.plugins import MarkerCluster
-from streamlit.components.v1 import html
 
 from smart_routing.area_map import (
     EXPLORER_CITIES,
@@ -633,7 +632,7 @@ def main():
     metric_cols[2].metric("Assigned SM Count", int(filtered_service_df["assigned_sm_code"].astype(str).nunique()) if not filtered_service_df.empty else 0)
     metric_cols[3].metric("Visible Routes", len(route_groups))
 
-    html(map_obj._repr_html_(), height=780)
+    st.iframe(map_obj.get_root().render(), height=780)
 
     candidate_col, summary_col, detail_col = st.columns([1.3, 1.0, 1.2], gap="medium")
     with candidate_col:

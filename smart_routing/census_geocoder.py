@@ -238,8 +238,15 @@ def load_geocode_cache(path: Path) -> pd.DataFrame:
     for col in base.columns:
         if col not in df.columns:
             df[col] = ""
-    if {"address_line1", "city", "state", "postal_code", "country_name"}.issubset(df.columns):
-        df["address_line1"] = df.apply(
+    df["address_key"] = df["address_key"].astype(str).replace({"nan": "", "None": "", "none": "", "NaN": ""}).str.strip()
+    missing_key_mask = df["address_key"].eq("")
+    if missing_key_mask.any() and {"address_line1", "city", "state", "postal_code", "country_name"}.issubset(df.columns):
+        subset = df.loc[missing_key_mask, ["address_line1", "city", "state", "postal_code", "country_name"]].copy()
+        subset["city"] = subset["city"].map(normalize_text)
+        subset["state"] = subset["state"].map(normalize_text)
+        subset["postal_code"] = subset["postal_code"].map(normalize_postal_code)
+        subset["country_name"] = subset["country_name"].map(normalize_country_name)
+        subset["address_line1"] = subset.apply(
             lambda row: clean_street_address(
                 row.get("address_line1"),
                 row.get("city"),
@@ -249,7 +256,7 @@ def load_geocode_cache(path: Path) -> pd.DataFrame:
             ),
             axis=1,
         )
-        df["address_key"] = df.apply(
+        subset["address_key"] = subset.apply(
             lambda row: build_address_key(
                 row.get("address_line1"),
                 row.get("city"),
@@ -259,6 +266,12 @@ def load_geocode_cache(path: Path) -> pd.DataFrame:
             ),
             axis=1,
         )
+        df.loc[missing_key_mask, "address_line1"] = subset["address_line1"].values
+        df.loc[missing_key_mask, "city"] = subset["city"].values
+        df.loc[missing_key_mask, "state"] = subset["state"].values
+        df.loc[missing_key_mask, "postal_code"] = subset["postal_code"].values
+        df.loc[missing_key_mask, "country_name"] = subset["country_name"].values
+        df.loc[missing_key_mask, "address_key"] = subset["address_key"].values
     return df[base.columns.tolist()].copy()
 
 

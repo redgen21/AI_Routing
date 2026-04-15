@@ -1,0 +1,83 @@
+{
+  "request_id": "ROUTE-HTTP-002",
+  "planning_date": "2026-01-12",
+  "options": {
+    "respect_fixed_jobs": true,
+    "time_limit_seconds": 10,
+    "objective": "min_total_travel_time"
+  },
+  "technicians": [
+    {
+      "employee_code": "AI102087",
+      "employee_name": "Marcus Harmon",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 33.928986364898,
+        "lng": -84.748964265659
+      },
+      "end_location": {
+        "lat": 33.928986364898,
+        "lng": -84.748964265659
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": []
+    },
+    {
+      "employee_code": "AI103128",
+      "employee_name": "Ivan Zimic",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 34.1441,
+        "lng": -84.1741
+      },
+      "end_location": {
+        "lat": 34.1441,
+        "lng": -84.1741
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": []
+    }
+  ],
+  "jobs": [
+    {
+      "salesforce_id": "a1",
+      "receipt_no": "R1",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "French Door",
+      "address": "5750 Rocky Falls Road",
+      "postal_code": "30024",
+      "location": {
+        "lat": 34.099,
+        "lng": -84.132
+      },
+      "service_minutes": 45,
+      "priority": 10,
+      "fixed": false,
+      "current_employee_code": "AI103128",
+      "current_employee_name": "Ivan Zimic",
+      "current_center_type": "DMS"
+    },
+    {
+      "salesforce_id": "a2",
+      "receipt_no": "R2",
+      "product": "DRW",
+      "product_group": "WM",
+      "symptom": "Front Loader",
+      "address": "5257 Brooke Farm Dr",
+      "postal_code": "30338",
+      "location": {
+        "lat": 33.95,
+        "lng": -84.32
+      },
+      "service_minutes": 45,
+      "priority": 10,
+      "fixed": false,
+      "current_employee_code": "AI102087",
+      "current_employee_name": "Marcus Harmon",
+      "current_center_type": "DMS"
+    }
+  ]
+}

@@ -29,28 +29,6 @@ def get_routing_job_result(server_url: str, job_id: str, timeout_sec: int = 60) 
     return _http_json("GET", f"{server_url.rstrip('/')}/api/v1/routing/jobs/{job_id}/result", timeout_sec=timeout_sec)
 
 
-def _build_skill_payload(engineer_code: str, service_df: pd.DataFrame) -> list[dict]:
-    engineer_jobs = service_df[service_df["SVC_ENGINEER_CODE"].astype(str) == str(engineer_code)].copy()
-    if engineer_jobs.empty:
-        return []
-    skills: list[dict] = []
-    for product_code, group in engineer_jobs.groupby("SERVICE_PRODUCT_CODE", dropna=False):
-        symptoms = sorted(
-            {
-                str(v).strip().upper()
-                for v in group["RECEIPT_DETAIL_SYMPTOM_CODE"].dropna().astype(str).tolist()
-                if str(v).strip()
-            }
-        )
-        skills.append(
-            {
-                "product": str(product_code).strip().upper(),
-                "symptoms": symptoms,
-            }
-        )
-    return skills
-
-
 def _infer_city_from_service_frame(service_df: pd.DataFrame, fallback: str = "Atlanta, GA") -> str:
     if service_df.empty or "STRATEGIC_CITY_NAME" not in service_df.columns:
         return str(fallback).strip() or "Atlanta, GA"
@@ -111,7 +89,6 @@ def build_payload_from_service_frame(
                 },
                 "shift_start": "08:00",
                 "shift_end": "18:00",
-                "skills": _build_skill_payload(code, service_working),
             }
         )
 
@@ -136,7 +113,6 @@ def build_payload_from_service_frame(
                 "current_employee_code": str(row.get("SVC_ENGINEER_CODE", "")).strip(),
                 "current_center_type": str(row.get("SVC_CENTER_TYPE", "")).strip().upper(),
                 "is_heavy_repair": bool(row.get("is_heavy_repair", False)),
-                "is_tv_job": bool(row.get("is_tv_job", False)),
             }
         )
 

@@ -1,0 +1,1306 @@
+{
+  "request_id": "ROUTE-2026-03-31",
+  "planning_date": "2026-03-31",
+  "options": {
+    "respect_fixed_jobs": true,
+    "time_limit_seconds": 30,
+    "objective": "min_total_travel_time",
+    "timezone_offset": "-04:00"
+  },
+  "technicians": [
+    {
+      "employee_code": "AI005576",
+      "employee_name": "RUDY EDOLE",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 33.629797793466,
+        "lng": -84.2013870795
+      },
+      "end_location": {
+        "lat": 33.629797793466,
+        "lng": -84.2013870795
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": [
+        {
+          "product": "FRD",
+          "symptoms": [
+            "1FFFWFI"
+          ]
+        },
+        {
+          "product": "OTR",
+          "symptoms": [
+            "1AEACAA"
+          ]
+        },
+        {
+          "product": "SBS",
+          "symptoms": [
+            "NAN"
+          ]
+        }
+      ]
+    },
+    {
+      "employee_code": "AI102087",
+      "employee_name": "Marcus Harmon",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 33.928986364898,
+        "lng": -84.748964265659
+      },
+      "end_location": {
+        "lat": 33.928986364898,
+        "lng": -84.748964265659
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": [
+        {
+          "product": "DRC",
+          "symptoms": [
+            "NAN"
+          ]
+        },
+        {
+          "product": "FRD",
+          "symptoms": [
+            "1PPACAA",
+            "NAN"
+          ]
+        }
+      ]
+    },
+    {
+      "employee_code": "AI102608",
+      "employee_name": "Sergey Ashihmin",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 34.0992678,
+        "lng": -84.6247226
+      },
+      "end_location": {
+        "lat": 34.0992678,
+        "lng": -84.6247226
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": [
+        {
+          "product": "FRD",
+          "symptoms": [
+            "1FFFVFH",
+            "NAN"
+          ]
+        },
+        {
+          "product": "W/M",
+          "symptoms": [
+            "NAN"
+          ]
+        }
+      ]
+    },
+    {
+      "employee_code": "AI102961",
+      "employee_name": "Nicholas Foskin",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 33.895481059397,
+        "lng": -83.991723522499
+      },
+      "end_location": {
+        "lat": 33.895481059397,
+        "lng": -83.991723522499
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": [
+        {
+          "product": "DWM",
+          "symptoms": [
+            "1ADAFAA",
+            "1ADAGAA"
+          ]
+        },
+        {
+          "product": "FRD",
+          "symptoms": [
+            "1FFFVFH"
+          ]
+        }
+      ]
+    },
+    {
+      "employee_code": "AI102977",
+      "employee_name": "Yu Zheng",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 34.018539783845,
+        "lng": -84.451551533147
+      },
+      "end_location": {
+        "lat": 34.018539783845,
+        "lng": -84.451551533147
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": [
+        {
+          "product": "OTR",
+          "symptoms": [
+            "1AAAEAA"
+          ]
+        }
+      ]
+    },
+    {
+      "employee_code": "AI102315",
+      "employee_name": "Winston Perez",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 33.949958875921,
+        "lng": -83.798998485556
+      },
+      "end_location": {
+        "lat": 33.949958875921,
+        "lng": -83.798998485556
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": [
+        {
+          "product": "DRW",
+          "symptoms": [
+            "2OOOMOK"
+          ]
+        },
+        {
+          "product": "FRD",
+          "symptoms": [
+            "1FFFVFH",
+            "NAN"
+          ]
+        }
+      ]
+    },
+    {
+      "employee_code": "AI102933",
+      "employee_name": "Richardo Brooks",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 33.617583,
+        "lng": -83.972026
+      },
+      "end_location": {
+        "lat": 33.617583,
+        "lng": -83.972026
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": [
+        {
+          "product": "DRW",
+          "symptoms": [
+            "2HHHGHU"
+          ]
+        },
+        {
+          "product": "FRD",
+          "symptoms": [
+            "1PPPEPW"
+          ]
+        },
+        {
+          "product": "SBS",
+          "symptoms": [
+            "NAN"
+          ]
+        }
+      ]
+    },
+    {
+      "employee_code": "AI103128",
+      "employee_name": "Ivan Zimic",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 34.34432048806,
+        "lng": -84.071245414198
+      },
+      "end_location": {
+        "lat": 34.34432048806,
+        "lng": -84.071245414198
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": [
+        {
+          "product": "FRD",
+          "symptoms": [
+            "1PPPDPT",
+            "8TUABAA",
+            "8TUABAE"
+          ]
+        }
+      ]
+    },
+    {
+      "employee_code": "AI103146",
+      "employee_name": "Arthur Gloster",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 34.11132010000001,
+        "lng": -84.2611806
+      },
+      "end_location": {
+        "lat": 34.11132010000001,
+        "lng": -84.2611806
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": [
+        {
+          "product": "FRD",
+          "symptoms": [
+            "1FFFWFI"
+          ]
+        }
+      ]
+    },
+    {
+      "employee_code": "AI103264",
+      "employee_name": "Adolph Scarlett",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 33.757983120639,
+        "lng": -84.035460468907
+      },
+      "end_location": {
+        "lat": 33.757983120639,
+        "lng": -84.035460468907
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": [
+        {
+          "product": "DRR",
+          "symptoms": [
+            "1NNACAC"
+          ]
+        },
+        {
+          "product": "SBS",
+          "symptoms": [
+            "3BBBMBH"
+          ]
+        }
+      ]
+    },
+    {
+      "employee_code": "AI103317",
+      "employee_name": "Richard Grant",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 33.363360215869,
+        "lng": -84.108908534098
+      },
+      "end_location": {
+        "lat": 33.363360215869,
+        "lng": -84.108908534098
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": [
+        {
+          "product": "FRD",
+          "symptoms": [
+            "1FFFWFI",
+            "1PPPDPT"
+          ]
+        }
+      ]
+    },
+    {
+      "employee_code": "AI102448",
+      "employee_name": "Gilbert Dupree",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 33.936932039487,
+        "lng": -84.68736026055
+      },
+      "end_location": {
+        "lat": 33.936932039487,
+        "lng": -84.68736026055
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": [
+        {
+          "product": "FRD",
+          "symptoms": [
+            "1FFFVFH",
+            "1FFFWFJ"
+          ]
+        },
+        {
+          "product": "SBS",
+          "symptoms": [
+            "NAN"
+          ]
+        },
+        {
+          "product": "W/M",
+          "symptoms": [
+            "NAN"
+          ]
+        }
+      ]
+    },
+    {
+      "employee_code": "AI103261",
+      "employee_name": "Horace Bull",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 33.450883432924,
+        "lng": -84.179052980296
+      },
+      "end_location": {
+        "lat": 33.450883432924,
+        "lng": -84.179052980296
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": [
+        {
+          "product": "REF",
+          "symptoms": [
+            "NAN"
+          ]
+        }
+      ]
+    },
+    {
+      "employee_code": "AI105115",
+      "employee_name": "Jason Patterson",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 33.189745727281,
+        "lng": -83.875801190073
+      },
+      "end_location": {
+        "lat": 33.189745727281,
+        "lng": -83.875801190073
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": [
+        {
+          "product": "W/M",
+          "symptoms": [
+            "2GGGBGD"
+          ]
+        }
+      ]
+    },
+    {
+      "employee_code": "AI105116",
+      "employee_name": "Frank Hooks",
+      "center_type": "DMS",
+      "start_location": {
+        "lat": 33.875496159031,
+        "lng": -84.700128091381
+      },
+      "end_location": {
+        "lat": 33.875496159031,
+        "lng": -84.700128091381
+      },
+      "shift_start": "08:00",
+      "shift_end": "18:00",
+      "skills": [
+        {
+          "product": "DRR",
+          "symptoms": [
+            "1PPPNPB"
+          ]
+        },
+        {
+          "product": "FRD",
+          "symptoms": [
+            "1FFFWFJ"
+          ]
+        },
+        {
+          "product": "SBS",
+          "symptoms": [
+            "1FFFVFH"
+          ]
+        }
+      ]
+    }
+  ],
+  "jobs": [
+    {
+      "salesforce_id": "RNN260318099850",
+      "receipt_no": "RNN260318099850",
+      "product": "DWM",
+      "product_group": "WM",
+      "symptom": "1ADAGAA",
+      "address": "109 Adair St",
+      "postal_code": "30683",
+      "location": {
+        "lat": 33.973545607969,
+        "lng": -83.295423165755
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102961",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260323021594",
+      "receipt_no": "RNN260323021594",
+      "product": "SBS",
+      "product_group": "REF",
+      "symptom": "3BBBMBH",
+      "address": "2525 Piedmont Rd NE",
+      "postal_code": "30324",
+      "location": {
+        "lat": 33.82411402327,
+        "lng": -84.367170831732
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI103264",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260323024038",
+      "receipt_no": "RNN260323024038",
+      "product": "ELR",
+      "product_group": "COK",
+      "symptom": "7UKAAAA",
+      "address": "480 Paper Mill Rd",
+      "postal_code": "30046",
+      "location": {
+        "lat": 33.950876054247,
+        "lng": -83.961915781901
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "40324200",
+      "current_center_type": "DMS2",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260324029886",
+      "receipt_no": "RNN260324029886",
+      "product": "DWM",
+      "product_group": "WM",
+      "symptom": "1ADAFAA",
+      "address": "375 St Marks Dr SW",
+      "postal_code": "30047",
+      "location": {
+        "lat": 33.876007922713,
+        "lng": -84.120707603001
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102961",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260324029921",
+      "receipt_no": "RNN260324029921",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "1FFFWFI",
+      "address": "95 Coady Rd",
+      "postal_code": "30233",
+      "location": {
+        "lat": 33.432471802341,
+        "lng": -83.951584091243
+      },
+      "service_minutes": 100,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI103317",
+      "current_center_type": "DMS",
+      "is_heavy_repair": true,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260324030009",
+      "receipt_no": "RNN260324030009",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "8TUABAA",
+      "address": "229 Nottely Shores West",
+      "postal_code": "30512",
+      "location": {
+        "lat": 34.9010821982,
+        "lng": -84.048365573637
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI103128",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260325036111",
+      "receipt_no": "RNN260325036111",
+      "product": "SBS",
+      "product_group": "REF",
+      "symptom": "3IIIFIM",
+      "address": "981 Lulworth Ln  Lawrenceville, GA, 30044",
+      "postal_code": "30044",
+      "location": {
+        "lat": 33.944196123098,
+        "lng": -84.078423150739
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "40324200",
+      "current_center_type": "DMS2",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260325037290",
+      "receipt_no": "RNN260325037290",
+      "product": "W/M",
+      "product_group": "WM",
+      "symptom": "NAN",
+      "address": "4492 TREADLE RD",
+      "postal_code": "30126",
+      "location": {
+        "lat": 33.838844240055,
+        "lng": -84.579629343261
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102448",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260326039101",
+      "receipt_no": "RNN260326039101",
+      "product": "SBS",
+      "product_group": "REF",
+      "symptom": "NAN",
+      "address": "30 Hamby Lane",
+      "postal_code": "30025",
+      "location": {
+        "lat": 33.64015892906,
+        "lng": -83.777999873231
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102933",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260326042155",
+      "receipt_no": "RNN260326042155",
+      "product": "DRW",
+      "product_group": "WM",
+      "symptom": "1PPPPPJ",
+      "address": "3860 Bogan Mill Rd, Buford, GA",
+      "postal_code": "30519",
+      "location": {
+        "lat": 34.101197178499,
+        "lng": -83.952743121826
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "40324200",
+      "current_center_type": "DMS2",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260327044342",
+      "receipt_no": "RNN260327044342",
+      "product": "OTR",
+      "product_group": "COK",
+      "symptom": "1AAAEAA",
+      "address": "2410 Thompson Rd NE",
+      "postal_code": "30319",
+      "location": {
+        "lat": 33.856659386557,
+        "lng": -84.324591583239
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102977",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260327044717",
+      "receipt_no": "RNN260327044717",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "1FFFVFH",
+      "address": "1000 CRUISER RUN  LAWRENCEVILLE,GA,30045",
+      "postal_code": "30045",
+      "location": {
+        "lat": 33.933707682304,
+        "lng": -83.929005613061
+      },
+      "service_minutes": 100,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102961",
+      "current_center_type": "DMS",
+      "is_heavy_repair": true,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260327044720",
+      "receipt_no": "RNN260327044720",
+      "product": "SBS",
+      "product_group": "REF",
+      "symptom": "1FFFVFH",
+      "address": "636 sugar valley rd",
+      "postal_code": "30120",
+      "location": {
+        "lat": 34.183391785582,
+        "lng": -84.829341654923
+      },
+      "service_minutes": 100,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI105116",
+      "current_center_type": "DMS",
+      "is_heavy_repair": true,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260327044872",
+      "receipt_no": "RNN260327044872",
+      "product": "DRC",
+      "product_group": "WM",
+      "symptom": "NAN",
+      "address": "2122 TAYSIDE XING NW",
+      "postal_code": "30152",
+      "location": {
+        "lat": 33.987384659958,
+        "lng": -84.616813670426
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102087",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260327045907",
+      "receipt_no": "RNN260327045907",
+      "product": "OTR",
+      "product_group": "COK",
+      "symptom": "1AEACAA",
+      "address": "306 Ormond St SE",
+      "postal_code": "30315",
+      "location": {
+        "lat": 33.731550362838,
+        "lng": -84.377892684064
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI005576",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260327047201",
+      "receipt_no": "RNN260327047201",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "1FFFVFH",
+      "address": "37 Oak Green Dr",
+      "postal_code": "30044",
+      "location": {
+        "lat": 33.924992998643,
+        "lng": -84.060381443455
+      },
+      "service_minutes": 100,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "40324200",
+      "current_center_type": "DMS2",
+      "is_heavy_repair": true,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260327047292",
+      "receipt_no": "RNN260327047292",
+      "product": "REF",
+      "product_group": "REF",
+      "symptom": "NAN",
+      "address": "323 State Route 279",
+      "postal_code": "30214",
+      "location": {
+        "lat": 33.51762604164,
+        "lng": -84.443892888201
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI103261",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260327047906",
+      "receipt_no": "RNN260327047906",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "1PPPEPW",
+      "address": "2912 Highway 11 S",
+      "postal_code": "30055",
+      "location": {
+        "lat": 33.522802505332,
+        "lng": -83.736823580065
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102933",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260328048713",
+      "receipt_no": "RNN260328048713",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "1FFFVFH",
+      "address": "3007 Olde Tabby Dr",
+      "postal_code": "30135",
+      "location": {
+        "lat": 33.724087545277,
+        "lng": -84.69444723521
+      },
+      "service_minutes": 100,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102448",
+      "current_center_type": "DMS",
+      "is_heavy_repair": true,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260328048728",
+      "receipt_no": "RNN260328048728",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "NAN",
+      "address": "3205 AMBERWOOD DR",
+      "postal_code": "30052",
+      "location": {
+        "lat": 33.759599716867,
+        "lng": -83.920656772871
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102315",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260328048779",
+      "receipt_no": "RNN260328048779",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "NAN",
+      "address": "5002 Niagara Dr NW",
+      "postal_code": "30102",
+      "location": {
+        "lat": 34.072577555308,
+        "lng": -84.600689571192
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102608",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260328048862",
+      "receipt_no": "RNN260328048862",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "1FFFWFJ",
+      "address": "3705 Long Lake Dr",
+      "postal_code": "30135",
+      "location": {
+        "lat": 33.704915302165,
+        "lng": -84.743016069897
+      },
+      "service_minutes": 100,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102448",
+      "current_center_type": "DMS",
+      "is_heavy_repair": true,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260328049141",
+      "receipt_no": "RNN260328049141",
+      "product": "W/M",
+      "product_group": "WM",
+      "symptom": "2GGGBGD",
+      "address": "616 Gleaner Wy",
+      "postal_code": "30248",
+      "location": {
+        "lat": 33.349997964872,
+        "lng": -84.064279088824
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI105115",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260328049693",
+      "receipt_no": "RNN260328049693",
+      "product": "DRR",
+      "product_group": "WM",
+      "symptom": "1PPPNPB",
+      "address": "1041 Asa Cash Rd",
+      "postal_code": "30110",
+      "location": {
+        "lat": 33.734848699377,
+        "lng": -85.21110180199
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI105116",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260328050247",
+      "receipt_no": "RNN260328050247",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "1PPACAA",
+      "address": "762 Phil haven Ln",
+      "postal_code": "30152",
+      "location": {
+        "lat": 33.9742306,
+        "lng": -84.6437023
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102087",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260328050280",
+      "receipt_no": "RNN260328050280",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "1FFFWFJ",
+      "address": "694 Bentleaf Dr",
+      "postal_code": "30132",
+      "location": {
+        "lat": 34.018075641814,
+        "lng": -84.777518538825
+      },
+      "service_minutes": 100,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI105116",
+      "current_center_type": "DMS",
+      "is_heavy_repair": true,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260329051001",
+      "receipt_no": "RNN260329051001",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "1FFFVFH",
+      "address": "830 Vintner Ct",
+      "postal_code": "30004",
+      "location": {
+        "lat": 34.118984473711,
+        "lng": -84.248445109679
+      },
+      "service_minutes": 100,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102608",
+      "current_center_type": "DMS",
+      "is_heavy_repair": true,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260329051407",
+      "receipt_no": "RNN260329051407",
+      "product": "DRW",
+      "product_group": "WM",
+      "symptom": "2HHHGHU",
+      "address": "4582 Chaderton Ct",
+      "postal_code": "30083",
+      "location": {
+        "lat": 33.760385260643,
+        "lng": -84.201945631412
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102933",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260329051578",
+      "receipt_no": "RNN260329051578",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "1FFFVFH",
+      "address": "6924 Sky Ln Dr",
+      "postal_code": "30102",
+      "location": {
+        "lat": 34.12531269999999,
+        "lng": -84.6060378
+      },
+      "service_minutes": 100,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102608",
+      "current_center_type": "DMS",
+      "is_heavy_repair": true,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260329051892",
+      "receipt_no": "RNN260329051892",
+      "product": "SBS",
+      "product_group": "REF",
+      "symptom": "NAN",
+      "address": "1765 Enclave Pl",
+      "postal_code": "30288",
+      "location": {
+        "lat": 33.660609723777,
+        "lng": -84.317170970971
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI005576",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260329051907",
+      "receipt_no": "RNN260329051907",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "1FFFWFI",
+      "address": "5750 Rocky Falls Road",
+      "postal_code": "30024",
+      "location": {
+        "lat": 34.0764244,
+        "lng": -84.1274416
+      },
+      "service_minutes": 100,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI103146",
+      "current_center_type": "DMS",
+      "is_heavy_repair": true,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260330052248",
+      "receipt_no": "RNN260330052248",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "1PPPDPT",
+      "address": "5520 Loring St",
+      "postal_code": "30040",
+      "location": {
+        "lat": 34.219725543213,
+        "lng": -84.217627287703
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI103128",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260330052563",
+      "receipt_no": "RNN260330052563",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "1FFFVFH",
+      "address": "2487 Bay Crest Ln  Loganville, GA, 30052",
+      "postal_code": "30052",
+      "location": {
+        "lat": 33.885572297584,
+        "lng": -83.93753424734
+      },
+      "service_minutes": 100,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102315",
+      "current_center_type": "DMS",
+      "is_heavy_repair": true,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260330052836",
+      "receipt_no": "RNN260330052836",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "8TUABAE",
+      "address": "540 Etowah Dr",
+      "postal_code": "30533",
+      "location": {
+        "lat": 34.504909445123,
+        "lng": -84.062115575004
+      },
+      "service_minutes": 100,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI103128",
+      "current_center_type": "DMS",
+      "is_heavy_repair": true,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260330054152",
+      "receipt_no": "RNN260330054152",
+      "product": "DRR",
+      "product_group": "WM",
+      "symptom": "1NNACAC",
+      "address": "2456 Sunset Dr NE",
+      "postal_code": "30345",
+      "location": {
+        "lat": 33.854346126058,
+        "lng": -84.28831497173
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI103264",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260330054643",
+      "receipt_no": "RNN260330054643",
+      "product": "W/M",
+      "product_group": "WM",
+      "symptom": "NAN",
+      "address": "311 Oak Ter",
+      "postal_code": "30009",
+      "location": {
+        "lat": 34.075986033642,
+        "lng": -84.285443946701
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102608",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260330055628",
+      "receipt_no": "RNN260330055628",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "1PPPDPT",
+      "address": "150 River Cove Meadows",
+      "postal_code": "30025",
+      "location": {
+        "lat": 33.616956371486,
+        "lng": -83.769083109273
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI103317",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260330055907",
+      "receipt_no": "RNN260330055907",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "NAN",
+      "address": "25 A C DR",
+      "postal_code": "30132",
+      "location": {
+        "lat": 33.921189598338,
+        "lng": -84.883710517382
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102087",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260330056126",
+      "receipt_no": "RNN260330056126",
+      "product": "SBS",
+      "product_group": "REF",
+      "symptom": "NAN",
+      "address": "978 WOODWARD CIR SW",
+      "postal_code": "30126",
+      "location": {
+        "lat": 33.835498311223,
+        "lng": -84.582764661226
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102448",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260330057676",
+      "receipt_no": "RNN260330057676",
+      "product": "DRW",
+      "product_group": "WM",
+      "symptom": "2OOOMOK",
+      "address": "3122 Little Bear Ln",
+      "postal_code": "30519",
+      "location": {
+        "lat": 34.102146168167,
+        "lng": -83.948075668376
+      },
+      "service_minutes": 45,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI102315",
+      "current_center_type": "DMS",
+      "is_heavy_repair": false,
+      "is_tv_job": false
+    },
+    {
+      "salesforce_id": "RNN260331060844",
+      "receipt_no": "RNN260331060844",
+      "product": "FRD",
+      "product_group": "REF",
+      "symptom": "1FFFWFI",
+      "address": "399 Enota Pl SW",
+      "postal_code": "30310",
+      "location": {
+        "lat": 33.745203752307,
+        "lng": -84.434024043396
+      },
+      "service_minutes": 100,
+      "time_window": [],
+      "priority": 0,
+      "fixed": false,
+      "current_employee_code": "AI005576",
+      "current_center_type": "DMS",
+      "is_heavy_repair": true,
+      "is_tv_job": false
+    }
+  ]
+}
