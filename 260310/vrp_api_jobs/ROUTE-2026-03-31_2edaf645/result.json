@@ -1,0 +1,610 @@
+{
+  "request_id": "ROUTE-2026-03-31",
+  "mode": "na_general",
+  "city": "Atlanta, GA",
+  "status": "completed",
+  "summary": {
+    "total_jobs": 41,
+    "assigned_jobs": 41,
+    "unassigned_jobs": 0
+  },
+  "assignments": [
+    {
+      "salesforce_id": "RNN260329051892",
+      "receipt_no": "RNN260329051892",
+      "employee_code": "AI005576",
+      "sequence": 1,
+      "planned_start": "2026-03-31T09:21:00-04:00",
+      "planned_end": "2026-03-31T10:06:00-04:00",
+      "changed": false
+    },
+    {
+      "salesforce_id": "RNN260327045907",
+      "receipt_no": "RNN260327045907",
+      "employee_code": "AI005576",
+      "sequence": 2,
+      "planned_start": "2026-03-31T10:22:00-04:00",
+      "planned_end": "2026-03-31T11:07:00-04:00",
+      "changed": false
+    },
+    {
+      "salesforce_id": "RNN260331060844",
+      "receipt_no": "RNN260331060844",
+      "employee_code": "AI005576",
+      "sequence": 3,
+      "planned_start": "2026-03-31T11:16:00-04:00",
+      "planned_end": "2026-03-31T12:56:00-04:00",
+      "changed": false
+    },
+    {
+      "salesforce_id": "RNN260328050280",
+      "receipt_no": "RNN260328050280",
+      "employee_code": "AI102087",
+      "sequence": 1,
+      "planned_start": "2026-03-31T09:17:00-04:00",
+      "planned_end": "2026-03-31T10:57:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260327044720",
+      "receipt_no": "RNN260327044720",
+      "employee_code": "AI102087",
+      "sequence": 2,
+      "planned_start": "2026-03-31T11:26:00-04:00",
+      "planned_end": "2026-03-31T13:06:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260329051578",
+      "receipt_no": "RNN260329051578",
+      "employee_code": "AI102608",
+      "sequence": 1,
+      "planned_start": "2026-03-31T09:10:00-04:00",
+      "planned_end": "2026-03-31T10:50:00-04:00",
+      "changed": false
+    },
+    {
+      "salesforce_id": "RNN260328048779",
+      "receipt_no": "RNN260328048779",
+      "employee_code": "AI102608",
+      "sequence": 2,
+      "planned_start": "2026-03-31T11:06:00-04:00",
+      "planned_end": "2026-03-31T11:51:00-04:00",
+      "changed": false
+    },
+    {
+      "salesforce_id": "RNN260327044872",
+      "receipt_no": "RNN260327044872",
+      "employee_code": "AI102608",
+      "sequence": 3,
+      "planned_start": "2026-03-31T13:10:00-04:00",
+      "planned_end": "2026-03-31T13:55:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260327047201",
+      "receipt_no": "RNN260327047201",
+      "employee_code": "AI102961",
+      "sequence": 1,
+      "planned_start": "2026-03-31T09:16:00-04:00",
+      "planned_end": "2026-03-31T10:56:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260325036111",
+      "receipt_no": "RNN260325036111",
+      "employee_code": "AI102961",
+      "sequence": 2,
+      "planned_start": "2026-03-31T11:03:00-04:00",
+      "planned_end": "2026-03-31T11:48:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260324029886",
+      "receipt_no": "RNN260324029886",
+      "employee_code": "AI102961",
+      "sequence": 3,
+      "planned_start": "2026-03-31T13:04:00-04:00",
+      "planned_end": "2026-03-31T13:49:00-04:00",
+      "changed": false
+    },
+    {
+      "salesforce_id": "RNN260330054643",
+      "receipt_no": "RNN260330054643",
+      "employee_code": "AI102977",
+      "sequence": 1,
+      "planned_start": "2026-03-31T09:26:00-04:00",
+      "planned_end": "2026-03-31T10:11:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260329051001",
+      "receipt_no": "RNN260329051001",
+      "employee_code": "AI102977",
+      "sequence": 2,
+      "planned_start": "2026-03-31T10:23:00-04:00",
+      "planned_end": "2026-03-31T12:03:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260330052248",
+      "receipt_no": "RNN260330052248",
+      "employee_code": "AI102977",
+      "sequence": 3,
+      "planned_start": "2026-03-31T13:25:00-04:00",
+      "planned_end": "2026-03-31T14:10:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260327044717",
+      "receipt_no": "RNN260327044717",
+      "employee_code": "AI102315",
+      "sequence": 1,
+      "planned_start": "2026-03-31T09:20:00-04:00",
+      "planned_end": "2026-03-31T11:00:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260318099850",
+      "receipt_no": "RNN260318099850",
+      "employee_code": "AI102315",
+      "sequence": 2,
+      "planned_start": "2026-03-31T13:01:00-04:00",
+      "planned_end": "2026-03-31T13:46:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260329051407",
+      "receipt_no": "RNN260329051407",
+      "employee_code": "AI102933",
+      "sequence": 1,
+      "planned_start": "2026-03-31T09:28:00-04:00",
+      "planned_end": "2026-03-31T10:13:00-04:00",
+      "changed": false
+    },
+    {
+      "salesforce_id": "RNN260330054152",
+      "receipt_no": "RNN260330054152",
+      "employee_code": "AI102933",
+      "sequence": 2,
+      "planned_start": "2026-03-31T10:34:00-04:00",
+      "planned_end": "2026-03-31T11:19:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260327044342",
+      "receipt_no": "RNN260327044342",
+      "employee_code": "AI102933",
+      "sequence": 3,
+      "planned_start": "2026-03-31T11:29:00-04:00",
+      "planned_end": "2026-03-31T12:14:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260323021594",
+      "receipt_no": "RNN260323021594",
+      "employee_code": "AI102933",
+      "sequence": 4,
+      "planned_start": "2026-03-31T13:23:00-04:00",
+      "planned_end": "2026-03-31T14:08:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260330052836",
+      "receipt_no": "RNN260330052836",
+      "employee_code": "AI103128",
+      "sequence": 1,
+      "planned_start": "2026-03-31T09:34:00-04:00",
+      "planned_end": "2026-03-31T11:14:00-04:00",
+      "changed": false
+    },
+    {
+      "salesforce_id": "RNN260324030009",
+      "receipt_no": "RNN260324030009",
+      "employee_code": "AI103128",
+      "sequence": 2,
+      "planned_start": "2026-03-31T13:34:00-04:00",
+      "planned_end": "2026-03-31T14:19:00-04:00",
+      "changed": false
+    },
+    {
+      "salesforce_id": "RNN260329051907",
+      "receipt_no": "RNN260329051907",
+      "employee_code": "AI103146",
+      "sequence": 1,
+      "planned_start": "2026-03-31T09:19:00-04:00",
+      "planned_end": "2026-03-31T10:59:00-04:00",
+      "changed": false
+    },
+    {
+      "salesforce_id": "RNN260326042155",
+      "receipt_no": "RNN260326042155",
+      "employee_code": "AI103146",
+      "sequence": 2,
+      "planned_start": "2026-03-31T11:24:00-04:00",
+      "planned_end": "2026-03-31T12:09:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260330057676",
+      "receipt_no": "RNN260330057676",
+      "employee_code": "AI103146",
+      "sequence": 3,
+      "planned_start": "2026-03-31T13:11:00-04:00",
+      "planned_end": "2026-03-31T13:56:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260328048728",
+      "receipt_no": "RNN260328048728",
+      "employee_code": "AI103264",
+      "sequence": 1,
+      "planned_start": "2026-03-31T09:20:00-04:00",
+      "planned_end": "2026-03-31T10:05:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260330052563",
+      "receipt_no": "RNN260330052563",
+      "employee_code": "AI103264",
+      "sequence": 2,
+      "planned_start": "2026-03-31T10:28:00-04:00",
+      "planned_end": "2026-03-31T12:08:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260323024038",
+      "receipt_no": "RNN260323024038",
+      "employee_code": "AI103264",
+      "sequence": 3,
+      "planned_start": "2026-03-31T13:23:00-04:00",
+      "planned_end": "2026-03-31T14:08:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260328049141",
+      "receipt_no": "RNN260328049141",
+      "employee_code": "AI103317",
+      "sequence": 1,
+      "planned_start": "2026-03-31T09:14:00-04:00",
+      "planned_end": "2026-03-31T09:59:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260324029921",
+      "receipt_no": "RNN260324029921",
+      "employee_code": "AI103317",
+      "sequence": 2,
+      "planned_start": "2026-03-31T10:38:00-04:00",
+      "planned_end": "2026-03-31T12:18:00-04:00",
+      "changed": false
+    },
+    {
+      "salesforce_id": "RNN260328050247",
+      "receipt_no": "RNN260328050247",
+      "employee_code": "AI102448",
+      "sequence": 1,
+      "planned_start": "2026-03-31T09:11:00-04:00",
+      "planned_end": "2026-03-31T09:56:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260330055907",
+      "receipt_no": "RNN260330055907",
+      "employee_code": "AI102448",
+      "sequence": 2,
+      "planned_start": "2026-03-31T10:25:00-04:00",
+      "planned_end": "2026-03-31T11:10:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260328049693",
+      "receipt_no": "RNN260328049693",
+      "employee_code": "AI102448",
+      "sequence": 3,
+      "planned_start": "2026-03-31T12:57:00-04:00",
+      "planned_end": "2026-03-31T13:42:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260327047292",
+      "receipt_no": "RNN260327047292",
+      "employee_code": "AI103261",
+      "sequence": 1,
+      "planned_start": "2026-03-31T09:34:00-04:00",
+      "planned_end": "2026-03-31T10:19:00-04:00",
+      "changed": false
+    },
+    {
+      "salesforce_id": "RNN260325037290",
+      "receipt_no": "RNN260325037290",
+      "employee_code": "AI103261",
+      "sequence": 2,
+      "planned_start": "2026-03-31T11:01:00-04:00",
+      "planned_end": "2026-03-31T11:46:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260330056126",
+      "receipt_no": "RNN260330056126",
+      "employee_code": "AI103261",
+      "sequence": 3,
+      "planned_start": "2026-03-31T12:48:00-04:00",
+      "planned_end": "2026-03-31T13:33:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260327047906",
+      "receipt_no": "RNN260327047906",
+      "employee_code": "AI105115",
+      "sequence": 1,
+      "planned_start": "2026-03-31T09:55:00-04:00",
+      "planned_end": "2026-03-31T10:40:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260330055628",
+      "receipt_no": "RNN260330055628",
+      "employee_code": "AI105115",
+      "sequence": 2,
+      "planned_start": "2026-03-31T10:55:00-04:00",
+      "planned_end": "2026-03-31T11:40:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260326039101",
+      "receipt_no": "RNN260326039101",
+      "employee_code": "AI105115",
+      "sequence": 3,
+      "planned_start": "2026-03-31T12:53:00-04:00",
+      "planned_end": "2026-03-31T13:38:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260328048713",
+      "receipt_no": "RNN260328048713",
+      "employee_code": "AI105116",
+      "sequence": 1,
+      "planned_start": "2026-03-31T09:27:00-04:00",
+      "planned_end": "2026-03-31T11:07:00-04:00",
+      "changed": true
+    },
+    {
+      "salesforce_id": "RNN260328048862",
+      "receipt_no": "RNN260328048862",
+      "employee_code": "AI105116",
+      "sequence": 2,
+      "planned_start": "2026-03-31T11:20:00-04:00",
+      "planned_end": "2026-03-31T13:00:00-04:00",
+      "changed": true
+    }
+  ],
+  "unassigned": [],
+  "engineer_summary": [
+    {
+      "service_date_key": "2026-03-31",
+      "SVC_ENGINEER_CODE": "AI005576",
+      "SVC_ENGINEER_NAME": "RUDY EDOLE",
+      "assigned_center_type": "DMS",
+      "assigned_region_seq": 1,
+      "job_count": 3,
+      "service_time_min": 190.0,
+      "travel_time_min": 47.62,
+      "travel_distance_km": 37.23,
+      "total_work_min": 237.62,
+      "overflow_480": false,
+      "route_distance_km": 37.23,
+      "route_duration_min": 47.62
+    },
+    {
+      "service_date_key": "2026-03-31",
+      "SVC_ENGINEER_CODE": "AI102087",
+      "SVC_ENGINEER_NAME": "Marcus Harmon",
+      "assigned_center_type": "DMS",
+      "assigned_region_seq": 1,
+      "job_count": 2,
+      "service_time_min": 200.0,
+      "travel_time_min": 48.06,
+      "travel_distance_km": 40.25,
+      "total_work_min": 248.06,
+      "overflow_480": false,
+      "route_distance_km": 40.25,
+      "route_duration_min": 48.06
+    },
+    {
+      "service_date_key": "2026-03-31",
+      "SVC_ENGINEER_CODE": "AI102608",
+      "SVC_ENGINEER_NAME": "Sergey Ashihmin",
+      "assigned_center_type": "DMS",
+      "assigned_region_seq": 1,
+      "job_count": 3,
+      "service_time_min": 190.0,
+      "travel_time_min": 46.65,
+      "travel_distance_km": 29.92,
+      "total_work_min": 236.65,
+      "overflow_480": false,
+      "route_distance_km": 29.92,
+      "route_duration_min": 46.65
+    },
+    {
+      "service_date_key": "2026-03-31",
+      "SVC_ENGINEER_CODE": "AI102961",
+      "SVC_ENGINEER_NAME": "Nicholas Foskin",
+      "assigned_center_type": "DMS",
+      "assigned_region_seq": 1,
+      "job_count": 3,
+      "service_time_min": 190.0,
+      "travel_time_min": 43.6,
+      "travel_distance_km": 28.62,
+      "total_work_min": 233.6,
+      "overflow_480": false,
+      "route_distance_km": 28.62,
+      "route_duration_min": 43.6
+    },
+    {
+      "service_date_key": "2026-03-31",
+      "SVC_ENGINEER_CODE": "AI102977",
+      "SVC_ENGINEER_NAME": "Yu Zheng",
+      "assigned_center_type": "DMS",
+      "assigned_region_seq": 1,
+      "job_count": 3,
+      "service_time_min": 190.0,
+      "travel_time_min": 62.91,
+      "travel_distance_km": 46.9,
+      "total_work_min": 252.91,
+      "overflow_480": false,
+      "route_distance_km": 46.9,
+      "route_duration_min": 62.91
+    },
+    {
+      "service_date_key": "2026-03-31",
+      "SVC_ENGINEER_CODE": "AI102315",
+      "SVC_ENGINEER_NAME": "Winston Perez",
+      "assigned_center_type": "DMS",
+      "assigned_region_seq": 2,
+      "job_count": 2,
+      "service_time_min": 145.0,
+      "travel_time_min": 81.64,
+      "travel_distance_km": 90.79,
+      "total_work_min": 226.64,
+      "overflow_480": false,
+      "route_distance_km": 90.79,
+      "route_duration_min": 81.64
+    },
+    {
+      "service_date_key": "2026-03-31",
+      "SVC_ENGINEER_CODE": "AI102933",
+      "SVC_ENGINEER_NAME": "Richardo Brooks",
+      "assigned_center_type": "DMS",
+      "assigned_region_seq": 2,
+      "job_count": 4,
+      "service_time_min": 180.0,
+      "travel_time_min": 71.66,
+      "travel_distance_km": 65.28,
+      "total_work_min": 251.66,
+      "overflow_480": false,
+      "route_distance_km": 65.28,
+      "route_duration_min": 71.66
+    },
+    {
+      "service_date_key": "2026-03-31",
+      "SVC_ENGINEER_CODE": "AI103128",
+      "SVC_ENGINEER_NAME": "Ivan Zimic",
+      "assigned_center_type": "DMS",
+      "assigned_region_seq": 2,
+      "job_count": 2,
+      "service_time_min": 145.0,
+      "travel_time_min": 116.42,
+      "travel_distance_km": 103.83,
+      "total_work_min": 261.42,
+      "overflow_480": false,
+      "route_distance_km": 103.83,
+      "route_duration_min": 116.42
+    },
+    {
+      "service_date_key": "2026-03-31",
+      "SVC_ENGINEER_CODE": "AI103146",
+      "SVC_ENGINEER_NAME": "Arthur Gloster",
+      "assigned_center_type": "DMS",
+      "assigned_region_seq": 2,
+      "job_count": 3,
+      "service_time_min": 190.0,
+      "travel_time_min": 48.52,
+      "travel_distance_km": 41.86,
+      "total_work_min": 238.52,
+      "overflow_480": false,
+      "route_distance_km": 41.86,
+      "route_duration_min": 48.52
+    },
+    {
+      "service_date_key": "2026-03-31",
+      "SVC_ENGINEER_CODE": "AI103264",
+      "SVC_ENGINEER_NAME": "Adolph Scarlett",
+      "assigned_center_type": "DMS",
+      "assigned_region_seq": 2,
+      "job_count": 3,
+      "service_time_min": 190.0,
+      "travel_time_min": 60.45,
+      "travel_distance_km": 45.14,
+      "total_work_min": 250.45,
+      "overflow_480": false,
+      "route_distance_km": 45.14,
+      "route_duration_min": 60.45
+    },
+    {
+      "service_date_key": "2026-03-31",
+      "SVC_ENGINEER_CODE": "AI103317",
+      "SVC_ENGINEER_NAME": "Richard Grant",
+      "assigned_center_type": "DMS",
+      "assigned_region_seq": 2,
+      "job_count": 2,
+      "service_time_min": 145.0,
+      "travel_time_min": 53.23,
+      "travel_distance_km": 32.78,
+      "total_work_min": 198.23,
+      "overflow_480": false,
+      "route_distance_km": 32.78,
+      "route_duration_min": 53.23
+    },
+    {
+      "service_date_key": "2026-03-31",
+      "SVC_ENGINEER_CODE": "AI102448",
+      "SVC_ENGINEER_NAME": "Gilbert Dupree",
+      "assigned_center_type": "DMS",
+      "assigned_region_seq": 3,
+      "job_count": 3,
+      "service_time_min": 135.0,
+      "travel_time_min": 89.82,
+      "travel_distance_km": 85.53,
+      "total_work_min": 224.82,
+      "overflow_480": false,
+      "route_distance_km": 85.53,
+      "route_duration_min": 89.82
+    },
+    {
+      "service_date_key": "2026-03-31",
+      "SVC_ENGINEER_CODE": "AI103261",
+      "SVC_ENGINEER_NAME": "Horace Bull",
+      "assigned_center_type": "DMS",
+      "assigned_region_seq": 3,
+      "job_count": 3,
+      "service_time_min": 135.0,
+      "travel_time_min": 78.62,
+      "travel_distance_km": 80.3,
+      "total_work_min": 213.62,
+      "overflow_480": false,
+      "route_distance_km": 80.3,
+      "route_duration_min": 78.62
+    },
+    {
+      "service_date_key": "2026-03-31",
+      "SVC_ENGINEER_CODE": "AI105115",
+      "SVC_ENGINEER_NAME": "Jason Patterson",
+      "assigned_center_type": "DMS",
+      "assigned_region_seq": 3,
+      "job_count": 3,
+      "service_time_min": 135.0,
+      "travel_time_min": 84.43,
+      "travel_distance_km": 79.59,
+      "total_work_min": 219.43,
+      "overflow_480": false,
+      "route_distance_km": 79.59,
+      "route_duration_min": 84.43
+    },
+    {
+      "service_date_key": "2026-03-31",
+      "SVC_ENGINEER_CODE": "AI105116",
+      "SVC_ENGINEER_NAME": "Frank Hooks",
+      "assigned_center_type": "DMS",
+      "assigned_region_seq": 3,
+      "job_count": 2,
+      "service_time_min": 200.0,
+      "travel_time_min": 41.13,
+      "travel_distance_km": 31.36,
+      "total_work_min": 241.13,
+      "overflow_480": false,
+      "route_distance_km": 31.36,
+      "route_duration_min": 41.13
+    }
+  ]
+}

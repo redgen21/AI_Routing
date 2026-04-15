@@ -1,0 +1,16 @@
+﻿SVC_ENGINEER_CODE,Name,Home Street Address,City ,State,Zip,matched_address,match_indicator,match_type,latitude,longitude,source,SVC_CENTER_TYPE,normalized_slot,REF_HEAVY_REPAIR_FLAG,assigned_region_seq,assigned_region_name
+AI005576,RUDY EDOLE,5735 Hearn Road,Ellenwood,GA,30294,"5735 HEARN RD, ELLENWOOD, GA, 30294",Match,Exact,33.629797793466,-84.2013870795,us_census_geocoder,DMS,8,Y,1,Atlanta New Region 1
+AI102087,Marcus Harmon,1367 Hardy Circle,Dallas,GA,30157,"1367 HARDY CIR, DALLAS, GA, 30157",Match,Exact,33.928986364898,-84.748964265659,us_census_geocoder,DMS,8,Y,1,Atlanta New Region 1
+AI102608,Sergey Ashihmin,115 Centennial Ridge Dr,Acworth,GA,30102,"115 Centennial Ridge Dr, Acworth, GA 30102, USA",Match,ROOFTOP,34.0992678,-84.6247226,google_geocoding_api,DMS,8,Y,1,Atlanta New Region 1
+AI102961,Nicholas Foskin,1253 Pensacola Ln,Grayson,GA,30017,"1253 PENSACOLA LN, GRAYSON, GA, 30017",Match,Exact,33.895481059397,-83.991723522499,us_census_geocoder,DMS,8,Y,1,Atlanta New Region 1
+AI102977,Yu Zheng,2824 Sudbury Court,Marietta,GA,30062,"2824 SUDBURY CT, MARIETTA, GA, 30062",Match,Exact,34.018539783845,-84.451551533147,us_census_geocoder,DMS,8,Y,1,Atlanta New Region 1
+AI102315,Winston Perez,1881 Roxey Lane,Winder,GA,30680,"1881 ROXEY LN, WINDER, GA, 30680",Match,Exact,33.949958875921,-83.798998485556,us_census_geocoder,DMS,8,Y,2,Atlanta New Region 2
+AI102933,Richardo Brooks,133 Avondale Blvd 30013,Conyers,GA,30013,"133 Avondale Blvd SE, Conyers, GA 30013, USA",Match,ROOFTOP,33.617583,-83.972026,google_geocoding_api,DMS,8,Y,2,Atlanta New Region 2
+AI103128,Ivan Zimic,295 Fernbrooke Trail,Dawsonville,GA,30534,"295 FERNBROOK TRL, DAWSONVILLE, GA, 30534",Match,Non_Exact,34.34432048806,-84.071245414198,us_census_geocoder,DMS,8,Y,2,Atlanta New Region 2
+AI103146,Arthur Gloster,3355 Bethany Bend,Alpharetta,GA,30004,"3355 Bethany Bend, Alpharetta, GA 30004, USA",Match,ROOFTOP,34.11132010000001,-84.2611806,google_geocoding_api,DMS,8,Y,2,Atlanta New Region 2
+AI103264,Adolph Scarlett,4842 Tower View Dr.,Snellville,GA,30039,"4842 TOWER VIEW DR, SNELLVILLE, GA, 30039",Match,Exact,33.757983120639,-84.035460468907,us_census_geocoder,DMS,8,Y,2,Atlanta New Region 2
+AI103317,Richard Grant,192 JODI Place,Locust Grove,GA,30248,"192 JODI PL, LOCUST GROVE, GA, 30248",Match,Exact,33.363360215869,-84.108908534098,us_census_geocoder,DMS,8,Y,2,Atlanta New Region 2
+AI102448,Gilbert Dupree,660 Goldenwood Ct.,Powder Springs,GA,30127,"660 GOLDENWOOD CT, POWDER SPRINGS, GA, 30127",Match,Exact,33.936932039487,-84.68736026055,us_census_geocoder,DMS,8,Y,3,Atlanta New Region 3
+AI103261,Horace Bull,1310 Aberdare Dr.,McDonough,GA,30253,"1310 ABERDARE DR, MCDONOUGH, GA, 30253",Match,Exact,33.450883432924,-84.179052980296,us_census_geocoder,DMS,8,Y,3,Atlanta New Region 3
+AI105115,Jason Patterson,175 Tommys Trl,Forsyth,GA,31029,"175 TOMMYS TRL, FORSYTH, GA, 31029",Match,Exact,33.189745727281,-83.875801190073,us_census_geocoder,DMS,8,N,3,Atlanta New Region 3
+AI105116,Frank Hooks,5157 St. Claire Pl,Powder Springs,GA,30127,"5157 ST CLAIRE PL, POWDER SPRINGS, GA, 30127",Match,Exact,33.875496159031,-84.700128091381,us_census_geocoder,DMS,8,Y,3,Atlanta New Region 3

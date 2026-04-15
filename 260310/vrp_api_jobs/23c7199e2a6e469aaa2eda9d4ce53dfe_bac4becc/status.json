@@ -1,0 +1,16 @@
+{
+  "job_id": "23c7199e2a6e469aaa2eda9d4ce53dfe_bac4becc",
+  "status": "completed",
+  "mode": "na_general",
+  "city": "Atlanta, GA",
+  "created_at": "2026-04-15T06:41:09Z",
+  "updated_at": "2026-04-15T06:41:31Z",
+  "started_at": "2026-04-15T06:41:09Z",
+  "completed_at": "2026-04-15T06:41:31Z",
+  "request_id": "23c7199e2a6e469aaa2eda9d4ce53dfe",
+  "summary": {
+    "total_jobs": 41,
+    "assigned_jobs": 41,
+    "unassigned_jobs": 0
+  }
+}

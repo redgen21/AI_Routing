@@ -1,0 +1,3 @@
+﻿side,source,request_id,mode,city,planning_date,payload_jobs,payload_technicians,payload_heavy_jobs,payload_service_minutes_distribution,server_service_rows,server_service_heavy_jobs,server_solver_engineers
+existing,downloads\latest_vrp_common_mode_bbaa9ae\260310\vrp_api_jobs\ROUTE-2026-03-31_075afdfb\request.json,ROUTE-2026-03-31,,,2026-03-31,41,15,13,"{""100"": 13, ""45"": 28}",41,13,15
+common,downloads\latest_vrp_common_mode_bbaa9ae\260310\vrp_api_jobs\ROUTE-2026-03-31_075afdfb\request.json,ROUTE-2026-03-31,,,2026-03-31,41,15,13,"{""100"": 13, ""45"": 28}",41,13,15

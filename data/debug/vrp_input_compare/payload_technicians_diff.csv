@@ -1,0 +1,16 @@
+﻿employee_code,field,existing,common,diff_type
+AI005576,skills_json,[],"[{""product"": ""FRD"", ""symptoms"": [""1FFFWFI""]}, {""product"": ""OTR"", ""symptoms"": [""1AEACAA""]}, {""product"": ""SBS"", ""symptoms"": [""NAN""]}]",value_mismatch
+AI102087,skills_json,[],"[{""product"": ""DRC"", ""symptoms"": [""NAN""]}, {""product"": ""FRD"", ""symptoms"": [""1PPACAA"", ""NAN""]}]",value_mismatch
+AI102315,skills_json,[],"[{""product"": ""DRW"", ""symptoms"": [""2OOOMOK""]}, {""product"": ""FRD"", ""symptoms"": [""1FFFVFH"", ""NAN""]}]",value_mismatch
+AI102448,skills_json,[],"[{""product"": ""FRD"", ""symptoms"": [""1FFFVFH"", ""1FFFWFJ""]}, {""product"": ""SBS"", ""symptoms"": [""NAN""]}, {""product"": ""W/M"", ""symptoms"": [""NAN""]}]",value_mismatch
+AI102608,skills_json,[],"[{""product"": ""FRD"", ""symptoms"": [""1FFFVFH"", ""NAN""]}, {""product"": ""W/M"", ""symptoms"": [""NAN""]}]",value_mismatch
+AI102933,skills_json,[],"[{""product"": ""DRW"", ""symptoms"": [""2HHHGHU""]}, {""product"": ""FRD"", ""symptoms"": [""1PPPEPW""]}, {""product"": ""SBS"", ""symptoms"": [""NAN""]}]",value_mismatch
+AI102961,skills_json,[],"[{""product"": ""DWM"", ""symptoms"": [""1ADAFAA"", ""1ADAGAA""]}, {""product"": ""FRD"", ""symptoms"": [""1FFFVFH""]}]",value_mismatch
+AI102977,skills_json,[],"[{""product"": ""OTR"", ""symptoms"": [""1AAAEAA""]}]",value_mismatch
+AI103128,skills_json,[],"[{""product"": ""FRD"", ""symptoms"": [""1PPPDPT"", ""8TUABAA"", ""8TUABAE""]}]",value_mismatch
+AI103146,skills_json,[],"[{""product"": ""FRD"", ""symptoms"": [""1FFFWFI""]}]",value_mismatch
+AI103261,skills_json,[],"[{""product"": ""REF"", ""symptoms"": [""NAN""]}]",value_mismatch
+AI103264,skills_json,[],"[{""product"": ""DRR"", ""symptoms"": [""1NNACAC""]}, {""product"": ""SBS"", ""symptoms"": [""3BBBMBH""]}]",value_mismatch
+AI103317,skills_json,[],"[{""product"": ""FRD"", ""symptoms"": [""1FFFWFI"", ""1PPPDPT""]}]",value_mismatch
+AI105115,skills_json,[],"[{""product"": ""W/M"", ""symptoms"": [""2GGGBGD""]}]",value_mismatch
+AI105116,skills_json,[],"[{""product"": ""DRR"", ""symptoms"": [""1PPPNPB""]}, {""product"": ""FRD"", ""symptoms"": [""1FFFWFJ""]}, {""product"": ""SBS"", ""symptoms"": [""1FFFVFH""]}]",value_mismatch

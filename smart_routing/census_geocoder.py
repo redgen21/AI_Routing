@@ -8,7 +8,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from urllib import request
+from urllib import error, request
 
 import pandas as pd
 
@@ -56,11 +56,23 @@ def normalize_text(value: object) -> str:
     return " ".join(str(value).strip().split())
 
 
+def normalize_country_name(value: object) -> str:
+    text = normalize_text(value).upper()
+    if text in {"US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA"}:
+        return "USA"
+    return text
+
+
 def normalize_postal_code(value: object) -> str:
     text = normalize_text(value)
     if not text:
         return ""
-    return text.split("-")[0].upper()
+    text = text.split("-")[0].upper()
+    text = re.sub(r"\.0+$", "", text)
+    numeric = pd.to_numeric(pd.Series([text]), errors="coerce").iloc[0]
+    if pd.notna(numeric):
+        return str(int(numeric))
+    return text
 
 
 def clean_street_address(
@@ -126,7 +138,7 @@ def build_address_key(
         normalize_text(city).upper(),
         normalize_text(state).upper(),
         normalize_postal_code(postal_code),
-        normalize_text(country_name).upper(),
+        normalize_country_name(country_name),
     ]
     return "|".join(parts)
 
@@ -160,7 +172,10 @@ def build_unique_addresses(
     if "country_name" not in out.columns:
         out["country_name"] = "USA"
     for col in ["city", "state", "postal_code", "country_name"]:
-        out[col] = out[col].map(normalize_text)
+        if col == "country_name":
+            out[col] = out[col].map(normalize_country_name)
+        else:
+            out[col] = out[col].map(normalize_text)
     out["postal_code"] = out["postal_code"].map(normalize_postal_code)
     out["address_line1_raw"] = out["address_line1"].map(normalize_text)
     out["address_line1"] = out.apply(
@@ -183,7 +198,7 @@ def build_unique_addresses(
         ),
         axis=1,
     )
-    out = out[out["country_name"].str.upper().eq("USA")].copy()
+    out = out[out["country_name"].eq("USA")].copy()
     out = out[out["address_line1"] != ""].copy()
     out = out.drop_duplicates(subset=["address_key"], keep="first").reset_index(drop=True)
     return out
@@ -223,8 +238,15 @@ def load_geocode_cache(path: Path) -> pd.DataFrame:
     for col in base.columns:
         if col not in df.columns:
             df[col] = ""
-    if {"address_line1", "city", "state", "postal_code", "country_name"}.issubset(df.columns):
-        df["address_line1"] = df.apply(
+    df["address_key"] = df["address_key"].astype(str).replace({"nan": "", "None": "", "none": "", "NaN": ""}).str.strip()
+    missing_key_mask = df["address_key"].eq("")
+    if missing_key_mask.any() and {"address_line1", "city", "state", "postal_code", "country_name"}.issubset(df.columns):
+        subset = df.loc[missing_key_mask, ["address_line1", "city", "state", "postal_code", "country_name"]].copy()
+        subset["city"] = subset["city"].map(normalize_text)
+        subset["state"] = subset["state"].map(normalize_text)
+        subset["postal_code"] = subset["postal_code"].map(normalize_postal_code)
+        subset["country_name"] = subset["country_name"].map(normalize_country_name)
+        subset["address_line1"] = subset.apply(
             lambda row: clean_street_address(
                 row.get("address_line1"),
                 row.get("city"),
@@ -234,7 +256,7 @@ def load_geocode_cache(path: Path) -> pd.DataFrame:
             ),
             axis=1,
         )
-        df["address_key"] = df.apply(
+        subset["address_key"] = subset.apply(
             lambda row: build_address_key(
                 row.get("address_line1"),
                 row.get("city"),
@@ -244,6 +266,12 @@ def load_geocode_cache(path: Path) -> pd.DataFrame:
             ),
             axis=1,
         )
+        df.loc[missing_key_mask, "address_line1"] = subset["address_line1"].values
+        df.loc[missing_key_mask, "city"] = subset["city"].values
+        df.loc[missing_key_mask, "state"] = subset["state"].values
+        df.loc[missing_key_mask, "postal_code"] = subset["postal_code"].values
+        df.loc[missing_key_mask, "country_name"] = subset["country_name"].values
+        df.loc[missing_key_mask, "address_key"] = subset["address_key"].values
     return df[base.columns.tolist()].copy()
 
 
@@ -262,7 +290,7 @@ def merge_service_with_geocodes(
         merged_df["POSTAL_CODE"].map(normalize_postal_code) if "POSTAL_CODE" in merged_df.columns else ""
     )
     merged_df["country_norm"] = (
-        merged_df["COUNTRY_NAME"].map(normalize_text) if "COUNTRY_NAME" in merged_df.columns else "USA"
+        merged_df["COUNTRY_NAME"].map(normalize_country_name) if "COUNTRY_NAME" in merged_df.columns else "USA"
     )
     merged_df["address_line1_clean"] = merged_df.apply(
         lambda row: clean_street_address(
@@ -435,9 +463,16 @@ class CensusBatchGeocoder:
                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
                 method="POST",
             )
-            with request.urlopen(req, timeout=self.timeout) as response:
-                text = response.read().decode("utf-8")
-            return self._parse_batch_response(text, df)
+            try:
+                with request.urlopen(req, timeout=self.timeout) as response:
+                    text = response.read().decode("utf-8")
+                return self._parse_batch_response(text, df)
+            except error.HTTPError as exc:
+                if exc.code in {500, 502, 503, 504}:
+                    return self._empty_cache_frame()
+                raise
+            except error.URLError:
+                return self._empty_cache_frame()
         finally:
             temp_csv.unlink(missing_ok=True)
 

@@ -1,0 +1,730 @@
+from __future__ import annotations
+
+import colorsys
+import json
+import time
+from datetime import date
+from pathlib import Path
+
+import folium
+import pandas as pd
+import streamlit as st
+from folium.plugins import MarkerCluster
+
+from smart_routing.area_map import load_city_map_data
+from smart_routing.bigquery_runtime import query_service_data
+from smart_routing.live_atlanta_runtime import build_runtime_atlanta_inputs
+from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
+import smart_routing.production_assign_atlanta as production_assign_atlanta
+from smart_routing.production_assign_atlanta_vrp import build_atlanta_production_assignment_vrp_from_frames
+
+
+st.set_page_config(page_title="Atlanta Smart Routing", layout="wide")
+
+CONFIG_FILE = Path("config.json")
+PROFILE_FILE = Path("260310/Top 10_DMS_DMS2_Profile_20260317.xlsx")
+
+LIVE_STAGE_LABELS = [
+    "Loading input data",
+    "Merging geocode cache",
+    "Preparing Atlanta runtime inputs",
+    "Running Smart Routing assignment",
+    "Finalizing schedules and map data",
+]
+
+
+def _load_config(config_file: Path = CONFIG_FILE) -> dict:
+    if not config_file.exists():
+        return {}
+    return json.loads(config_file.read_text(encoding="utf-8"))
+
+
+@st.cache_resource(show_spinner=False)
+def get_route_client() -> OSRMTripClient:
+    routing_cfg = _load_config().get("routing", {})
+    return OSRMTripClient(
+        OSRMConfig(
+            osrm_url=str(routing_cfg.get("city_osrm_urls", {}).get("Atlanta, GA", routing_cfg.get("osrm_url", "http://20.51.244.68:5002"))).rstrip("/"),
+            mode="osrm",
+            osrm_profile=str(routing_cfg.get("osrm_profile", "driving")),
+            cache_file=Path("data/cache/osrm_trip_cache_atlanta_live_map.csv"),
+            fallback_osrm_url=str(routing_cfg.get("osrm_url", "http://20.51.244.68:5000")).rstrip("/"),
+        )
+    )
+
+
+def _generate_color_map(labels: list[str]) -> dict[str, str]:
+    color_map: dict[str, str] = {}
+    hue = 0.11
+    golden_ratio = 0.618033988749895
+    for label in sorted({str(v).strip() for v in labels if str(v).strip()}):
+        hue = (hue + golden_ratio) % 1.0
+        rgb = colorsys.hsv_to_rgb(hue, 0.68, 0.92)
+        color_map[label] = "#{:02x}{:02x}{:02x}".format(int(rgb[0] * 255), int(rgb[1] * 255), int(rgb[2] * 255))
+    return color_map
+
+
+def _region_color_map() -> dict[str, str]:
+    return {
+        "Atlanta New Region 1": "#db4437",
+        "Atlanta New Region 2": "#0f9d58",
+        "Atlanta New Region 3": "#4285f4",
+    }
+
+
+def _popup(content: str, width: int = 360) -> folium.Popup:
+    wrapped = (
+        f"<div style='min-width:{width}px;max-width:{width}px;white-space:normal;"
+        "line-height:1.4;font-size:13px;'>"
+        f"{content}</div>"
+    )
+    return folium.Popup(wrapped, max_width=width + 40)
+
+
+def _build_region_layers(region_zip_df: pd.DataFrame, service_df: pd.DataFrame):
+    city_data = load_city_map_data("Atlanta, GA")
+    coverage_df = pd.read_excel(PROFILE_FILE, sheet_name="1. Zip Coverage", dtype={"POSTAL_CODE": str})
+    coverage_df = coverage_df[coverage_df["STRATEGIC_CITY_NAME"].astype(str).eq("Atlanta, GA")].copy()
+    coverage_df["POSTAL_CODE"] = coverage_df["POSTAL_CODE"].astype(str).str.zfill(5)
+    coverage_df = coverage_df[["POSTAL_CODE"]].drop_duplicates().copy()
+
+    zip_layer = city_data.zip_layer.copy()
+    zip_layer["POSTAL_CODE"] = zip_layer["POSTAL_CODE"].astype(str).str.zfill(5)
+    coverage_layer = zip_layer.merge(coverage_df, on="POSTAL_CODE", how="inner")
+
+    merged = coverage_layer.merge(region_zip_df[["POSTAL_CODE", "region_seq", "new_region_name"]], on="POSTAL_CODE", how="left")
+    if service_df.empty or "POSTAL_CODE" not in service_df.columns:
+        postal_counts = pd.Series(dtype=int)
+    else:
+        postal_counts = service_df["POSTAL_CODE"].astype(str).str.zfill(5).value_counts()
+    merged["service_count"] = merged["POSTAL_CODE"].map(postal_counts).fillna(0).astype(int)
+    region_layer = (
+        merged.dropna(subset=["new_region_name"])
+        .dissolve(by="new_region_name", as_index=False, aggfunc="first")[["new_region_name", "region_seq", "geometry"]]
+        .sort_values("region_seq")
+        .reset_index(drop=True)
+    )
+    return merged, region_layer
+
+
+def _build_route_groups(schedule_df: pd.DataFrame):
+    route_groups: list[dict] = []
+    if schedule_df.empty:
+        return route_groups
+    for engineer_code, group in schedule_df.groupby("assigned_sm_code", dropna=True):
+        group = group.sort_values("visit_seq").reset_index(drop=True)
+        start_coord = None
+        if pd.notna(group.iloc[0].get("home_start_longitude")) and pd.notna(group.iloc[0].get("home_start_latitude")):
+            start_coord = (float(group.iloc[0]["home_start_longitude"]), float(group.iloc[0]["home_start_latitude"]))
+        stop_coords = [(float(row["longitude"]), float(row["latitude"])) for _, row in group.iterrows()]
+        coord_chain = [start_coord] + stop_coords if start_coord is not None else stop_coords
+        route_payload = get_route_client().build_ordered_route(tuple(coord_chain), preserve_first=start_coord is not None)
+        route_groups.append(
+            {
+                "engineer_code": str(engineer_code),
+                "engineer_name": str(group["assigned_sm_name"].iloc[0]),
+                "center_type": str(group.get("assigned_center_type", pd.Series([""])).iloc[0]).strip().upper() if "assigned_center_type" in group.columns else "",
+                "route_payload": route_payload,
+                "scheduled_rows": group.to_dict("records"),
+                "service_count": int(group["GSFS_RECEIPT_NO"].dropna().astype(str).nunique()),
+                "home_coord": start_coord,
+            }
+        )
+    return route_groups
+
+
+def _dedupe_schedule_receipts(schedule_df: pd.DataFrame) -> pd.DataFrame:
+    if schedule_df.empty:
+        return schedule_df.copy()
+    deduped = schedule_df.copy()
+    sort_cols = [col for col in ["service_date_key", "assigned_sm_code", "visit_seq", "GSFS_RECEIPT_NO"] if col in deduped.columns]
+    if sort_cols:
+        deduped = deduped.sort_values(sort_cols).reset_index(drop=True)
+    receipt_keys = [col for col in ["service_date_key", "assigned_sm_code", "GSFS_RECEIPT_NO"] if col in deduped.columns]
+    if receipt_keys:
+        deduped = deduped.drop_duplicates(subset=receipt_keys, keep="first").reset_index(drop=True)
+    return deduped
+
+
+def _build_region_staffing_view(service_df: pd.DataFrame) -> pd.DataFrame:
+    required_cols = {"new_region_name", "assigned_sm_code", "assigned_center_type", "GSFS_RECEIPT_NO"}
+    if service_df.empty or not required_cols.issubset(service_df.columns):
+        return pd.DataFrame(columns=["region", "dms_count", "dms2_count", "dms_service_count", "dms2_service_count", "service_count"])
+    staffing_df = service_df[["new_region_name", "assigned_sm_code", "assigned_center_type", "GSFS_RECEIPT_NO"]].dropna(subset=["new_region_name", "assigned_sm_code"]).copy()
+    staffing_df["assigned_center_type"] = staffing_df["assigned_center_type"].astype(str).str.upper()
+    rows: list[dict[str, object]] = []
+    for region_name, group in staffing_df.groupby("new_region_name", dropna=False):
+        dms_count = int(group.loc[group["assigned_center_type"] == "DMS", "assigned_sm_code"].astype(str).nunique())
+        dms2_count = int(group.loc[group["assigned_center_type"] == "DMS2", "assigned_sm_code"].astype(str).nunique())
+        dms_service_count = int(group.loc[group["assigned_center_type"] == "DMS", "GSFS_RECEIPT_NO"].dropna().astype(str).nunique())
+        dms2_service_count = int(group.loc[group["assigned_center_type"] == "DMS2", "GSFS_RECEIPT_NO"].dropna().astype(str).nunique())
+        rows.append(
+            {
+                "region": str(region_name),
+                "dms_count": dms_count,
+                "dms2_count": dms2_count,
+                "dms_service_count": dms_service_count,
+                "dms2_service_count": dms2_service_count,
+                "service_count": int(group["GSFS_RECEIPT_NO"].dropna().astype(str).nunique()),
+            }
+        )
+    return pd.DataFrame(rows).sort_values("region").reset_index(drop=True)
+
+
+def _build_actual_mode_frames(
+    service_df: pd.DataFrame,
+    home_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    if service_df.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    actual_df = service_df.copy()
+    actual_df["SVC_CENTER_TYPE"] = actual_df["SVC_CENTER_TYPE"].astype(str).str.upper()
+    actual_df = actual_df[actual_df["SVC_CENTER_TYPE"].isin(["DMS", "DMS2"])].copy()
+    if actual_df.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    home_lookup = (
+        home_df[["SVC_ENGINEER_CODE", "latitude", "longitude"]]
+        .drop_duplicates(subset=["SVC_ENGINEER_CODE"])
+        .rename(columns={"latitude": "home_latitude", "longitude": "home_longitude"})
+    )
+    labeled_df = actual_df.merge(home_lookup, on="SVC_ENGINEER_CODE", how="left")
+    labeled_df["assigned_sm_code"] = labeled_df["SVC_ENGINEER_CODE"].astype(str)
+    labeled_df["assigned_sm_name"] = labeled_df["SVC_ENGINEER_NAME"].astype(str)
+    labeled_df["assigned_center_type"] = labeled_df["SVC_CENTER_TYPE"].astype(str)
+    labeled_df["home_start_longitude"] = labeled_df["home_longitude"]
+    labeled_df["home_start_latitude"] = labeled_df["home_latitude"]
+
+    route_client = get_route_client()
+    schedule_frames: list[pd.DataFrame] = []
+    for _, group_df in labeled_df.groupby(["service_date_key", "assigned_sm_code"], dropna=False):
+        schedule_df, route_payload = production_assign_atlanta._build_schedule_for_group(group_df.copy(), route_client)
+        if schedule_df.empty:
+            continue
+        schedule_df["route_distance_km"] = round(float(route_payload["distance_km"]), 2)
+        schedule_df["route_duration_min"] = round(float(route_payload["duration_min"]), 2)
+        schedule_frames.append(schedule_df)
+
+    schedule_result_df = pd.concat(schedule_frames, ignore_index=True) if schedule_frames else pd.DataFrame()
+
+    service_counts = (
+        labeled_df.groupby(["service_date_key", "assigned_sm_code"], dropna=False)["GSFS_RECEIPT_NO"]
+        .nunique()
+        .rename("job_count")
+        .reset_index()
+    )
+    service_time = (
+        labeled_df.groupby(["service_date_key", "assigned_sm_code"], dropna=False)["service_time_min"]
+        .sum()
+        .rename("service_time_min")
+        .reset_index()
+    )
+    meta = (
+        labeled_df.groupby(["service_date_key", "assigned_sm_code"], dropna=False)
+        .agg(
+            SVC_ENGINEER_NAME=("assigned_sm_name", "first"),
+            assigned_center_type=("assigned_center_type", "first"),
+            assigned_region_seq=("region_seq", lambda s: pd.to_numeric(s, errors="coerce").mode().iloc[0] if not pd.to_numeric(s, errors="coerce").dropna().empty else pd.NA),
+        )
+        .reset_index()
+        .rename(columns={"assigned_sm_code": "SVC_ENGINEER_CODE"})
+    )
+    route_summary = pd.DataFrame()
+    if not schedule_result_df.empty:
+        route_summary = (
+            schedule_result_df.groupby(["service_date_key", "assigned_sm_code"], dropna=False)
+            .agg(route_distance_km=("route_distance_km", "max"), route_duration_min=("route_duration_min", "max"))
+            .reset_index()
+            .rename(columns={"assigned_sm_code": "SVC_ENGINEER_CODE"})
+        )
+
+    summary_df = (
+        meta.merge(service_counts.rename(columns={"assigned_sm_code": "SVC_ENGINEER_CODE"}), on=["service_date_key", "SVC_ENGINEER_CODE"], how="left")
+        .merge(service_time.rename(columns={"assigned_sm_code": "SVC_ENGINEER_CODE"}), on=["service_date_key", "SVC_ENGINEER_CODE"], how="left")
+        .merge(route_summary, on=["service_date_key", "SVC_ENGINEER_CODE"], how="left")
+    )
+    summary_df["job_count"] = pd.to_numeric(summary_df["job_count"], errors="coerce").fillna(0).astype(int)
+    summary_df["service_time_min"] = pd.to_numeric(summary_df["service_time_min"], errors="coerce").fillna(0)
+    summary_df["route_distance_km"] = pd.to_numeric(summary_df.get("route_distance_km"), errors="coerce").fillna(0)
+    summary_df["route_duration_min"] = pd.to_numeric(summary_df.get("route_duration_min"), errors="coerce").fillna(0)
+    summary_df["travel_time_min"] = summary_df["route_duration_min"]
+    summary_df["travel_distance_km"] = summary_df["route_distance_km"]
+    summary_df["total_work_min"] = (summary_df["service_time_min"] + summary_df["travel_time_min"]).round(2)
+    summary_df["overflow_480"] = summary_df["total_work_min"] > 480
+
+    return labeled_df, summary_df, schedule_result_df
+
+
+def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.DataFrame, route_groups: list[dict], region_zip_df: pd.DataFrame):
+    zip_layer, region_layer = _build_region_layers(region_zip_df, display_service_df)
+    region_colors = _region_color_map()
+    engineer_colors = _generate_color_map([group["engineer_code"] for group in route_groups])
+    home_region_lookup: dict[str, str] = {}
+    if not home_df.empty and "SVC_ENGINEER_CODE" in home_df.columns:
+        for _, home_row in home_df.drop_duplicates(subset=["SVC_ENGINEER_CODE"]).iterrows():
+            code = str(home_row.get("SVC_ENGINEER_CODE", "")).strip()
+            region = str(home_row.get("assigned_region_name", "")).strip()
+            if code and region:
+                home_region_lookup[code] = region
+
+    if region_name != "ALL":
+        zip_layer = zip_layer[zip_layer["new_region_name"] == region_name].copy()
+        region_layer = region_layer[region_layer["new_region_name"] == region_name].copy()
+        display_service_df = display_service_df[display_service_df["new_region_name"] == region_name].copy()
+        home_df = home_df[home_df["assigned_region_name"] == region_name].copy()
+
+    if not region_layer.empty:
+        center_points = region_layer.to_crs(epsg=3857).geometry.centroid.to_crs(epsg=4326)
+        center_lat = float(center_points.y.mean())
+        center_lon = float(center_points.x.mean())
+    else:
+        center_lat, center_lon = 33.7490, -84.3880
+
+    fmap = folium.Map(location=[center_lat, center_lon], zoom_start=9, tiles="CartoDB positron")
+    folium.GeoJson(
+        data=zip_layer.to_json(),
+        name="ZIP Coverage",
+        style_function=lambda feature: {
+            "color": "#c5c9cf" if int(feature["properties"].get("service_count", 0) or 0) == 0 else "#9aa0a6",
+            "weight": 0.5 if int(feature["properties"].get("service_count", 0) or 0) == 0 else 0.8,
+            "fillColor": "#eceff3" if int(feature["properties"].get("service_count", 0) or 0) == 0 else region_colors.get(feature["properties"].get("new_region_name", ""), "#dddddd"),
+            "fillOpacity": 0.05 if int(feature["properties"].get("service_count", 0) or 0) == 0 else 0.12,
+        },
+        tooltip=folium.GeoJsonTooltip(fields=["POSTAL_CODE", "new_region_name", "service_count"], aliases=["ZIP", "Region", "Service Count"]),
+    ).add_to(fmap)
+    folium.GeoJson(
+        data=region_layer.to_json(),
+        name="Production Regions",
+        style_function=lambda feature: {
+            "color": region_colors.get(feature["properties"].get("new_region_name", ""), "#333333"),
+            "weight": 3,
+            "fillColor": "none",
+            "fillOpacity": 0.0,
+        },
+        tooltip=folium.GeoJsonTooltip(fields=["new_region_name"], aliases=["Region"]),
+    ).add_to(fmap)
+
+    if route_groups:
+        route_layer = folium.FeatureGroup(name="Assigned Routes").add_to(fmap)
+        for group in route_groups:
+            engineer_color = engineer_colors.get(group["engineer_code"], "#111827")
+            group_center_type = str(group.get("center_type", "")).upper()
+            geometry = group["route_payload"]["geometry"]
+            if geometry:
+                folium.PolyLine(
+                    locations=geometry,
+                    color=engineer_color,
+                    weight=3,
+                    opacity=0.85,
+                    popup=_popup(
+                        f"<b>Engineer</b>: {group['engineer_name']}<br>"
+                        f"<b>Engineer Code</b>: {group['engineer_code']}<br>"
+                        f"<b>Service Count</b>: {group['service_count']} | "
+                        f"<b>Distance</b>: {group['route_payload']['distance_km']:.2f} km | "
+                        f"<b>Duration</b>: {group['route_payload']['duration_min']:.2f} min",
+                        width=420,
+                    ),
+                ).add_to(route_layer)
+            if group["home_coord"] is not None:
+                home_lon, home_lat = group["home_coord"]
+                home_bg = "#111111" if group_center_type == "DMS2" else "#ffffff"
+                home_fg = "#ffffff" if group_center_type == "DMS2" else border_color if (border_color := engineer_color) else engineer_color
+                folium.Marker(
+                    location=[home_lat, home_lon],
+                    icon=folium.DivIcon(
+                        html=(
+                            f"<div style=\"font-size:10px;font-weight:700;color:{home_fg};"
+                            f"background:{home_bg};border:2px solid {engineer_color};border-radius:12px;"
+                            "padding:2px 6px;text-align:center;white-space:nowrap;\">Home</div>"
+                        )
+                    ),
+                    popup=_popup(f"<b>Home Start</b>: {group['engineer_name']}<br><b>Engineer Code</b>: {group['engineer_code']}", width=280),
+                ).add_to(route_layer)
+            for row in group["scheduled_rows"]:
+                seq = int(row.get("visit_seq", 0))
+                engineer_code = str(row.get("assigned_sm_code", "")).strip()
+                center_type = str(row.get("assigned_center_type", "")).strip().upper()
+                home_region_name = str(row.get("assigned_region_name", "")).strip()
+                if not home_region_name:
+                    home_region_name = home_region_lookup.get(engineer_code, "")
+                if not home_region_name:
+                    region_seq = pd.to_numeric(pd.Series([row.get("assigned_region_seq")]), errors="coerce").iloc[0]
+                    if pd.notna(region_seq):
+                        home_region_name = f"Atlanta New Region {int(region_seq)}"
+                marker_bg = "#111111" if center_type == "DMS2" else "#ffffff"
+                marker_fg = "#ffffff" if center_type == "DMS2" else engineer_color
+                folium.Marker(
+                    location=[float(row["latitude"]), float(row["longitude"])],
+                    icon=folium.DivIcon(
+                        html=(
+                            f"<div style=\"font-size:11px;font-weight:700;color:{marker_fg};"
+                            f"background:{marker_bg};border:2px solid {engineer_color};border-radius:12px;"
+                            "width:22px;height:22px;line-height:18px;text-align:center;\">"
+                            f"{seq}</div>"
+                        )
+                    ),
+                    popup=_popup(
+                        f"<b>Engineer</b>: {row.get('assigned_sm_name', '')}<br>"
+                        f"<b>Engineer Code</b>: {engineer_code} | "
+                        f"<b>Center Type</b>: {center_type} | "
+                        f"<b>Receipt</b>: {row.get('GSFS_RECEIPT_NO', '')} | "
+                        f"<b>Seq</b>: {seq}<br>"
+                        f"<b>Home Region</b>: {home_region_name}<br>"
+                        f"<b>Product Group</b>: {row.get('SERVICE_PRODUCT_GROUP_CODE', '')}"
+                        + (
+                            f" | <b>REF Heavy</b>: {'Y' if bool(row.get('is_heavy_repair')) else 'N'}"
+                            if str(row.get('SERVICE_PRODUCT_GROUP_CODE', '')).strip().upper() == 'REF'
+                            else ""
+                        )
+                        + "<br>"
+                        f"<b>Start</b>: {row.get('visit_start_time', '')} | "
+                        f"<b>End</b>: {row.get('visit_end_time', '')} | "
+                        f"<b>Travel</b>: {row.get('travel_time_from_prev_min', 0)} min | "
+                        f"<b>Service</b>: {int(float(row.get('service_time_min', 45)))} min",
+                        width=460,
+                    ),
+                ).add_to(route_layer)
+    else:
+        point_cluster = MarkerCluster(name="Service Points").add_to(fmap)
+        for _, row in display_service_df.iterrows():
+            if pd.isna(row.get("latitude")) or pd.isna(row.get("longitude")):
+                continue
+            folium.CircleMarker(
+                location=[float(row["latitude"]), float(row["longitude"])],
+                radius=4,
+                color=region_colors.get(str(row.get("new_region_name", "")), "#555555"),
+                weight=1,
+                fill=True,
+                fill_color=region_colors.get(str(row.get("new_region_name", "")), "#555555"),
+                fill_opacity=0.75,
+                popup=_popup(
+                    f"<b>Receipt</b>: {row.get('GSFS_RECEIPT_NO', '')} | "
+                    f"<b>Region</b>: {row.get('new_region_name', '')}<br>"
+                    f"<b>Product Group</b>: {row.get('SERVICE_PRODUCT_GROUP_CODE', '')} | "
+                    f"<b>Heavy Repair</b>: {'Y' if bool(row.get('is_heavy_repair')) else 'N'} | "
+                    f"<b>Service Time</b>: {int(float(row.get('service_time_min', 45)))} min",
+                    width=420,
+                ),
+            ).add_to(point_cluster)
+
+    home_group = folium.FeatureGroup(name="Engineer Homes").add_to(fmap)
+    for _, row in home_df.iterrows():
+        if pd.isna(row.get("latitude")) or pd.isna(row.get("longitude")):
+            continue
+        code = str(row.get("SVC_ENGINEER_CODE", ""))
+        border_color = engineer_colors.get(code, "#444444")
+        folium.Marker(
+            location=[float(row["latitude"]), float(row["longitude"])],
+            icon=folium.DivIcon(
+                html=(
+                    f"<div style=\"font-size:10px;font-weight:700;color:{border_color};"
+                    f"background:#fff;border:2px solid {border_color};border-radius:12px;"
+                    "padding:2px 6px;text-align:center;white-space:nowrap;\">Home</div>"
+                )
+            ),
+            popup=_popup(
+                f"<b>Engineer</b>: {row.get('Name', '')}<br>"
+                f"<b>Engineer Code</b>: {row.get('SVC_ENGINEER_CODE', '')}<br>"
+                f"<b>Assigned Region</b>: {row.get('assigned_region_name', '')}<br>"
+                f"<b>REF Heavy Repair</b>: {row.get('REF_HEAVY_REPAIR_FLAG', '')}",
+                width=440,
+            ),
+        ).add_to(home_group)
+
+    folium.LayerControl(collapsed=False).add_to(fmap)
+    return fmap
+
+
+def _to_csv_bytes(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+
+
+def _read_uploaded_service_csv(uploaded_file) -> pd.DataFrame:
+    if uploaded_file is None:
+        return pd.DataFrame()
+    return pd.read_csv(uploaded_file, encoding="utf-8-sig", low_memory=False)
+
+
+def _build_engineer_options(assignment_df: pd.DataFrame) -> tuple[list[str], dict[str, str]]:
+    if assignment_df.empty:
+        return ["ALL"], {}
+    engineer_df = assignment_df[["assigned_sm_code", "assigned_sm_name"]].drop_duplicates().copy()
+    engineer_df["assigned_sm_code"] = engineer_df["assigned_sm_code"].astype(str).str.strip()
+    engineer_df["assigned_sm_name"] = engineer_df["assigned_sm_name"].astype(str).str.strip()
+    name_counts = engineer_df["assigned_sm_name"].value_counts()
+    labels = ["ALL"]
+    label_to_code: dict[str, str] = {}
+    for _, row in engineer_df.sort_values(["assigned_sm_name", "assigned_sm_code"]).iterrows():
+        code = str(row["assigned_sm_code"])
+        name = str(row["assigned_sm_name"])
+        label = name if int(name_counts.get(name, 0)) <= 1 else f"{name} ({code})"
+        labels.append(label)
+        label_to_code[label] = code
+    return labels, label_to_code
+
+
+def _render_stage_status(stage_box, progress_bar, current_step: int, message: str) -> None:
+    progress_bar.progress(min(max(current_step / len(LIVE_STAGE_LABELS), 0.0), 1.0))
+    stage_box.caption(message)
+
+
+def main():
+    st.title("Atlanta Smart Routing")
+    st.caption("BigQuery or CSV upload -> geocode/cache merge -> Atlanta preprocessing -> Smart Routing assignment")
+
+    sidebar_left, sidebar_right = st.columns([1, 2.3])
+    with sidebar_left:
+        today = date.today()
+        input_source = st.radio("Input Source", ["BigQuery", "CSV Upload"], index=0)
+        start_date = st.date_input("Start Date", value=today, disabled=input_source != "BigQuery")
+        end_date = st.date_input("End Date", value=today, disabled=input_source != "BigQuery")
+        uploaded_csv = st.file_uploader(
+            "Upload Service CSV",
+            type=["csv"],
+            disabled=input_source != "CSV Upload",
+            help="Upload a CSV with the live routing columns such as SUBSIDIARY_NAME, STRATEGIC_CITY_NAME, SVC_ENGINEER_CODE, SVC_ENGINEER_NAME, SERVICE_CENTER_TYPE, SERVICE_PRODUCT_GROUP_CODE, SERVICE_PRODUCT_CODE, RECEIPT_DETAIL_SYMPTOM_CODE, GSFS_RECEIPT_NO, PROMISE_DATE, STATE_NAME, CITY_NAME, COUNTRY_NAME, POSTAL_CODE, ADDRESS_LINE1_INFO.",
+        )
+        progress_placeholder = st.empty()
+        progress_bar_placeholder = st.empty()
+        run_clicked = st.button("Load And Route", type="primary", width="stretch")
+
+        if run_clicked:
+            if input_source == "BigQuery" and start_date > end_date:
+                st.error("Start Date must be on or before End Date.")
+            elif input_source == "CSV Upload" and uploaded_csv is None:
+                st.error("Upload a CSV file before running.")
+            else:
+                stage_box = progress_placeholder.container()
+                progress_bar = progress_bar_placeholder.progress(0.0)
+                run_start = time.perf_counter()
+                _render_stage_status(
+                    stage_box,
+                    progress_bar,
+                    0,
+                    "Preparing runtime request.",
+                )
+                try:
+                    step_start = time.perf_counter()
+                    _render_stage_status(
+                        stage_box,
+                        progress_bar,
+                        0,
+                        f"{LIVE_STAGE_LABELS[0]}...",
+                    )
+                    if input_source == "BigQuery":
+                        queried_service_df, rendered_sql = query_service_data(start_date, end_date, st.secrets)
+                        input_label = f"BigQuery {start_date.isoformat()} to {end_date.isoformat()}"
+                    else:
+                        queried_service_df = _read_uploaded_service_csv(uploaded_csv)
+                        rendered_sql = ""
+                        input_label = f"CSV upload: {uploaded_csv.name}"
+                    query_elapsed = time.perf_counter() - step_start
+
+                    step_start = time.perf_counter()
+                    _render_stage_status(
+                        stage_box,
+                        progress_bar,
+                        1,
+                        f"{LIVE_STAGE_LABELS[1]} and {LIVE_STAGE_LABELS[2]}...",
+                    )
+                    runtime = build_runtime_atlanta_inputs(queried_service_df)
+                    prep_elapsed = time.perf_counter() - step_start
+
+                    step_start = time.perf_counter()
+                    _render_stage_status(
+                        stage_box,
+                        progress_bar,
+                        3,
+                        f"{LIVE_STAGE_LABELS[3]}...",
+                    )
+                    assignment_df, summary_df, schedule_df = build_atlanta_production_assignment_vrp_from_frames(
+                        engineer_region_df=runtime.engineer_region_df,
+                        home_df=runtime.home_geocode_df,
+                        service_df=runtime.service_enriched_df,
+                        attendance_limited=True,
+                    )
+                    route_elapsed = time.perf_counter() - step_start
+
+                    step_start = time.perf_counter()
+                    _render_stage_status(
+                        stage_box,
+                        progress_bar,
+                        4,
+                        f"{LIVE_STAGE_LABELS[4]}...",
+                    )
+                    st.session_state["live_runtime"] = {
+                        "input_source": input_source,
+                        "input_label": input_label,
+                        "queried_service_df": queried_service_df,
+                        "rendered_sql": rendered_sql,
+                        "geocoded_service_df": runtime.geocoded_service_df,
+                        "region_zip_df": runtime.region_zip_df,
+                        "engineer_region_df": runtime.engineer_region_df,
+                        "home_df": runtime.home_geocode_df,
+                        "service_df": runtime.service_enriched_df,
+                        "assignment_df": assignment_df,
+                        "summary_df": summary_df,
+                        "schedule_df": schedule_df,
+                    }
+                    finalize_elapsed = time.perf_counter() - step_start
+                    total_elapsed = time.perf_counter() - run_start
+                    _render_stage_status(
+                        stage_box,
+                        progress_bar,
+                        len(LIVE_STAGE_LABELS),
+                        (
+                            f"Completed in {total_elapsed:.1f}s "
+                            f"(query {query_elapsed:.1f}s, prep {prep_elapsed:.1f}s, "
+                            f"routing {route_elapsed:.1f}s, finalize {finalize_elapsed:.1f}s)."
+                        ),
+                    )
+                except Exception as exc:
+                    total_elapsed = time.perf_counter() - run_start
+                    _render_stage_status(
+                        stage_box,
+                        progress_bar,
+                        1,
+                        f"Failed after {total_elapsed:.1f}s: {exc}",
+                    )
+                    raise
+
+    state = st.session_state.get("live_runtime")
+    if not state:
+        st.info("Select BigQuery dates or upload a service CSV, then click `Load And Route` to build Smart Routing routes.")
+        return
+
+    assignment_df = state["assignment_df"].copy()
+    summary_df = state["summary_df"].copy()
+    schedule_df = state["schedule_df"].copy()
+    service_df = state["service_df"].copy()
+    home_df = state["home_df"].copy()
+    region_zip_df = state["region_zip_df"].copy()
+
+    date_options = ["ALL"] + sorted(assignment_df["service_date_key"].dropna().astype(str).unique().tolist()) if not assignment_df.empty else ["ALL"]
+    region_options = ["ALL"] + sorted(region_zip_df["new_region_name"].dropna().astype(str).unique().tolist())
+    assignment_mode_options = ["Smart Routing Assign", "Actual Routes"]
+
+    left, right = st.columns([1, 2.25])
+    with left:
+        st.caption(state.get("input_label", ""))
+        selected_mode = st.selectbox("Assignment Mode", assignment_mode_options, index=0)
+        active_assignment = assignment_df.copy()
+        active_summary = summary_df.copy()
+        active_schedule = schedule_df.copy()
+        if selected_mode == "Actual Routes":
+            active_assignment, active_summary, active_schedule = _build_actual_mode_frames(service_df.copy(), home_df.copy())
+
+    engineer_options, engineer_label_to_code = _build_engineer_options(active_assignment)
+    with right:
+        filter_col1, filter_col2, filter_col3 = st.columns(3)
+        selected_date = filter_col1.selectbox("Date", date_options, index=0)
+        selected_region = filter_col2.selectbox("Production Region", region_options, index=0)
+        selected_engineer = filter_col3.selectbox("Engineer", engineer_options, index=0)
+
+    filtered_assignment = active_assignment.copy()
+    filtered_summary = active_summary.copy()
+    filtered_schedule = active_schedule.copy()
+    filtered_home = home_df.copy()
+
+    if selected_date != "ALL":
+        filtered_assignment = filtered_assignment[filtered_assignment["service_date_key"] == selected_date].copy()
+        filtered_summary = filtered_summary[filtered_summary["service_date_key"] == selected_date].copy()
+        filtered_schedule = filtered_schedule[filtered_schedule["service_date_key"] == selected_date].copy()
+    if selected_region != "ALL":
+        filtered_assignment = filtered_assignment[filtered_assignment["new_region_name"] == selected_region].copy()
+        filtered_schedule = filtered_schedule[filtered_schedule["new_region_name"] == selected_region].copy()
+        if "assigned_region_seq" in filtered_summary.columns:
+            region_seq = int(selected_region.split()[-1])
+            filtered_summary = filtered_summary[pd.to_numeric(filtered_summary["assigned_region_seq"], errors="coerce") == region_seq].copy()
+        filtered_home = filtered_home[filtered_home["assigned_region_name"] == selected_region].copy()
+    if selected_engineer != "ALL":
+        engineer_code = engineer_label_to_code.get(selected_engineer, "")
+        filtered_assignment = filtered_assignment[filtered_assignment["assigned_sm_code"].astype(str) == engineer_code].copy()
+        filtered_summary = filtered_summary[filtered_summary["SVC_ENGINEER_CODE"].astype(str) == engineer_code].copy()
+        filtered_schedule = filtered_schedule[filtered_schedule["assigned_sm_code"].astype(str) == engineer_code].copy()
+        filtered_home = filtered_home[filtered_home["SVC_ENGINEER_CODE"].astype(str) == engineer_code].copy()
+
+    filtered_schedule = _dedupe_schedule_receipts(filtered_schedule)
+    route_groups = _build_route_groups(filtered_schedule) if selected_date != "ALL" else []
+
+    with left:
+        service_count = int(filtered_assignment["GSFS_RECEIPT_NO"].dropna().astype(str).nunique()) if not filtered_assignment.empty else 0
+        engineer_count = int(filtered_summary["SVC_ENGINEER_CODE"].astype(str).nunique()) if not filtered_summary.empty else 0
+        dms_engineer_count = 0
+        dms2_engineer_count = 0
+        if not filtered_summary.empty and "assigned_center_type" in filtered_summary.columns:
+            center_types = filtered_summary["assigned_center_type"].astype(str).str.upper()
+            dms_engineer_count = int(filtered_summary.loc[center_types == "DMS", "SVC_ENGINEER_CODE"].astype(str).nunique())
+            dms2_engineer_count = int(filtered_summary.loc[center_types == "DMS2", "SVC_ENGINEER_CODE"].astype(str).nunique())
+        avg_distance = float(pd.to_numeric(filtered_summary.get("route_distance_km"), errors="coerce").dropna().mean()) if not filtered_summary.empty else 0.0
+        avg_duration = float(pd.to_numeric(filtered_summary.get("route_duration_min"), errors="coerce").dropna().mean()) if not filtered_summary.empty else 0.0
+        jobs_std = float(pd.to_numeric(filtered_summary.get("job_count"), errors="coerce").fillna(0).std(ddof=0)) if not filtered_summary.empty else 0.0
+
+        st.metric("Service Count", service_count)
+        if selected_mode == "Actual Routes":
+            st.metric("Assigned Engineer Count", f"{engineer_count} (DMS {dms_engineer_count}, DMS2 {dms2_engineer_count})")
+        else:
+            st.metric("Assigned Engineer Count", f"{engineer_count} (DMS {engineer_count})")
+        st.metric("Average Distance (km)", f"{avg_distance:.2f}")
+        st.metric("Average Duration (min)", f"{avg_duration:.2f}")
+        st.metric("Jobs per Engineer Std", f"{jobs_std:.2f}")
+
+        region_staffing_view = _build_region_staffing_view(filtered_assignment)
+        if not region_staffing_view.empty:
+            st.markdown("**Regional Staffing / Jobs**")
+            st.dataframe(region_staffing_view, width="stretch", hide_index=True)
+
+        st.markdown("**Engineer Summary**")
+        if not filtered_summary.empty:
+            st.dataframe(
+                filtered_summary[
+                    [
+                        "SVC_ENGINEER_NAME",
+                        "job_count",
+                        "service_time_min",
+                        "travel_time_min",
+                        "route_distance_km",
+                        "route_duration_min",
+                        "total_work_min",
+                        "overflow_480",
+                    ]
+                ].sort_values(["job_count", "SVC_ENGINEER_NAME"], ascending=[False, True]),
+                width="stretch",
+                hide_index=True,
+            )
+
+        st.markdown("**Downloads**")
+        download_name = "atlanta_live_schedule_actual_routes.csv" if selected_mode == "Actual Routes" else "atlanta_live_schedule_smart_routing.csv"
+        st.download_button("Download Schedule CSV", data=_to_csv_bytes(filtered_schedule), file_name=download_name, mime="text/csv", width="stretch")
+
+    with right:
+        map_obj = build_map(selected_region, filtered_assignment, filtered_home, route_groups, region_zip_df)
+        st.iframe(map_obj.get_root().render(), height=860)
+        if not filtered_schedule.empty:
+            st.markdown("**Selected Schedule**")
+            st.dataframe(
+                filtered_schedule[
+                    [
+                        "service_date_key",
+                        "assigned_sm_name",
+                        "GSFS_RECEIPT_NO",
+                        "visit_seq",
+                        "visit_start_time",
+                        "visit_end_time",
+                        "travel_time_from_prev_min",
+                        "service_time_min",
+                        "new_region_name",
+                    ]
+                ].sort_values(["assigned_sm_name", "visit_seq"]),
+                width="stretch",
+                hide_index=True,
+            )
+
+        if state.get("input_source") == "BigQuery" and state.get("rendered_sql"):
+            with st.expander("Executed SQL", expanded=False):
+                st.code(state["rendered_sql"], language="sql")
+
+
+if __name__ == "__main__":
+    main()

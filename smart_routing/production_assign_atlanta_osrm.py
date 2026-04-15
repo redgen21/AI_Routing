@@ -14,6 +14,7 @@ PRODUCTION_OUTPUT_DIR = Path("260310/production_output")
 CLUSTER_PRIMARY_PENALTY_KM = 0.0
 CLUSTER_SECONDARY_PENALTY_KM = 8.0
 CLUSTER_OUTSIDE_PENALTY_KM = 28.0
+ITERATION_MAX_CANDIDATES = 3
 
 
 @dataclass
@@ -22,6 +23,484 @@ class AtlantaProductionOSRMAssignmentResult:
     engineer_day_summary_path: Path
     schedule_path: Path
     daily_compare_path: Path
+
+
+def _dedupe_day_jobs(service_day_df: pd.DataFrame) -> pd.DataFrame:
+    if service_day_df.empty:
+        return service_day_df.copy()
+    deduped = service_day_df.copy()
+    sort_cols = [col for col in ["service_date_key", "GSFS_RECEIPT_NO", "service_time_min"] if col in deduped.columns]
+    if sort_cols:
+        ascending = [True] * len(sort_cols)
+        if "service_time_min" in sort_cols:
+            ascending[sort_cols.index("service_time_min")] = False
+        deduped = deduped.sort_values(sort_cols, ascending=ascending).reset_index(drop=True)
+    if "GSFS_RECEIPT_NO" in deduped.columns:
+        subset = ["GSFS_RECEIPT_NO"]
+        if "service_date_key" in deduped.columns:
+            subset = ["service_date_key", "GSFS_RECEIPT_NO"]
+        deduped = deduped.drop_duplicates(subset=subset, keep="first").reset_index(drop=True)
+    return deduped
+
+
+def _rows_to_group_df(
+    rows: list[dict[str, Any]],
+    engineer_code: str,
+    engineer_name: str,
+    center_type: str,
+    start_coord: tuple[float, float] | None,
+) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+    group_df = pd.DataFrame(rows).copy()
+    group_df["assigned_sm_code"] = engineer_code
+    group_df["assigned_sm_name"] = engineer_name
+    group_df["assigned_center_type"] = center_type
+    group_df["home_start_longitude"] = start_coord[0] if start_coord is not None else pd.NA
+    group_df["home_start_latitude"] = start_coord[1] if start_coord is not None else pd.NA
+    return group_df
+
+
+def _ordered_group_rows(
+    rows: list[dict[str, Any]],
+    start_coord: tuple[float, float] | None,
+    route_client,
+) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+    group_df = _rows_to_group_df(rows, "", "", "", start_coord)
+    if start_coord is not None:
+        group_df["home_start_longitude"] = start_coord[0]
+        group_df["home_start_latitude"] = start_coord[1]
+    _, route_payload = base._build_schedule_for_group(group_df, route_client)
+    ordered_coords = route_payload.get("ordered_coords", [])
+    ordered_stop_coords = ordered_coords[1:] if start_coord is not None and len(ordered_coords) > 1 else ordered_coords
+    buckets: dict[tuple[float, float], list[dict[str, Any]]] = {}
+    for row in rows:
+        key = (round(float(row["latitude"]), 6), round(float(row["longitude"]), 6))
+        buckets.setdefault(key, []).append(dict(row))
+    ordered_rows: list[dict[str, Any]] = []
+    for lon, lat in ordered_stop_coords:
+        key = (round(float(lat), 6), round(float(lon), 6))
+        row_list = buckets.get(key, [])
+        if row_list:
+            ordered_rows.append(row_list.pop(0))
+    if len(ordered_rows) != len(rows):
+        return [dict(row) for row in rows]
+    return ordered_rows
+
+
+def _group_route_metrics(
+    rows: list[dict[str, Any]],
+    start_coord: tuple[float, float] | None,
+    route_client,
+) -> tuple[float, float]:
+    if not rows:
+        return 0.0, 0.0
+    group_df = _rows_to_group_df(rows, "", "", "", start_coord)
+    if start_coord is not None:
+        group_df["home_start_longitude"] = start_coord[0]
+        group_df["home_start_latitude"] = start_coord[1]
+    _, route_payload = base._build_schedule_for_group(group_df, route_client)
+    return float(route_payload.get("distance_km", 0.0)), float(route_payload.get("duration_min", 0.0))
+
+
+def _group_total_work_min(
+    rows: list[dict[str, Any]],
+    start_coord: tuple[float, float] | None,
+    route_client,
+) -> float:
+    service_min = float(sum(float(pd.to_numeric(pd.Series([row.get("service_time_min")]), errors="coerce").fillna(45).iloc[0]) for row in rows))
+    _, duration_min = _group_route_metrics(rows, start_coord, route_client)
+    return service_min + float(duration_min)
+
+
+def _assignment_df_from_row_groups(
+    assigned_rows: dict[str, list[dict[str, Any]]],
+    engineer_lookup: dict[str, pd.Series],
+    start_lookup: dict[str, tuple[float, float] | None],
+) -> pd.DataFrame:
+    assignment_frames: list[pd.DataFrame] = []
+    for engineer_code, rows in assigned_rows.items():
+        if not rows:
+            continue
+        engineer_row = engineer_lookup.get(engineer_code)
+        if engineer_row is None:
+            continue
+        group_df = _rows_to_group_df(
+            rows,
+            engineer_code,
+            str(engineer_row.get("Name", "")),
+            str(engineer_row.get("SVC_CENTER_TYPE", "")),
+            start_lookup.get(engineer_code),
+        )
+        assignment_frames.append(group_df)
+    return pd.concat(assignment_frames, ignore_index=True) if assignment_frames else pd.DataFrame()
+
+
+def _global_assignment_objective(
+    assignment_df: pd.DataFrame,
+    engineer_master_df: pd.DataFrame,
+    region_centers: dict[int, tuple[float, float]],
+    service_date_key: str,
+    route_client,
+) -> tuple[float, float, float, float]:
+    if assignment_df.empty:
+        return (0.0, 0.0, 0.0, 0.0)
+    summary_df = base._build_summary_from_assignment(
+        assignment_df,
+        engineer_master_df.copy(),
+        region_centers,
+        service_date_key,
+        route_client=route_client,
+    )
+    distance_col = "route_distance_km" if "route_distance_km" in summary_df.columns else "travel_distance_km"
+    overflow_count = float(
+        pd.to_numeric(summary_df["overflow_480"], errors="coerce").fillna(0).astype(int).sum()
+    ) if not summary_df.empty else 0.0
+    max_total_work = float(
+        pd.to_numeric(summary_df["total_work_min"], errors="coerce").fillna(0).max()
+    ) if not summary_df.empty else 0.0
+    weighted_std = float(_weighted_jobs_std(assignment_df))
+    total_distance = float(
+        pd.to_numeric(summary_df[distance_col], errors="coerce").fillna(0).sum()
+    ) if not summary_df.empty else 0.0
+    return (
+        round(overflow_count, 4),
+        round(max_total_work, 4),
+        round(weighted_std, 4),
+        round(total_distance, 4),
+    )
+
+
+def _objective_from_metric_maps(
+    distance_by_engineer: dict[str, float],
+    work_by_engineer: dict[str, float],
+    weighted_jobs_by_engineer: dict[str, float],
+) -> tuple[float, float, float, float]:
+    overflow_count = float(sum(1 for value in work_by_engineer.values() if float(value) > float(base.MAX_WORK_MIN)))
+    max_total_work = float(max(work_by_engineer.values())) if work_by_engineer else 0.0
+    weighted_values = [float(value) for value in weighted_jobs_by_engineer.values() if float(value) > 0]
+    if weighted_values:
+        weighted_series = pd.Series(weighted_values, dtype="float64")
+        weighted_std = float(weighted_series.std(ddof=0))
+    else:
+        weighted_std = 0.0
+    total_distance = float(sum(float(value) for value in distance_by_engineer.values()))
+    return (
+        round(overflow_count, 4),
+        round(max_total_work, 4),
+        round(weighted_std, 4),
+        round(total_distance, 4),
+    )
+
+
+def _best_insertion_cost(
+    rows: list[dict[str, Any]],
+    job_row: pd.Series | dict[str, Any],
+    start_coord: tuple[float, float] | None,
+    route_client,
+) -> tuple[float, float, int]:
+    job_dict = job_row if isinstance(job_row, dict) else job_row.to_dict()
+    job_coord = (float(job_dict["longitude"]), float(job_dict["latitude"]))
+    ordered_coords = [start_coord] if start_coord is not None else []
+    ordered_coords.extend((float(row["longitude"]), float(row["latitude"])) for row in rows)
+    if not ordered_coords:
+        return 0.0, 0.0, 0
+    coords = ordered_coords + [job_coord]
+    distance_mat_km, duration_mat_min = route_client.get_distance_duration_matrix(coords)
+    route_count = len(ordered_coords)
+    job_idx = route_count
+    if route_count <= 1:
+        inc_km, inc_min = _route_insertion_delta_from_matrix(route_count, job_idx, distance_mat_km, duration_mat_min)
+        return inc_km, inc_min, len(rows)
+
+    best_delta_km = None
+    best_delta_min = None
+    best_pos = len(rows)
+    for insert_pos in range(1, route_count + 1):
+        prev_idx = insert_pos - 1
+        next_idx = insert_pos if insert_pos < route_count else None
+        delta_km = float(distance_mat_km[prev_idx][job_idx])
+        delta_min = float(duration_mat_min[prev_idx][job_idx])
+        if next_idx is not None:
+            delta_km += float(distance_mat_km[job_idx][next_idx]) - float(distance_mat_km[prev_idx][next_idx])
+            delta_min += float(duration_mat_min[job_idx][next_idx]) - float(duration_mat_min[prev_idx][next_idx])
+        if best_delta_km is None or delta_km < best_delta_km:
+            best_delta_km = delta_km
+            best_delta_min = delta_min
+            best_pos = max(insert_pos - 1, 0)
+    return max(float(best_delta_km or 0.0), 0.0), max(float(best_delta_min or 0.0), 0.0), int(best_pos)
+
+
+def _initial_seed_assignment(
+    jobs_df: pd.DataFrame,
+    engineer_df: pd.DataFrame,
+    region_centers: dict[int, tuple[float, float]],
+    route_client,
+) -> tuple[pd.DataFrame, dict[str, list[dict[str, Any]]], dict[str, pd.Series], dict[str, tuple[float, float] | None]]:
+    remaining_df = _dedupe_day_jobs(base._job_priority(jobs_df)).copy().reset_index(drop=True)
+    engineer_lookup = {
+        str(row["SVC_ENGINEER_CODE"]): row
+        for _, row in engineer_df.drop_duplicates(subset=["SVC_ENGINEER_CODE"]).iterrows()
+    }
+    start_lookup = {
+        code: base._get_engineer_start_coord(row, region_centers)
+        for code, row in engineer_lookup.items()
+    }
+    assigned_rows: dict[str, list[dict[str, Any]]] = {code: [] for code in engineer_lookup}
+    available_engineers = {code for code, coord in start_lookup.items() if coord is not None}
+
+    while available_engineers and not remaining_df.empty:
+        best_seed: tuple[tuple[float, str, str], str, int, pd.Series] | None = None
+        for job_idx, job_row in remaining_df.iterrows():
+            candidates_df = base._candidate_engineers(job_row, engineer_df)
+            if candidates_df.empty:
+                continue
+            for _, candidate in candidates_df.iterrows():
+                engineer_code = str(candidate["SVC_ENGINEER_CODE"])
+                if engineer_code not in available_engineers:
+                    continue
+                start_coord = start_lookup.get(engineer_code)
+                if start_coord is None:
+                    continue
+                seed_km, _ = route_client.pair_distance(
+                    start_coord,
+                    (float(job_row["longitude"]), float(job_row["latitude"])),
+                )
+                score = (
+                    round(float(seed_km), 4),
+                    str(job_row.get("GSFS_RECEIPT_NO", "")),
+                    engineer_code,
+                )
+                if best_seed is None or score < best_seed[0]:
+                    best_seed = (score, engineer_code, int(job_idx), job_row)
+        if best_seed is None:
+            break
+        _, engineer_code, job_idx, job_row = best_seed
+        assigned_rows[engineer_code].append(job_row.to_dict())
+        available_engineers.discard(engineer_code)
+        remaining_df = remaining_df.drop(index=[job_idx]).reset_index(drop=True)
+
+    return remaining_df, assigned_rows, engineer_lookup, start_lookup
+
+
+def _assign_day_osrm_routing(
+    service_day_df: pd.DataFrame,
+    engineer_master_df: pd.DataFrame,
+    region_centers: dict[int, tuple[float, float]],
+    route_client,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    remaining_df, assigned_rows, engineer_lookup, start_lookup = _initial_seed_assignment(
+        service_day_df,
+        engineer_master_df,
+        region_centers,
+        route_client,
+    )
+    if not engineer_lookup:
+        return pd.DataFrame(), pd.DataFrame()
+    service_date_key = str(service_day_df["service_date_key"].iloc[0])
+
+    for _, job_row in base._job_priority(remaining_df).iterrows():
+        candidates_df = base._candidate_engineers(job_row, engineer_master_df)
+        if candidates_df.empty:
+            continue
+        best_choice: tuple[tuple[float, float, float, float, float, float, str], str, int] | None = None
+        for _, candidate in candidates_df.drop_duplicates(subset=["SVC_ENGINEER_CODE"]).iterrows():
+            engineer_code = str(candidate["SVC_ENGINEER_CODE"])
+            start_coord = start_lookup.get(engineer_code)
+            if start_coord is None:
+                continue
+            inc_km, inc_min, insert_pos = _best_insertion_cost(
+                assigned_rows.get(engineer_code, []),
+                job_row,
+                start_coord,
+                route_client,
+            )
+            projected_rows = list(assigned_rows.get(engineer_code, []))
+            projected_rows.insert(insert_pos, job_row.to_dict())
+            projected_distance_km, projected_duration_min = _group_route_metrics(projected_rows, start_coord, route_client)
+
+            trial_row_groups = {
+                code: list(rows)
+                for code, rows in assigned_rows.items()
+            }
+            trial_row_groups[engineer_code] = projected_rows
+            trial_assignment_df = _assignment_df_from_row_groups(trial_row_groups, engineer_lookup, start_lookup)
+            objective = _global_assignment_objective(
+                trial_assignment_df,
+                engineer_master_df,
+                region_centers,
+                service_date_key,
+                route_client,
+            )
+            score = (
+                objective[0],
+                objective[1],
+                objective[2],
+                objective[3],
+                round(float(projected_duration_min), 4),
+                round(float(inc_km), 4),
+                round(float(projected_distance_km), 4),
+                engineer_code,
+            )
+            if best_choice is None or score < best_choice[0]:
+                best_choice = (score, engineer_code, insert_pos)
+        if best_choice is None:
+            continue
+        target_rows = assigned_rows[best_choice[1]]
+        target_rows.insert(best_choice[2], job_row.to_dict())
+
+    assignment_df = _assignment_df_from_row_groups(assigned_rows, engineer_lookup, start_lookup)
+    summary_df = base._build_summary_from_assignment(
+        assignment_df,
+        engineer_master_df.copy(),
+        region_centers,
+        str(service_day_df["service_date_key"].iloc[0]),
+        route_client=route_client,
+    )
+    return assignment_df, summary_df
+
+
+def _iterative_relocate_swap_assignment_df(
+    assignment_df: pd.DataFrame,
+    engineer_master_df: pd.DataFrame,
+    region_centers: dict[int, tuple[float, float]],
+    route_client,
+    iterations: int = 3,
+) -> pd.DataFrame:
+    if assignment_df.empty:
+        return assignment_df
+
+    improved_df = assignment_df.copy().reset_index(drop=True)
+    engineer_lookup = {
+        str(row["SVC_ENGINEER_CODE"]): row
+        for _, row in engineer_master_df.drop_duplicates(subset=["SVC_ENGINEER_CODE"]).iterrows()
+    }
+    service_date_key = str(improved_df["service_date_key"].iloc[0])
+    baseline_objective = _global_assignment_objective(
+        improved_df,
+        engineer_master_df,
+        region_centers,
+        service_date_key,
+        route_client,
+    )
+
+    def group_rows(df: pd.DataFrame, code: str) -> list[dict[str, Any]]:
+        return df[df["assigned_sm_code"].astype(str) == str(code)].to_dict("records")
+
+    def route_total(df: pd.DataFrame, code: str) -> tuple[float, float]:
+        rows = group_rows(df, code)
+        engineer_row = engineer_lookup.get(str(code))
+        if engineer_row is None:
+            return 0.0, 0.0
+        start_coord = base._get_engineer_start_coord(engineer_row, region_centers)
+        return _group_route_metrics(rows, start_coord, route_client)
+
+    def total_work(df: pd.DataFrame, code: str) -> float:
+        rows = group_rows(df, code)
+        engineer_row = engineer_lookup.get(str(code))
+        if engineer_row is None:
+            return 0.0
+        start_coord = base._get_engineer_start_coord(engineer_row, region_centers)
+        return _group_total_work_min(rows, start_coord, route_client)
+
+    def job_weight(row: pd.Series | dict[str, Any]) -> float:
+        flag = row.get("is_heavy_repair", False) if isinstance(row, dict) else row.get("is_heavy_repair", False)
+        return 2.0 if bool(flag) else 1.0
+
+    distance_by_engineer = {
+        str(code): float(route_total(improved_df, str(code))[0])
+        for code in engineer_lookup
+    }
+    work_by_engineer = {
+        str(code): float(total_work(improved_df, str(code)))
+        for code in engineer_lookup
+    }
+    weighted_jobs_by_engineer = {
+        str(code): float(
+            pd.Series(
+                [
+                    2.0 if bool(row.get("is_heavy_repair", False)) else 1.0
+                    for row in group_rows(improved_df, str(code))
+                ],
+                dtype="float64",
+            ).sum()
+        )
+        for code in engineer_lookup
+    }
+
+    for _ in range(max(int(iterations), 1)):
+        changed = False
+        current_df = improved_df.copy()
+        for idx, job_row in current_df.iterrows():
+            source_code = str(job_row["assigned_sm_code"])
+            source_rows = group_rows(improved_df, source_code)
+            if len(source_rows) <= 1:
+                continue
+            candidates_df = base._candidate_engineers(job_row, engineer_master_df)
+            if candidates_df.empty:
+                continue
+            job_coord = (float(job_row["longitude"]), float(job_row["latitude"]))
+            ranked_candidates: list[tuple[float, pd.Series]] = []
+            for _, candidate in candidates_df.drop_duplicates(subset=["SVC_ENGINEER_CODE"]).iterrows():
+                target_code = str(candidate["SVC_ENGINEER_CODE"])
+                if target_code == source_code:
+                    continue
+                start_coord = base._get_engineer_start_coord(candidate, region_centers)
+                if start_coord is None:
+                    continue
+                dist_km, _ = route_client.pair_distance(start_coord, job_coord)
+                ranked_candidates.append((float(dist_km), candidate))
+            ranked_candidates.sort(key=lambda item: (round(item[0], 4), str(item[1].get("SVC_ENGINEER_CODE", ""))))
+
+            for _, candidate in ranked_candidates[: max(int(ITERATION_MAX_CANDIDATES), 1)]:
+                target_code = str(candidate["SVC_ENGINEER_CODE"])
+                trial_df = improved_df.copy()
+                trial_df.loc[idx, "assigned_sm_code"] = target_code
+                trial_df.loc[idx, "assigned_sm_name"] = str(candidate.get("Name", ""))
+                trial_df.loc[idx, "assigned_center_type"] = str(candidate.get("SVC_CENTER_TYPE", ""))
+                candidate_start = base._get_engineer_start_coord(candidate, region_centers)
+                trial_df.loc[idx, "home_start_longitude"] = candidate_start[0] if candidate_start is not None else pd.NA
+                trial_df.loc[idx, "home_start_latitude"] = candidate_start[1] if candidate_start is not None else pd.NA
+
+                source_new_km, _ = route_total(trial_df, source_code)
+                target_new_km, _ = route_total(trial_df, target_code)
+                source_new_work = total_work(trial_df, source_code)
+                target_new_work = total_work(trial_df, target_code)
+                if max(source_new_work, target_new_work) > (base.MAX_WORK_MIN + 45):
+                    continue
+                job_unit = job_weight(job_row)
+                trial_distance_by_engineer = dict(distance_by_engineer)
+                trial_distance_by_engineer[source_code] = float(source_new_km)
+                trial_distance_by_engineer[target_code] = float(target_new_km)
+                trial_work_by_engineer = dict(work_by_engineer)
+                trial_work_by_engineer[source_code] = float(source_new_work)
+                trial_work_by_engineer[target_code] = float(target_new_work)
+                trial_weighted_jobs = dict(weighted_jobs_by_engineer)
+                trial_weighted_jobs[source_code] = max(float(trial_weighted_jobs.get(source_code, 0.0)) - float(job_unit), 0.0)
+                trial_weighted_jobs[target_code] = float(trial_weighted_jobs.get(target_code, 0.0)) + float(job_unit)
+                objective = _objective_from_metric_maps(
+                    trial_distance_by_engineer,
+                    trial_work_by_engineer,
+                    trial_weighted_jobs,
+                )
+                if objective < baseline_objective:
+                    improved_df = trial_df
+                    baseline_objective = objective
+                    distance_by_engineer = trial_distance_by_engineer
+                    work_by_engineer = trial_work_by_engineer
+                    weighted_jobs_by_engineer = trial_weighted_jobs
+                    changed = True
+                    break
+
+            if changed:
+                break
+
+        if not changed:
+            break
+
+    return improved_df
 
 
 def _preference_penalty_km(job_row: pd.Series, engineer_code: str) -> float:
@@ -509,28 +988,33 @@ def build_atlanta_production_assignment_osrm_from_frames(
                     day_engineer_master_df.copy(),
                     region_centers,
                 )
-            if assignment_strategy == "sequence":
+            if assignment_strategy == "routing":
+                assignment_df, summary_df = _assign_day_osrm_routing(
+                    day_service_df.copy(),
+                    day_engineer_master_df.copy(),
+                    region_centers,
+                    route_client,
+                )
+            elif assignment_strategy == "sequence":
                 assignment_df, summary_df = base._assign_day_sequence(
                     day_service_df.copy(),
                     day_engineer_master_df.copy(),
                     region_centers,
                 )
             else:
-                assignment_df, summary_df = base._assign_day(
-                    day_service_df.copy(),
-                    day_engineer_master_df.copy(),
-                    region_centers,
-                    route_client,
-                    border_expansion_zip_map,
-                )
-                if assignment_strategy in {"iteration", "cluster_iteration"}:
-                    assignment_df = base._iterative_improve_assignment_df(
+                if assignment_strategy == "iteration":
+                    assignment_df, summary_df = _assign_day_osrm_routing(
+                        day_service_df.copy(),
+                        day_engineer_master_df.copy(),
+                        region_centers,
+                        route_client,
+                    )
+                    assignment_df = _iterative_relocate_swap_assignment_df(
                         assignment_df,
                         day_engineer_master_df.copy(),
                         region_centers,
-                        route_client=route_client,
-                        iterations=4,
-                        priority_mode="travel_first",
+                        route_client,
+                        iterations=1,
                     )
                     summary_df = base._build_summary_from_assignment(
                         assignment_df,
@@ -539,6 +1023,30 @@ def build_atlanta_production_assignment_osrm_from_frames(
                         str(day_service_df["service_date_key"].iloc[0]),
                         route_client=route_client,
                     )
+                else:
+                    assignment_df, summary_df = base._assign_day(
+                        day_service_df.copy(),
+                        day_engineer_master_df.copy(),
+                        region_centers,
+                        route_client,
+                        border_expansion_zip_map,
+                    )
+                    if assignment_strategy in {"cluster_iteration"}:
+                        assignment_df = base._iterative_improve_assignment_df(
+                            assignment_df,
+                            day_engineer_master_df.copy(),
+                            region_centers,
+                            route_client=route_client,
+                            iterations=4,
+                            priority_mode="travel_first",
+                        )
+                        summary_df = base._build_summary_from_assignment(
+                            assignment_df,
+                            day_engineer_master_df.copy(),
+                            region_centers,
+                            str(day_service_df["service_date_key"].iloc[0]),
+                            route_client=route_client,
+                        )
             if assignment_df.empty:
                 continue
             assignment_frames.append(assignment_df)
@@ -641,28 +1149,33 @@ def build_atlanta_production_assignment_osrm(
                     day_engineer_master_df.copy(),
                     region_centers,
                 )
-            if assignment_strategy == "sequence":
+            if assignment_strategy == "routing":
+                assignment_df, summary_df = _assign_day_osrm_routing(
+                    day_service_df.copy(),
+                    day_engineer_master_df.copy(),
+                    region_centers,
+                    route_client,
+                )
+            elif assignment_strategy == "sequence":
                 assignment_df, summary_df = base._assign_day_sequence(
                     day_service_df.copy(),
                     day_engineer_master_df.copy(),
                     region_centers,
                 )
             else:
-                assignment_df, summary_df = base._assign_day(
-                    day_service_df.copy(),
-                    day_engineer_master_df.copy(),
-                    region_centers,
-                    route_client,
-                    border_expansion_zip_map,
-                )
-                if assignment_strategy in {"iteration", "cluster_iteration"}:
-                    assignment_df = base._iterative_improve_assignment_df(
+                if assignment_strategy == "iteration":
+                    assignment_df, summary_df = _assign_day_osrm_routing(
+                        day_service_df.copy(),
+                        day_engineer_master_df.copy(),
+                        region_centers,
+                        route_client,
+                    )
+                    assignment_df = _iterative_relocate_swap_assignment_df(
                         assignment_df,
                         day_engineer_master_df.copy(),
                         region_centers,
-                        route_client=route_client,
-                        iterations=4,
-                        priority_mode="travel_first",
+                        route_client,
+                        iterations=1,
                     )
                     summary_df = base._build_summary_from_assignment(
                         assignment_df,
@@ -671,6 +1184,30 @@ def build_atlanta_production_assignment_osrm(
                         str(day_service_df["service_date_key"].iloc[0]),
                         route_client=route_client,
                     )
+                else:
+                    assignment_df, summary_df = base._assign_day(
+                        day_service_df.copy(),
+                        day_engineer_master_df.copy(),
+                        region_centers,
+                        route_client,
+                        border_expansion_zip_map,
+                    )
+                    if assignment_strategy in {"cluster_iteration"}:
+                        assignment_df = base._iterative_improve_assignment_df(
+                            assignment_df,
+                            day_engineer_master_df.copy(),
+                            region_centers,
+                            route_client=route_client,
+                            iterations=4,
+                            priority_mode="travel_first",
+                        )
+                        summary_df = base._build_summary_from_assignment(
+                            assignment_df,
+                            day_engineer_master_df.copy(),
+                            region_centers,
+                            str(day_service_df["service_date_key"].iloc[0]),
+                            route_client=route_client,
+                        )
             if assignment_df.empty:
                 continue
             assignment_frames.append(assignment_df)

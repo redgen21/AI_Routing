@@ -1,0 +1,35 @@
+{
+  "api": {
+    "host": "0.0.0.0",
+    "port": 8065
+  },
+  "routing_api_url": "http://20.51.244.68:8065",
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "dbname": "vrp_db",
+    "user": "vrp_agent",
+    "password": "csda123!"
+  },
+  "defaults": {
+    "subsidiary_name": "LGEAI",
+    "strategic_city_name": "Atlanta, GA"
+  },
+  "routing_seed": {
+    "distance_backend": "city_osrm_else_haversine",
+    "assignment_distance_backend": "haversine",
+    "osrm_url": "http://20.51.244.68:5000",
+    "osrm_profile": "driving",
+    "city_osrm_urls": {
+      "Los Angeles, CA": "http://20.51.244.68:5001",
+      "Atlanta, GA": "http://20.51.244.68:5002"
+    },
+    "effective_service_per_sm": 4,
+    "target_sm_per_region": 5,
+    "service_time_per_job_min": 60,
+    "max_work_min_per_sm_day": 480,
+    "max_travel_min_per_sm_day": 240,
+    "max_travel_km_per_sm_day": 120,
+    "timezone_offset": "-04:00"
+  }
+}

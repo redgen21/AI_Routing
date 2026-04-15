@@ -1,0 +1,16 @@
+﻿service_date_key,SVC_ENGINEER_CODE,assigned_region_seq,zip_overlap_count,zip_overlap_ratio,AREA_NAME,SVC_CENTER_TYPE,assigned_region_name,preferred_region_rank_1,preferred_region_rank_2,preferred_region_rank_3,anchor_region_seq,anchor_region_name,Name,normalized_slot,REF_HEAVY_REPAIR_FLAG,latitude,longitude
+2026-03-31,AI103146,2,3,0.75,AI103146_Arthur Gloster,DMS,Atlanta New Region 2,,,,,,Arthur Gloster,8,Y,34.11132010000001,-84.2611806
+2026-03-31,AI102608,1,8,1.0,AI102608_Sergey Ashihmin,DMS,Atlanta New Region 1,,,,,,Sergey Ashihmin,8,Y,34.0992678,-84.6247226
+2026-03-31,AI102933,2,11,0.55,AI102933_Richardo Brooks,DMS,Atlanta New Region 2,,,,,,Richardo Brooks,8,Y,33.617583,-83.972026
+2026-03-31,AI102448,3,16,0.7273,AI102448_Gilbert Dupree,DMS,Atlanta New Region 3,,,,,,Gilbert Dupree,8,Y,33.936932039487,-84.68736026055
+2026-03-31,AI102087,1,13,1.0,AI102087_Marcus Harmon,DMS,Atlanta New Region 1,,,,,,Marcus Harmon,8,Y,33.928986364898,-84.748964265659
+2026-03-31,AI105115,3,8,1.0,AI105115_Jason Patterson_T/TH_NON REF,DMS,Atlanta New Region 3,,,,,,Jason Patterson,8,N,33.189745727281,-83.875801190073
+2026-03-31,AI005576,1,8,0.3636,AI005576_Rudy Edole,DMS,Atlanta New Region 1,,,,,,RUDY EDOLE,8,Y,33.629797793466,-84.2013870795
+2026-03-31,AI103128,2,11,0.6111,AI103128_Ivan Zimic,DMS,Atlanta New Region 2,,,,,,Ivan Zimic,8,Y,34.34432048806,-84.071245414198
+2026-03-31,AI102961,1,12,0.1333,AI102961_Nicholas Foskin_SAMEDAY,DMS,Atlanta New Region 1,,,,,,Nicholas Foskin,8,Y,33.895481059397,-83.991723522499
+2026-03-31,AI103264,2,15,0.8824,AI103264_Adolph Scarlett,DMS,Atlanta New Region 2,,,,,,Adolph Scarlett,8,Y,33.757983120639,-84.035460468907
+2026-03-31,AI105116,3,14,0.1647,AI105116_Frank Hooks_Float,DMS,Atlanta New Region 3,,,,,,Frank Hooks,8,Y,33.875496159031,-84.700128091381
+2026-03-31,AI102315,2,20,1.0,AI102315_Winston Perez,DMS,Atlanta New Region 2,,,,,,Winston Perez,8,Y,33.949958875921,-83.798998485556
+2026-03-31,AI103317,2,20,0.202,AI103317_Richard Grant_SAMEDAY,DMS,Atlanta New Region 2,,,,,,Richard Grant,8,Y,33.363360215869,-84.108908534098
+2026-03-31,AI102977,1,9,0.5625,AI102977_Yu Brandon Zheng,DMS,Atlanta New Region 1,,,,,,Yu Zheng,8,Y,34.018539783845,-84.451551533147
+2026-03-31,AI103261,3,16,1.0,AI103261_Horace Bull,DMS,Atlanta New Region 3,,,,,,Horace Bull,8,Y,33.450883432924,-84.179052980296

@@ -1,0 +1,14 @@
+{
+  "job_id": "ROUTE-2026-03-31_1d8d2c2d",
+  "status": "completed",
+  "created_at": "2026-04-03T02:23:37Z",
+  "updated_at": "2026-04-03T02:24:12Z",
+  "started_at": "2026-04-03T02:23:37Z",
+  "completed_at": "2026-04-03T02:24:12Z",
+  "request_id": "ROUTE-2026-03-31",
+  "summary": {
+    "total_jobs": 41,
+    "assigned_jobs": 41,
+    "unassigned_jobs": 0
+  }
+}

@@ -1,0 +1,30 @@
+# Area Map Notes 2026-03-18
+
+- `AREA_NAME` values in the profile workbook can contain leading spaces, trailing spaces, and embedded newlines.
+- Map statistics and area geometry joins must normalize key text fields before grouping or merging.
+- A displayed `area_km2 = 0` is not necessarily a true zero-area region. Check name normalization and geometry join coverage first.
+- The current loader normalizes `AREA_NAME`, `STRATEGIC_CITY_NAME`, `SVC_ENGINEER_CODE`, and related display fields when reading the workbook.
+- City-level map datasets are cached on disk under `data/cache/area_map/<city_slug>/`.
+- Cache reuse is allowed only when the profile workbook, the ZCTA ZIP file, and the selected geocoded service file all have the same path and modification time as the cached metadata.
+- Display layers use simplified geometries before caching to reduce Folium rendering cost.
+- Area colors are generated dynamically per city so large cities such as Los Angeles are not limited by a short fixed palette.
+- Map HTML is also cached by `city + area + service-point toggle` in the Streamlit layer.
+- ZIP and AREA map tooltips now use actual service counts matched by `POSTAL_CODE` from the geocoded service file rather than slot capacity from the profile workbook.
+- AREA polygons own the color semantics. ZIP polygons are drawn with thin neutral boundaries so users can distinguish postal boundaries from area coverage.
+- The profile workbook contains heavy multi-assignment of the same ZIP to multiple `AREA_NAME` values, especially in Los Angeles.
+- For map interaction, each ZIP is now assigned to a single primary `AREA_NAME` using the most frequent workbook assignment for that ZIP. This prevents stacked overlapping area polygons from showing mismatched popups.
+- A service-driven profile sync flow is available for `DMS/DMS2` engineers.
+- Updated `Zip Coverage` keeps the original postal-area master and replaces engineer assignments with active service engineers observed on the same `POSTAL_CODE + STRATEGIC_CITY_NAME + SVC_CENTER_TYPE`.
+- When a postal code maps to multiple areas in the workbook, the profile sync uses only one primary area per `POSTAL_CODE + STRATEGIC_CITY_NAME + SVC_CENTER_TYPE`, chosen by the most frequent workbook assignment.
+- Updated `Slot` keeps active existing rows, drops inactive rows, and adds missing active service engineers with default `Slot=7`.
+- The map UI now shows two stacked maps on the right side:
+  - current ZIP and AREA coverage
+  - redesigned integrated regions from `region_design_postal_*.csv`
+- The integrated region map uses the latest `region_design_postal_*.csv` file in `260310/input`.
+- Integrated regions are dissolved from postal assignments and rendered with their own color map independent from the current AREA map.
+- The integrated region stats table is shown in the left panel so users can compare current coverage and redesigned regions in the same screen.
+- Region dissolve now uses `GeoSeries.union_all()` instead of the deprecated `unary_union` attribute.
+- Integrated region stats now expose service-balance and radius metrics so users can review:
+  - `service_gap_pct`
+  - `max_radius_km`
+  - `avg_radius_km`
