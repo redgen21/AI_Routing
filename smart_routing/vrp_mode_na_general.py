@@ -331,7 +331,10 @@ def _build_response_payload(
 
 
 def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
-    from smart_routing.production_assign_atlanta_vrp import build_atlanta_production_assignment_vrp_from_frames
+    from smart_routing.production_assign_atlanta_vrp import (
+        RETURN_HOME_MAX_WORK_MIN,
+        build_atlanta_production_assignment_vrp_from_frames,
+    )
 
     region_zip_df, reference_engineer_region_df, reference_home_df = _load_reference_inputs()
     region_lookup = _build_region_lookup(region_zip_df)
@@ -351,6 +354,12 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
         errors="coerce",
     ).fillna(20).clip(lower=10).iloc[0])
     respect_fixed_jobs = bool(request_payload.get("options", {}).get("respect_fixed_jobs", True))
+    return_to_home = bool(request_payload.get("options", {}).get("return_to_home", False))
+    default_max_work_min = RETURN_HOME_MAX_WORK_MIN if return_to_home else 480
+    max_work_min = int(pd.to_numeric(
+        pd.Series([request_payload.get("options", {}).get("max_work_min", default_max_work_min)]),
+        errors="coerce",
+    ).fillna(default_max_work_min).clip(lower=1).iloc[0])
     _, summary_df, schedule_df = build_atlanta_production_assignment_vrp_from_frames(
         engineer_region_df=engineer_region_df,
         home_df=home_df,
@@ -358,5 +367,7 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
         attendance_limited=False,
         time_limit_seconds=time_limit_seconds,
         respect_fixed_jobs=respect_fixed_jobs,
+        return_to_home=return_to_home,
+        max_work_min=max_work_min,
     )
     return _build_response_payload(request_payload, summary_df, schedule_df)

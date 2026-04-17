@@ -10,6 +10,7 @@ import smart_routing.production_assign_atlanta as base
 
 
 PRODUCTION_OUTPUT_DIR = Path("260310/production_output")
+RETURN_HOME_MAX_WORK_MIN = 560
 
 
 @dataclass
@@ -67,7 +68,11 @@ def _build_route_geometry(route_client, coord_chain: list[tuple[float, float]]) 
     return round(total_km, 2), round(total_min, 2), geometry
 
 
-def _build_schedule_for_ordered_group(group_df: pd.DataFrame, route_client) -> tuple[pd.DataFrame, dict[str, object]]:
+def _build_schedule_for_ordered_group(
+    group_df: pd.DataFrame,
+    route_client,
+    return_to_home: bool = False,
+) -> tuple[pd.DataFrame, dict[str, object]]:
     if group_df.empty:
         return pd.DataFrame(), {"distance_km": 0.0, "duration_min": 0.0, "geometry": [], "ordered_coords": []}
 
@@ -79,6 +84,8 @@ def _build_schedule_for_ordered_group(group_df: pd.DataFrame, route_client) -> t
 
     stop_coords = [(float(row["longitude"]), float(row["latitude"])) for _, row in ordered_group.iterrows()]
     coord_chain = [start_coord] + stop_coords if start_coord is not None else stop_coords
+    if return_to_home and start_coord is not None and stop_coords:
+        coord_chain = coord_chain + [start_coord]
     distance_mat, duration_mat = route_client.get_distance_duration_matrix(coord_chain)
     route_distance_km, route_duration_min, geometry = _build_route_geometry(route_client, coord_chain)
 
@@ -126,6 +133,7 @@ def _build_schedule_for_ordered_group(group_df: pd.DataFrame, route_client) -> t
         schedule_row["visit_start_time"] = base._fmt_dt(start_time)
         schedule_row["visit_end_time"] = base._fmt_dt(end_time)
         schedule_row["lunch_applied"] = lunch_flag
+        schedule_row["return_to_home"] = bool(return_to_home)
         schedule_row["route_distance_km"] = round(float(route_distance_km), 2)
         schedule_row["route_duration_min"] = round(float(route_duration_min), 2)
         schedule_rows.append(schedule_row)
@@ -146,6 +154,8 @@ def _solve_vrp_day(
     region_centers: dict[int, tuple[float, float]],
     time_limit_seconds: int = 20,
     respect_fixed_jobs: bool = True,
+    return_to_home: bool = False,
+    max_work_min: int = base.MAX_WORK_MIN,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     job_df = _dedupe_day_jobs(service_day_df)
     if job_df.empty or engineer_master_df.empty:
@@ -174,7 +184,8 @@ def _solve_vrp_day(
 
     start_coords = [tuple(coord) for coord in engineer_df["start_coord"].tolist()]
     job_coords = [(float(row["longitude"]), float(row["latitude"])) for _, row in job_df.iterrows()]
-    matrix_coords = start_coords + job_coords
+    end_coords = start_coords if return_to_home else []
+    matrix_coords = start_coords + job_coords + end_coords
     distance_mat_km, duration_mat_min = route_client.get_distance_duration_matrix(matrix_coords)
 
     manager = pywrapcp.RoutingIndexManager(job_count + (2 * vehicle_count), vehicle_count, list(range(job_count, job_count + vehicle_count)), list(range(job_count + vehicle_count, job_count + (2 * vehicle_count))))
@@ -190,6 +201,9 @@ def _solve_vrp_day(
             return 10_000_000.0
         if from_node in start_nodes and to_node in end_nodes:
             return 0.0
+        if to_node in end_nodes and return_to_home and from_node < job_count:
+            end_vehicle_idx = to_node - (job_count + vehicle_count)
+            return float(duration_mat_min[vehicle_count + from_node][vehicle_count + job_count + end_vehicle_idx])
         if to_node in end_nodes:
             return 0.0
         if from_node in start_nodes and to_node < job_count:
@@ -213,7 +227,7 @@ def _solve_vrp_day(
     transit_callback_index = routing.RegisterTransitCallback(transit_cost_callback)
     time_callback_index = routing.RegisterTransitCallback(time_callback)
     routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
-    routing.AddDimension(time_callback_index, 0, int(base.MAX_WORK_MIN * 100), True, "Time")
+    routing.AddDimension(time_callback_index, 0, int(max_work_min * 100), True, "Time")
     time_dimension = routing.GetDimensionOrDie("Time")
     time_dimension.SetGlobalSpanCostCoefficient(100)
 
@@ -270,7 +284,11 @@ def _solve_vrp_day(
 
         if ordered_rows:
             ordered_group_df = pd.DataFrame(ordered_rows)
-            schedule_df, _ = _build_schedule_for_ordered_group(ordered_group_df, route_client)
+            schedule_df, _ = _build_schedule_for_ordered_group(
+                ordered_group_df,
+                route_client,
+                return_to_home=return_to_home,
+            )
             if not schedule_df.empty:
                 schedule_frames.append(schedule_df)
 
@@ -309,7 +327,8 @@ def _solve_vrp_day(
             pd.to_numeric(summary_df["service_time_min"], errors="coerce").fillna(0)
             + pd.to_numeric(summary_df["travel_time_min"], errors="coerce").fillna(0)
         ).round(2)
-        summary_df["overflow_480"] = summary_df["total_work_min"] > base.MAX_WORK_MIN
+        summary_df["max_work_min_limit"] = int(max_work_min)
+        summary_df["overflow_480"] = summary_df["total_work_min"] > max_work_min
     return assignment_df, summary_df, schedule_result_df
 
 
@@ -318,6 +337,8 @@ def build_atlanta_production_assignment_vrp(
     output_suffix: str = "vrp_actual_3days",
     attendance_limited: bool = True,
     respect_fixed_jobs: bool = True,
+    return_to_home: bool = False,
+    max_work_min: int = base.MAX_WORK_MIN,
 ) -> AtlantaProductionVRPAssignmentResult:
     assignment_path, summary_path, schedule_path = _output_paths(output_suffix)
     _, engineer_region_df, home_df, service_df = base._load_inputs()
@@ -348,6 +369,8 @@ def build_atlanta_production_assignment_vrp(
             route_client,
             region_centers,
             respect_fixed_jobs=respect_fixed_jobs,
+            return_to_home=return_to_home,
+            max_work_min=max_work_min,
         )
         if assignment_df.empty:
             continue
@@ -377,6 +400,8 @@ def build_atlanta_production_assignment_vrp_from_frames(
     attendance_limited: bool = True,
     time_limit_seconds: int = 20,
     respect_fixed_jobs: bool = True,
+    return_to_home: bool = False,
+    max_work_min: int = base.MAX_WORK_MIN,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     working_service_df = service_df.copy()
     if not working_service_df.empty:
@@ -423,6 +448,8 @@ def build_atlanta_production_assignment_vrp_from_frames(
             region_centers,
             time_limit_seconds=time_limit_seconds,
             respect_fixed_jobs=respect_fixed_jobs,
+            return_to_home=return_to_home,
+            max_work_min=max_work_min,
         )
         if assignment_df.empty:
             continue

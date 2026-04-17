@@ -68,6 +68,7 @@ def build_payload_from_service_frame(
     mode: str = "na_general",
     city: str = "",
     respect_fixed_jobs: bool = True,
+    return_to_home: bool = False,
     objective: str = "min_total_travel_time",
     time_limit_seconds: int = 30,
 ) -> dict:
@@ -161,6 +162,8 @@ def build_payload_from_service_frame(
         "planning_date": planning_date,
         "options": {
             "respect_fixed_jobs": bool(respect_fixed_jobs),
+            "return_to_home": bool(return_to_home),
+            "max_work_min": 560 if bool(return_to_home) else 480,
             "time_limit_seconds": int(time_limit_seconds),
             "objective": objective,
             "timezone_offset": "-04:00",

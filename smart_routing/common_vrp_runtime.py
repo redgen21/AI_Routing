@@ -67,6 +67,7 @@ def _build_payload_from_dataframes(
     promise_date: str,
     config_path: Path = COMMON_CONFIG_PATH,
     mode: str = "na_general",
+    return_to_home: bool = False,
 ) -> dict[str, Any]:
     if jobs_df.empty:
         raise ValueError("No jobs found for the selected PROMISE_DATE.")
@@ -225,6 +226,8 @@ def _build_payload_from_dataframes(
         "planning_date": planning_date,
         "options": {
             "respect_fixed_jobs": True,
+            "return_to_home": bool(return_to_home),
+            "max_work_min": 560 if bool(return_to_home) else 480,
             "objective": "min_total_travel_time",
             "time_limit_seconds": 30,
             "timezone_offset": timezone_offset,
@@ -242,10 +245,20 @@ def build_payload_from_inputs(
     technician_rows: list[dict[str, Any]],
     config_path: Path = COMMON_CONFIG_PATH,
     mode: str = "na_general",
+    return_to_home: bool = False,
 ) -> dict[str, Any]:
     jobs_df = pd.DataFrame(job_rows)
     technicians_df = pd.DataFrame(technician_rows)
-    return _build_payload_from_dataframes(jobs_df, technicians_df, subsidiary_name, strategic_city_name, promise_date, config_path=config_path, mode=mode)
+    return _build_payload_from_dataframes(
+        jobs_df,
+        technicians_df,
+        subsidiary_name,
+        strategic_city_name,
+        promise_date,
+        config_path=config_path,
+        mode=mode,
+        return_to_home=return_to_home,
+    )
 
 
 def _enrich_jobs_heavy_repair(jobs: list[dict[str, Any]], config_path: Path = COMMON_CONFIG_PATH) -> list[dict[str, Any]]:
