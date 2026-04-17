@@ -165,13 +165,10 @@ def _build_route_groups(schedule_df: pd.DataFrame, strategic_city_name: str):
     for engineer_code, group in schedule_df.groupby("assigned_sm_code", dropna=True):
         group = group.sort_values("visit_seq").reset_index(drop=True)
         start_coord = None
-        return_to_home = _coerce_bool_value(group.iloc[0].get("return_to_home", False))
         if pd.notna(group.iloc[0].get("home_start_longitude")) and pd.notna(group.iloc[0].get("home_start_latitude")):
             start_coord = (float(group.iloc[0]["home_start_longitude"]), float(group.iloc[0]["home_start_latitude"]))
         stop_coords = [(float(row["longitude"]), float(row["latitude"])) for _, row in group.iterrows()]
         coord_chain = [start_coord] + stop_coords if start_coord is not None else stop_coords
-        if return_to_home and start_coord is not None and stop_coords:
-            coord_chain = coord_chain + [start_coord]
         route_payload = get_route_client(strategic_city_name).build_ordered_route(tuple(coord_chain), preserve_first=start_coord is not None)
         route_groups.append(
             {
@@ -777,7 +774,6 @@ def _build_common_result_frames(
     merged["visit_seq"] = pd.to_numeric(merged.get("sequence"), errors="coerce").fillna(0).astype(int)
     merged["assigned_sm_name"] = merged["assigned_sm_name"].fillna(merged.get("employee_code"))
     merged["changed"] = merged.get("changed", False).fillna(False)
-    merged["return_to_home"] = bool((st.session_state.get("common_vrp_payload") or {}).get("options", {}).get("return_to_home", False))
     merged["assigned_region_name"] = pd.NA
     merged["travel_time_from_prev_min"] = pd.NA
     schedule_df = merged.sort_values(["assigned_sm_code", "visit_seq", "GSFS_RECEIPT_NO"]).reset_index(drop=True)
@@ -838,7 +834,6 @@ def _build_common_actual_frames(
     actual_df["visit_end_time"] = ""
     actual_df["travel_time_from_prev_min"] = pd.NA
     actual_df["assigned_region_name"] = pd.NA
-    actual_df["return_to_home"] = bool((st.session_state.get("common_vrp_payload") or {}).get("options", {}).get("return_to_home", False))
     schedule_df = actual_df.sort_values(["service_date_key", "assigned_sm_code", "visit_seq"]).reset_index(drop=True)
     assignment_df = schedule_df.copy()
     return assignment_df, schedule_df
@@ -1484,7 +1479,6 @@ def _render_payload_tab(subsidiary_name: str, strategic_city_name: str) -> None:
     st.caption(f"Jobs for selected date: {len(selected_jobs_df)}")
     available_tech_count = int(technicians_df["available"].fillna(False).astype(bool).sum()) if not technicians_df.empty and "available" in technicians_df.columns else 0
     st.caption(f"Available technicians saved: {available_tech_count}")
-    return_to_home = st.checkbox("Return To Home", value=bool(st.session_state.get("common_vrp_return_to_home", True)), key="common_vrp_return_to_home")
 
     if st.button("Build Payload", type="primary", width="stretch"):
         try:
@@ -1499,7 +1493,6 @@ def _render_payload_tab(subsidiary_name: str, strategic_city_name: str) -> None:
                         "jobs": selected_jobs_df.to_dict("records"),
                         "technicians": technicians_df.to_dict("records"),
                         "mode": "na_general",
-                        "return_to_home": bool(return_to_home),
                     },
                 )
             payload = response.get("payload")

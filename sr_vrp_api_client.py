@@ -637,13 +637,10 @@ def _build_route_groups(schedule_df: pd.DataFrame):
     for engineer_code, group in schedule_df.groupby("assigned_sm_code", dropna=True):
         group = group.sort_values("visit_seq").reset_index(drop=True)
         start_coord = None
-        return_to_home = _coerce_bool_value(group.iloc[0].get("return_to_home", False))
         if pd.notna(group.iloc[0].get("home_start_longitude")) and pd.notna(group.iloc[0].get("home_start_latitude")):
             start_coord = (float(group.iloc[0]["home_start_longitude"]), float(group.iloc[0]["home_start_latitude"]))
         stop_coords = [(float(row["longitude"]), float(row["latitude"])) for _, row in group.iterrows()]
         coord_chain = [start_coord] + stop_coords if start_coord is not None else stop_coords
-        if return_to_home and start_coord is not None and stop_coords:
-            coord_chain = coord_chain + [start_coord]
         route_payload = get_route_client().build_ordered_route(tuple(coord_chain), preserve_first=start_coord is not None)
         route_groups.append(
             {
@@ -712,7 +709,6 @@ def _build_preview_route_groups(service_df: pd.DataFrame, home_df: pd.DataFrame)
     preview_df["visit_start_time"] = ""
     preview_df["visit_end_time"] = ""
     preview_df["assigned_region_name"] = preview_df.get("new_region_name", pd.Series(index=preview_df.index))
-    preview_df["return_to_home"] = bool((st.session_state.get("vrp_payload") or {}).get("options", {}).get("return_to_home", False))
     return _build_route_groups(preview_df)
 
 
@@ -932,7 +928,6 @@ def _build_result_frames(result_payload: dict, runtime_state: dict) -> tuple[pd.
     merged["travel_time_from_prev_min"] = pd.NA
     merged["assigned_sm_name"] = merged["assigned_sm_name"].fillna(merged["employee_code"])
     merged["changed"] = merged.get("changed", False).fillna(False)
-    merged["return_to_home"] = bool((st.session_state.get("vrp_payload") or {}).get("options", {}).get("return_to_home", False))
     schedule_df = merged.sort_values(["service_date_key", "assigned_sm_code", "visit_seq"]).reset_index(drop=True)
     assignment_df = schedule_df.copy()
     return assignment_df, schedule_df
@@ -955,7 +950,6 @@ def _build_actual_frames(runtime_state: dict) -> tuple[pd.DataFrame, pd.DataFram
     actual_df["visit_start_time"] = ""
     actual_df["visit_end_time"] = ""
     actual_df["travel_time_from_prev_min"] = pd.NA
-    actual_df["return_to_home"] = bool((st.session_state.get("vrp_payload") or {}).get("options", {}).get("return_to_home", False))
     schedule_df = actual_df.sort_values(["service_date_key", "assigned_sm_code", "visit_seq"]).reset_index(drop=True)
     assignment_df = schedule_df.copy()
     return assignment_df, schedule_df
@@ -1070,7 +1064,6 @@ def _render_input_manager(server_url: str) -> None:
         )
         selected_count = int(store_df.loc[store_df["PROMISE_DATE"].astype(str) == str(selected_promise_date), "GSFS_RECEIPT_NO"].astype(str).nunique()) if selected_promise_date else 0
         st.caption(f"Saved rows for selected PROMISE_DATE: {selected_count}")
-        return_to_home = st.checkbox("Return To Home", value=bool(st.session_state.get("vrp_return_to_home", True)), key="vrp_return_to_home")
         if st.button("Build Payload", width="stretch"):
             if not selected_promise_date:
                 st.warning("Select PROMISE_DATE first.")
@@ -1094,7 +1087,6 @@ def _render_input_manager(server_url: str) -> None:
                             planning_date=planning_date,
                             request_id=f"ROUTE-{planning_date}",
                             mode=ROUTING_MODE,
-                            return_to_home=bool(return_to_home),
                         )
                         st.session_state["vrp_payload"] = payload
                         st.session_state["vrp_runtime"] = {
