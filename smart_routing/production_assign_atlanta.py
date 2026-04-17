@@ -77,13 +77,17 @@ def _load_config(config_path: Path = Path("config.json")) -> dict[str, Any]:
 
 def _build_route_client() -> OSRMTripClient:
     routing_cfg = _load_config().get("routing", {})
+    city_osrm_urls = routing_cfg.get("city_osrm_urls", {}) if isinstance(routing_cfg.get("city_osrm_urls", {}), dict) else {}
+    osrm_url = str(city_osrm_urls.get(ATLANTA_CITY, "http://20.51.244.68:5002")).rstrip("/")
+    fallback_osrm_url = routing_cfg.get("fallback_osrm_url")
+    fallback_osrm_url = str(fallback_osrm_url).rstrip("/") if fallback_osrm_url else None
     return OSRMTripClient(
         OSRMConfig(
-            osrm_url=str(routing_cfg.get("city_osrm_urls", {}).get(ATLANTA_CITY, routing_cfg.get("osrm_url", "http://20.51.244.68:5002"))).rstrip("/"),
+            osrm_url=osrm_url,
             mode="osrm",
             osrm_profile=str(routing_cfg.get("osrm_profile", "driving")),
             cache_file=Path("data/cache/osrm_trip_cache_atlanta_production_assignment.csv"),
-            fallback_osrm_url=str(routing_cfg.get("osrm_url", "http://20.51.244.68:5000")).rstrip("/"),
+            fallback_osrm_url=fallback_osrm_url,
         )
     )
 
@@ -564,18 +568,14 @@ def _grow_assign_jobs(
 
 
 def _candidate_engineers(job_row: pd.Series, engineer_master_df: pd.DataFrame) -> pd.DataFrame:
-    is_tv = bool(job_row.get("is_tv_job", False))
     is_heavy = bool(job_row.get("is_heavy_repair", False))
     product_group = str(job_row.get("SERVICE_PRODUCT_GROUP_CODE", "")).strip().upper()
 
-    if is_tv:
-        candidates = engineer_master_df[engineer_master_df["SVC_CENTER_TYPE"] == DMS2_CENTER_TYPE].copy()
-    else:
-        region_dms = engineer_master_df[
-            engineer_master_df["SVC_CENTER_TYPE"] == DMS_CENTER_TYPE
-        ].copy()
-        floating_dms2 = engineer_master_df[engineer_master_df["SVC_CENTER_TYPE"] == DMS2_CENTER_TYPE].copy()
-        candidates = pd.concat([region_dms, floating_dms2], ignore_index=True)
+    region_dms = engineer_master_df[
+        engineer_master_df["SVC_CENTER_TYPE"] == DMS_CENTER_TYPE
+    ].copy()
+    floating_dms2 = engineer_master_df[engineer_master_df["SVC_CENTER_TYPE"] == DMS2_CENTER_TYPE].copy()
+    candidates = pd.concat([region_dms, floating_dms2], ignore_index=True)
 
     if is_heavy and product_group == REF_PRODUCT_GROUP:
         candidates = candidates[candidates["REF_HEAVY_REPAIR_FLAG"] == "Y"].copy()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -9,27 +10,53 @@ import pandas as pd
 
 from .common_vrp_db import (
     COMMON_CONFIG_PATH,
+    DEFAULT_HEAVY_REPAIR_LOOKUP_PATH,
+    DEFAULT_SYMPTOM_FILE,
     get_latest_routing_request,
     get_routing_config,
     get_routing_request,
     get_routing_result,
     list_engineers,
     list_heavy_repair_rules,
-    load_common_config,
-    replace_request_technicians,
-    upsert_jobs,
     upsert_routing_request,
     upsert_routing_result,
 )
 from .live_atlanta_runtime import _load_config as _load_runtime_config
 from .live_atlanta_runtime import _merge_service_geocodes
-from .vrp_api_client import get_routing_job_result, get_routing_job_status, submit_routing_job
+from .vrp_api_service import create_job_id, load_result, load_status, process_job, save_new_job
 
 
-def _routing_server_url(config_path: Path = COMMON_CONFIG_PATH) -> str:
-    cfg = load_common_config(config_path)
-    url = str(cfg.get("routing_api_url", "http://20.51.244.68:8055")).strip()
-    return url or "http://20.51.244.68:8055"
+def _normalize_heavy_repair_rules(rule_df: pd.DataFrame) -> pd.DataFrame:
+    if rule_df.empty:
+        return pd.DataFrame(columns=["product_group_code", "product_code", "detailed_symptom_code"])
+    rename_map = {
+        "SERVICE_PRODUCT_GROUP_CODE": "product_group_code",
+        "SERVICE_PRODUCT_CODE": "product_code",
+        "SYMP_CODE_THREE": "detailed_symptom_code",
+    }
+    working = rule_df.rename(columns={k: v for k, v in rename_map.items() if k in rule_df.columns}).copy()
+    required = ["product_group_code", "product_code", "detailed_symptom_code"]
+    for col in required:
+        if col not in working.columns:
+            working[col] = ""
+        working[col] = working[col].fillna("").astype(str).str.strip().str.upper()
+    working = working[required]
+    working = working[
+        working["product_group_code"].ne("")
+        & working["product_code"].ne("")
+        & working["detailed_symptom_code"].ne("")
+    ].copy()
+    return working.drop_duplicates().reset_index(drop=True)
+
+
+def _load_fallback_heavy_repair_rules() -> pd.DataFrame:
+    if DEFAULT_HEAVY_REPAIR_LOOKUP_PATH.exists():
+        lookup_df = pd.read_csv(DEFAULT_HEAVY_REPAIR_LOOKUP_PATH, encoding="utf-8-sig")
+    else:
+        from .production_atlanta import _build_heavy_repair_lookup
+
+        lookup_df = _build_heavy_repair_lookup(DEFAULT_SYMPTOM_FILE)
+    return _normalize_heavy_repair_rules(lookup_df)
 
 
 def _build_payload_from_dataframes(
@@ -39,6 +66,7 @@ def _build_payload_from_dataframes(
     strategic_city_name: str,
     promise_date: str,
     config_path: Path = COMMON_CONFIG_PATH,
+    mode: str = "na_general",
 ) -> dict[str, Any]:
     if jobs_df.empty:
         raise ValueError("No jobs found for the selected PROMISE_DATE.")
@@ -50,25 +78,7 @@ def _build_payload_from_dataframes(
         raise ValueError("No available technicians selected.")
 
     engineer_master_df = list_engineers(subsidiary_name, strategic_city_name, config_path=config_path)
-    heavy_repair_rule_df = list_heavy_repair_rules(config_path=config_path)
     routing_config = get_routing_config(subsidiary_name, strategic_city_name, config_path=config_path) or {}
-    heavy_repair_exact_key = {
-        (
-            str(row.get("product_group_code", "")).strip().upper(),
-            str(row.get("product_code", "")).strip().upper(),
-            str(row.get("detailed_symptom_code", "")).strip().upper(),
-        )
-        for _, row in heavy_repair_rule_df.iterrows()
-        if str(row.get("product_group_code", "")).strip() and str(row.get("product_code", "")).strip()
-    }
-    heavy_repair_group_key = {
-        (
-            str(row.get("product_group_code", "")).strip().upper(),
-            str(row.get("detailed_symptom_code", "")).strip().upper(),
-        )
-        for _, row in heavy_repair_rule_df.iterrows()
-        if str(row.get("product_group_code", "")).strip() and str(row.get("detailed_symptom_code", "")).strip()
-    }
 
     state_value = str(jobs_df["state_name"].dropna().astype(str).iloc[0]).strip() if "state_name" in jobs_df.columns else ""
     custom_geo_rows: list[dict[str, Any]] = []
@@ -121,6 +131,25 @@ def _build_payload_from_dataframes(
 
     planning_date = f"{str(promise_date)[:4]}-{str(promise_date)[4:6]}-{str(promise_date)[6:8]}"
 
+    # Sort technicians geographically (west to east, then south to north)
+    # so PATH_CHEAPEST_ARC builds regionally coherent initial routes consistently.
+    if tech_location_lookup:
+        _sort_lng = active_technicians["employee_code"].astype(str).str.strip().map(
+            lambda c: tech_location_lookup.get(c, (0.0, 0.0))[1]
+        )
+        _sort_lat = active_technicians["employee_code"].astype(str).str.strip().map(
+            lambda c: tech_location_lookup.get(c, (0.0, 0.0))[0]
+        )
+        active_technicians = active_technicians.copy()
+        active_technicians["_sort_lng"] = _sort_lng
+        active_technicians["_sort_lat"] = _sort_lat
+        active_technicians = (
+            active_technicians
+            .sort_values(["_sort_lng", "_sort_lat"])
+            .drop(columns=["_sort_lng", "_sort_lat"])
+            .reset_index(drop=True)
+        )
+
     technicians_payload: list[dict[str, Any]] = []
     for _, tech in active_technicians.iterrows():
         code = str(tech["employee_code"]).strip()
@@ -141,6 +170,26 @@ def _build_payload_from_dataframes(
             }
         )
 
+    engineer_center_type_lookup: dict[str, str] = {
+        str(r["employee_code"]).strip(): str(r.get("center_type", "DMS")).strip().upper() or "DMS"
+        for _, r in engineer_master_df.iterrows()
+        if str(r.get("employee_code", "")).strip()
+    }
+
+    def _coerce_bool_value(value: object) -> bool:
+        if pd.isna(value):
+            return False
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        text = str(value).strip().lower()
+        if text in {"true", "1", "y", "yes", "t"}:
+            return True
+        if text in {"false", "0", "n", "no", "f", ""}:
+            return False
+        return bool(text)
+
     jobs_payload: list[dict[str, Any]] = []
     timezone_offset = str(routing_config.get("timezone_offset", "-04:00")).strip() or "-04:00"
     for _, row in jobs_df.iterrows():
@@ -148,18 +197,6 @@ def _build_payload_from_dataframes(
         product_code = str(row.get("service_product_code", "")).strip().upper()
         symptom = str(row.get("receipt_detail_symptom_code", "")).strip().upper()
         current_employee_code = str(row.get("svc_engineer_code", "")).strip()
-        symptom_candidates = [symptom]
-        if symptom:
-            symptom_candidates.append(symptom[:5])
-            symptom_candidates.append(symptom[:3])
-        is_heavy_repair = any(
-            (
-                (product_group, product_code, candidate) in heavy_repair_exact_key
-                or (product_group, candidate) in heavy_repair_group_key
-            )
-            for candidate in symptom_candidates
-            if candidate
-        )
         jobs_payload.append(
             {
                 "salesforce_id": str(row.get("gsfs_receipt_no", "")).strip(),
@@ -173,19 +210,17 @@ def _build_payload_from_dataframes(
                 "country_name": str(row.get("country_name", "USA")).strip() or "USA",
                 "postal_code": str(row.get("postal_code", "")).strip(),
                 "location": {"lat": float(row["latitude"]), "lng": float(row["longitude"])},
-                "service_minutes": 100 if is_heavy_repair else 45,
                 "time_window": [],
                 "priority": 0,
-                "fixed": False,
+                "fixed": _coerce_bool_value(row.get("fixed", False)),
                 "current_employee_code": current_employee_code,
-                "current_center_type": "DMS",
-                "is_heavy_repair": is_heavy_repair,
+                "current_center_type": engineer_center_type_lookup.get(current_employee_code, "DMS"),
             }
         )
 
     return {
         "request_id": uuid.uuid4().hex,
-        "mode": "na_general",
+        "mode": mode,
         "city": strategic_city_name,
         "planning_date": planning_date,
         "options": {
@@ -206,53 +241,85 @@ def build_payload_from_inputs(
     job_rows: list[dict[str, Any]],
     technician_rows: list[dict[str, Any]],
     config_path: Path = COMMON_CONFIG_PATH,
+    mode: str = "na_general",
 ) -> dict[str, Any]:
     jobs_df = pd.DataFrame(job_rows)
     technicians_df = pd.DataFrame(technician_rows)
-    return _build_payload_from_dataframes(jobs_df, technicians_df, subsidiary_name, strategic_city_name, promise_date, config_path=config_path)
+    return _build_payload_from_dataframes(jobs_df, technicians_df, subsidiary_name, strategic_city_name, promise_date, config_path=config_path, mode=mode)
 
 
-def submit_routing_from_inputs(
+def _enrich_jobs_heavy_repair(jobs: list[dict[str, Any]], config_path: Path = COMMON_CONFIG_PATH) -> list[dict[str, Any]]:
+    heavy_repair_rule_df = _normalize_heavy_repair_rules(list_heavy_repair_rules(config_path=config_path))
+    if heavy_repair_rule_df.empty:
+        heavy_repair_rule_df = _load_fallback_heavy_repair_rules()
+    heavy_repair_exact_key = {
+        (
+            str(row.get("product_group_code", "")).strip().upper(),
+            str(row.get("product_code", "")).strip().upper(),
+            str(row.get("detailed_symptom_code", "")).strip().upper(),
+        )
+        for _, row in heavy_repair_rule_df.iterrows()
+        if str(row.get("product_group_code", "")).strip() and str(row.get("product_code", "")).strip()
+    }
+    heavy_repair_group_key = {
+        (
+            str(row.get("product_group_code", "")).strip().upper(),
+            str(row.get("detailed_symptom_code", "")).strip().upper(),
+        )
+        for _, row in heavy_repair_rule_df.iterrows()
+        if str(row.get("product_group_code", "")).strip() and str(row.get("detailed_symptom_code", "")).strip()
+    }
+    enriched = []
+    for job in jobs:
+        product_group = str(job.get("product_group", "")).strip().upper()
+        product_code = str(job.get("product", "")).strip().upper()
+        symptom = str(job.get("symptom", "")).strip().upper()
+        symptom_candidates = [symptom]
+        if symptom:
+            symptom_candidates.append(symptom[:5])
+            symptom_candidates.append(symptom[:3])
+        is_heavy_repair = any(
+            (
+                (product_group, product_code, candidate) in heavy_repair_exact_key
+                or (product_group, candidate) in heavy_repair_group_key
+            )
+            for candidate in symptom_candidates
+            if candidate
+        )
+        enriched_job = dict(job)
+        enriched_job["is_heavy_repair"] = is_heavy_repair
+        enriched_job["service_minutes"] = 100 if is_heavy_repair else 45
+        enriched.append(enriched_job)
+    return enriched
+
+
+def submit_routing_from_payload(
+    payload: dict[str, Any],
     subsidiary_name: str,
     strategic_city_name: str,
     promise_date: str,
-    job_rows: list[dict[str, Any]],
-    technician_rows: list[dict[str, Any]],
     config_path: Path = COMMON_CONFIG_PATH,
 ) -> dict[str, Any]:
-    upsert_jobs(job_rows, config_path=config_path)
-    replace_request_technicians(
-        subsidiary_name,
-        strategic_city_name,
-        str(promise_date),
-        technician_rows,
-        config_path=config_path,
-    )
-    payload = build_payload_from_inputs(
-        subsidiary_name,
-        strategic_city_name,
-        promise_date,
-        job_rows,
-        technician_rows,
-        config_path=config_path,
-    )
-    response = submit_routing_job(_routing_server_url(config_path), payload)
+    enriched_payload = dict(payload)
+    enriched_payload["jobs"] = _enrich_jobs_heavy_repair(list(payload.get("jobs", [])), config_path=config_path)
+    routing_job_id = create_job_id(enriched_payload.get("request_id"))
+    save_new_job(routing_job_id, enriched_payload)
+    threading.Thread(target=process_job, args=(routing_job_id,), daemon=True).start()
     request_row = {
-        "request_id": payload["request_id"],
+        "request_id": enriched_payload["request_id"],
         "subsidiary_name": subsidiary_name,
         "strategic_city_name": strategic_city_name,
         "promise_date": str(promise_date),
-        "routing_job_id": str(response.get("job_id", "")).strip(),
-        "routing_status": str(response.get("status", "submitted")).strip() or "submitted",
-        "payload_json": json.dumps(payload, ensure_ascii=False),
-        "status_json": json.dumps(response, ensure_ascii=False),
+        "routing_job_id": routing_job_id,
+        "routing_status": "queued",
+        "payload_json": json.dumps(enriched_payload, ensure_ascii=False),
+        "status_json": "{}",
     }
     upsert_routing_request(request_row, config_path=config_path)
     return {
-        "request_id": payload["request_id"],
-        "routing_job_id": str(response.get("job_id", "")).strip(),
-        "status": str(response.get("status", "submitted")).strip() or "submitted",
-        "payload": payload,
+        "request_id": enriched_payload["request_id"],
+        "routing_job_id": routing_job_id,
+        "status": "queued",
     }
 
 
@@ -267,14 +334,14 @@ def refresh_routing_result(
     if not routing_job_id:
         raise ValueError("Missing routing_job_id for request.")
 
-    status_payload = get_routing_job_status(_routing_server_url(config_path), routing_job_id)
+    status_payload = load_status(routing_job_id)
     request_row["routing_status"] = str(status_payload.get("status", "")).strip()
     request_row["status_json"] = json.dumps(status_payload, ensure_ascii=False)
     upsert_routing_request(request_row, config_path=config_path)
 
     result_payload: dict[str, Any] | None = None
     if str(status_payload.get("status", "")).strip().lower() == "completed":
-        result_payload = get_routing_job_result(_routing_server_url(config_path), routing_job_id)
+        result_payload = load_result(routing_job_id)
         upsert_routing_result(
             {
                 "request_id": request_id,

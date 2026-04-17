@@ -77,11 +77,22 @@ def _build_engineer_frames_from_payload(
     reference_home_df: pd.DataFrame,
     region_centers: dict[int, tuple[float, float]],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    technicians = list(request_payload.get("technicians", []))
     ref_engineer = reference_engineer_region_df.copy()
     ref_engineer["SVC_ENGINEER_CODE"] = ref_engineer["SVC_ENGINEER_CODE"].astype(str)
     ref_home = reference_home_df.copy()
     ref_home["SVC_ENGINEER_CODE"] = ref_home["SVC_ENGINEER_CODE"].astype(str)
+    reference_order = {
+        code: idx
+        for idx, code in enumerate(ref_engineer["SVC_ENGINEER_CODE"].astype(str).str.strip().tolist())
+        if code
+    }
+    technicians = sorted(
+        list(request_payload.get("technicians", [])),
+        key=lambda tech: (
+            reference_order.get(str(tech.get("employee_code", "")).strip(), 1_000_000),
+            str(tech.get("employee_code", "")).strip(),
+        ),
+    )
 
     requested_codes = {
         str(tech.get("employee_code", "")).strip()
@@ -205,6 +216,9 @@ def _build_service_frame_from_payload(
         else:
             region_seq, region_name = pd.NA, ""
         time_window = job.get("time_window") or []
+        center_type = str(job.get("current_center_type", "")).strip().upper() or "DMS"
+        if not prod.ENABLE_DMS2 and center_type == prod.DMS2_CENTER_TYPE:
+            center_type = prod.DMS_CENTER_TYPE
         rows.append(
             {
                 "salesforce_id": salesforce_id,
@@ -232,7 +246,7 @@ def _build_service_frame_from_payload(
                 "current_employee_code": str(job.get("current_employee_code", "")).strip(),
                 "region_seq": int(region_seq) if pd.notna(region_seq) else pd.NA,
                 "new_region_name": region_name,
-                "SVC_CENTER_TYPE": str(job.get("current_center_type", "")).strip().upper() or "DMS",
+                "SVC_CENTER_TYPE": center_type,
                 "is_tv_job": bool(job.get("is_tv_job", False)),
             }
         )
@@ -332,10 +346,17 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
     if engineer_region_df.empty or home_df.empty or service_df.empty:
         return build_empty_result(request_payload, reason="INVALID_INPUT_DATA", mode="na_general")
 
+    time_limit_seconds = int(pd.to_numeric(
+        pd.Series([request_payload.get("options", {}).get("time_limit_seconds", 20)]),
+        errors="coerce",
+    ).fillna(20).clip(lower=10).iloc[0])
+    respect_fixed_jobs = bool(request_payload.get("options", {}).get("respect_fixed_jobs", True))
     _, summary_df, schedule_df = build_atlanta_production_assignment_vrp_from_frames(
         engineer_region_df=engineer_region_df,
         home_df=home_df,
         service_df=service_df,
-        attendance_limited=True,
+        attendance_limited=False,
+        time_limit_seconds=time_limit_seconds,
+        respect_fixed_jobs=respect_fixed_jobs,
     )
     return _build_response_payload(request_payload, summary_df, schedule_df)

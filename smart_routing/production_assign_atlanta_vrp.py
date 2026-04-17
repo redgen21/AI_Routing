@@ -144,6 +144,8 @@ def _solve_vrp_day(
     engineer_master_df: pd.DataFrame,
     route_client,
     region_centers: dict[int, tuple[float, float]],
+    time_limit_seconds: int = 20,
+    respect_fixed_jobs: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     job_df = _dedupe_day_jobs(service_day_df)
     if job_df.empty or engineer_master_df.empty:
@@ -155,8 +157,19 @@ def _solve_vrp_day(
     if engineer_df.empty:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    vehicle_codes = engineer_df["SVC_ENGINEER_CODE"].astype(str).tolist()
+    vehicle_codes = engineer_df["SVC_ENGINEER_CODE"].astype(str).str.strip().tolist()
     vehicle_count = len(vehicle_codes)
+    vehicle_index_by_code = {str(code).strip(): idx for idx, code in enumerate(vehicle_codes)}
+
+    if respect_fixed_jobs and "fixed" in job_df.columns:
+        fixed_mask = job_df["fixed"].fillna(False).astype(bool)
+        fixed_code_series = job_df.get("current_employee_code", pd.Series("", index=job_df.index)).fillna("").astype(str).str.strip()
+        unavailable_fixed_mask = fixed_mask & fixed_code_series.ne("") & ~fixed_code_series.isin(vehicle_codes)
+        if unavailable_fixed_mask.any():
+            job_df = job_df.loc[~unavailable_fixed_mask].copy().reset_index(drop=True)
+            if job_df.empty:
+                return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
     job_count = len(job_df)
 
     start_coords = [tuple(coord) for coord in engineer_df["start_coord"].tolist()]
@@ -206,23 +219,24 @@ def _solve_vrp_day(
 
     engineer_lookup = {str(row["SVC_ENGINEER_CODE"]): row for _, row in engineer_df.iterrows()}
     for job_idx, (_, row) in enumerate(job_df.iterrows()):
-        candidates_df = base._candidate_engineers(row, engineer_df)
-        allowed_codes = set(candidates_df["SVC_ENGINEER_CODE"].astype(str).tolist())
-        allowed_vehicle_indices = [int(vehicle_idx) for vehicle_idx, code in enumerate(vehicle_codes) if code in allowed_codes]
+        fixed_employee_code = str(row.get("current_employee_code", "")).strip()
+        if respect_fixed_jobs and bool(row.get("fixed", False)) and fixed_employee_code:
+            fixed_vehicle_idx = vehicle_index_by_code.get(fixed_employee_code)
+            allowed_vehicle_indices = [fixed_vehicle_idx] if fixed_vehicle_idx is not None else []
+        else:
+            candidates_df = base._candidate_engineers(row, engineer_df)
+            allowed_codes = set(candidates_df["SVC_ENGINEER_CODE"].astype(str).tolist())
+            allowed_vehicle_indices = [int(vehicle_idx) for vehicle_idx, code in enumerate(vehicle_codes) if code in allowed_codes]
         if not allowed_vehicle_indices:
             continue
         node_index = manager.NodeToIndex(job_idx)
-        disallowed_vehicle_indices = [
-            vehicle_idx for vehicle_idx in range(vehicle_count) if vehicle_idx not in allowed_vehicle_indices
-        ]
-        for vehicle_idx in disallowed_vehicle_indices:
-            routing.VehicleVar(node_index).RemoveValue(vehicle_idx)
+        routing.SetAllowedVehiclesForIndex(allowed_vehicle_indices, node_index)
         routing.AddDisjunction([manager.NodeToIndex(job_idx)], 10_000_000)
 
     search_params = pywrapcp.DefaultRoutingSearchParameters()
     search_params.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
     search_params.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
-    search_params.time_limit.FromSeconds(20)
+    search_params.time_limit.FromSeconds(int(time_limit_seconds))
     solution = routing.SolveWithParameters(search_params)
     if solution is None:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -303,6 +317,7 @@ def build_atlanta_production_assignment_vrp(
     date_keys: list[str] | None = None,
     output_suffix: str = "vrp_actual_3days",
     attendance_limited: bool = True,
+    respect_fixed_jobs: bool = True,
 ) -> AtlantaProductionVRPAssignmentResult:
     assignment_path, summary_path, schedule_path = _output_paths(output_suffix)
     _, engineer_region_df, home_df, service_df = base._load_inputs()
@@ -332,6 +347,7 @@ def build_atlanta_production_assignment_vrp(
             day_engineer_master_df.copy(),
             route_client,
             region_centers,
+            respect_fixed_jobs=respect_fixed_jobs,
         )
         if assignment_df.empty:
             continue
@@ -359,6 +375,8 @@ def build_atlanta_production_assignment_vrp_from_frames(
     home_df: pd.DataFrame,
     service_df: pd.DataFrame,
     attendance_limited: bool = True,
+    time_limit_seconds: int = 20,
+    respect_fixed_jobs: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     working_service_df = service_df.copy()
     if not working_service_df.empty:
@@ -370,7 +388,16 @@ def build_atlanta_production_assignment_vrp_from_frames(
         working_service_df["longitude"] = pd.to_numeric(working_service_df["longitude"], errors="coerce")
         working_service_df["service_time_min"] = pd.to_numeric(working_service_df["service_time_min"], errors="coerce").fillna(45)
         working_service_df["is_heavy_repair"] = working_service_df["is_heavy_repair"].fillna(False).astype(bool)
-        working_service_df["is_tv_job"] = working_service_df["is_tv_job"].fillna(False).astype(bool)
+        working_service_df["fixed"] = working_service_df.get("fixed", False)
+        working_service_df["fixed"] = working_service_df["fixed"].fillna(False).astype(bool)
+        working_service_df["current_employee_code"] = working_service_df.get(
+            "current_employee_code",
+            pd.Series("", index=working_service_df.index),
+        ).fillna("").astype(str).str.strip()
+        working_service_df["is_tv_job"] = working_service_df.get(
+            "is_tv_job",
+            pd.Series(False, index=working_service_df.index),
+        ).fillna(False).astype(bool)
 
     engineer_master_df = base._build_engineer_master(engineer_region_df.copy(), home_df.copy())
     region_centers = base._region_centers(working_service_df)
@@ -394,6 +421,8 @@ def build_atlanta_production_assignment_vrp_from_frames(
             day_engineer_master_df.copy(),
             route_client,
             region_centers,
+            time_limit_seconds=time_limit_seconds,
+            respect_fixed_jobs=respect_fixed_jobs,
         )
         if assignment_df.empty:
             continue

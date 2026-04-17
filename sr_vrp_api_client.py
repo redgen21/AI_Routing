@@ -28,6 +28,7 @@ st.set_page_config(page_title="Smart Routing API Client", layout="wide")
 ROUTING_MODE = "na_general"
 DEFAULT_SERVER_URL = "http://20.51.244.68:8055"
 NETWORK_URL = "http://10.233.84.33:8503"
+CONFIG_PATH = Path("config.json")
 INPUT_STORE_PATH = Path("data/atlanta_input_store.parquet")
 MASTER_PATH = Path("data/All_In_One_Master.xlsx")
 PROFILE_PATH = Path("260310/Top 10_DMS_DMS2_Profile_20260317.xlsx")
@@ -59,6 +60,7 @@ STORE_COLUMNS = [
     "CITY_NAME",
     "POSTAL_CODE",
     "ADDRESS_LINE1_INFO",
+    "fixed",
     "STRATEGIC_CITY_NAME",
     "STATE_NAME",
     "COUNTRY_NAME",
@@ -73,6 +75,25 @@ STORE_COLUMNS = [
 ]
 
 
+def _coerce_bool_value(value: object) -> bool:
+    if pd.isna(value):
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "1", "y", "yes", "t"}:
+        return True
+    if text in {"false", "0", "n", "no", "f", ""}:
+        return False
+    return bool(text)
+
+
+def _coerce_bool_series(series: pd.Series) -> pd.Series:
+    return series.map(_coerce_bool_value).astype(bool)
+
+
 def _empty_store_df() -> pd.DataFrame:
     return pd.DataFrame(columns=STORE_COLUMNS)
 
@@ -84,6 +105,7 @@ def _load_input_store() -> pd.DataFrame:
     for col in STORE_COLUMNS:
         if col not in df.columns:
             df[col] = pd.NA
+    df["fixed"] = _coerce_bool_series(df["fixed"])
     return df[STORE_COLUMNS].copy()
 
 
@@ -93,6 +115,7 @@ def _save_input_store(df: pd.DataFrame) -> None:
     for col in STORE_COLUMNS:
         if col not in save_df.columns:
             save_df[col] = pd.NA
+    save_df["fixed"] = _coerce_bool_series(save_df["fixed"])
     save_df = save_df[STORE_COLUMNS].copy()
     save_df.to_parquet(INPUT_STORE_PATH, index=False)
 
@@ -146,6 +169,9 @@ def _prepare_input_df(raw_df: pd.DataFrame, input_source: str, existing_df: pd.D
     if missing:
         raise ValueError(f"Missing required columns: {', '.join(missing)}")
     working = working[INPUT_REQUIRED_COLUMNS].copy()
+    fixed_series = _coerce_bool_series(
+        raw_df["fixed"] if "fixed" in raw_df.columns else pd.Series(False, index=raw_df.index)
+    )
     for col in INPUT_REQUIRED_COLUMNS:
         working[col] = working[col].astype(str).str.strip()
         working[col] = working[col].replace(
@@ -163,6 +189,7 @@ def _prepare_input_df(raw_df: pd.DataFrame, input_source: str, existing_df: pd.D
     if working["PROMISE_DATE"].eq("").any():
         raise ValueError("PROMISE_DATE must be in YYYYMMDD format.")
     working["POSTAL_CODE"] = working["POSTAL_CODE"].str.replace(r"\.0+$", "", regex=True).str.zfill(5)
+    working["fixed"] = fixed_series.loc[working.index].astype(bool)
     working["STRATEGIC_CITY_NAME"] = DEFAULT_STRATEGIC_CITY
     working["STATE_NAME"] = DEFAULT_STATE
     working["COUNTRY_NAME"] = DEFAULT_COUNTRY
@@ -256,6 +283,9 @@ def _build_service_frame_for_payload(store_df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     payload_df = store_df.copy()
     payload_df["SVC_CENTER_TYPE"] = "DMS"
+    payload_df["fixed"] = _coerce_bool_series(
+        payload_df["fixed"] if "fixed" in payload_df.columns else pd.Series(False, index=payload_df.index)
+    )
     return payload_df
 
 
@@ -359,6 +389,7 @@ def _direct_input_dialog(master_df: pd.DataFrame, store_df: pd.DataFrame, edit_r
     default_city = str(edit_record.get("CITY_NAME", "")) if edit_record is not None else ""
     default_postal = str(edit_record.get("POSTAL_CODE", "")) if edit_record is not None else ""
     default_address = str(edit_record.get("ADDRESS_LINE1_INFO", "")) if edit_record is not None else ""
+    default_fixed = _coerce_bool_value(edit_record.get("fixed", False)) if edit_record is not None else False
     default_promise_date = pd.to_datetime(default_promise, format="%Y%m%d", errors="coerce")
     promise_date_value = st.date_input(
         "PROMISE_DATE",
@@ -461,6 +492,7 @@ def _direct_input_dialog(master_df: pd.DataFrame, store_df: pd.DataFrame, edit_r
     city_name = st.text_input("CITY_NAME", value=default_city)
     postal_code = st.text_input("POSTAL_CODE", value=default_postal)
     address_line1 = st.text_input("ADDRESS_LINE1_INFO", value=default_address)
+    fixed = st.checkbox("Fixed Assignment", value=default_fixed)
 
     save_col, cancel_col = st.columns(2)
     if save_col.button("Save", type="primary", width="stretch"):
@@ -477,6 +509,7 @@ def _direct_input_dialog(master_df: pd.DataFrame, store_df: pd.DataFrame, edit_r
                     "CITY_NAME": str(city_name).strip(),
                     "POSTAL_CODE": str(postal_code).strip(),
                     "ADDRESS_LINE1_INFO": str(address_line1).strip(),
+                    "fixed": bool(fixed),
                 }
             ]
         )
@@ -516,15 +549,30 @@ def _direct_input_dialog(master_df: pd.DataFrame, store_df: pd.DataFrame, edit_r
         st.rerun()
 
 
+@st.cache_data(show_spinner=False)
+def _load_client_config(config_path: str = str(CONFIG_PATH)) -> dict:
+    path = Path(config_path)
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
 @st.cache_resource(show_spinner=False)
 def get_route_client() -> OSRMTripClient:
+    routing_cfg = _load_client_config().get("routing", {})
+    city_osrm_urls = routing_cfg.get("city_osrm_urls", {}) if isinstance(routing_cfg.get("city_osrm_urls", {}), dict) else {}
+    osrm_url = str(city_osrm_urls.get(DEFAULT_STRATEGIC_CITY, "http://20.51.244.68:5002")).strip().rstrip("/")
+    osrm_profile = str(routing_cfg.get("osrm_profile", "driving")).strip() or "driving"
     return OSRMTripClient(
         OSRMConfig(
-            osrm_url="http://20.51.244.68:5002",
+            osrm_url=osrm_url,
             mode="osrm",
-            osrm_profile="driving",
+            osrm_profile=osrm_profile,
             cache_file=Path("data/cache/osrm_trip_cache_atlanta_vrp_api_client.csv"),
-            fallback_osrm_url="http://20.51.244.68:5000",
+            fallback_osrm_url=None,
         )
     )
 
@@ -562,7 +610,7 @@ def _region_color_map() -> dict[str, str]:
 
 
 def _build_region_layers(region_zip_df: pd.DataFrame, service_df: pd.DataFrame):
-    city_data = load_city_map_data("Atlanta, GA")
+    city_data = load_city_map_data(DEFAULT_STRATEGIC_CITY)
     zip_layer = city_data.zip_layer.copy()
     zip_layer["POSTAL_CODE"] = zip_layer["POSTAL_CODE"].astype(str).str.zfill(5)
     coverage_df = region_zip_df[["POSTAL_CODE", "region_seq", "new_region_name"]].drop_duplicates().copy()
@@ -924,6 +972,13 @@ def _routing_status_progress(status_value: str) -> tuple[float, str]:
     return 0.0, "Routing request not submitted."
 
 
+def _reset_vrp_result_view(default_compare_mode: str = "Smart Routing") -> None:
+    st.session_state["vrp_compare_mode"] = default_compare_mode
+    st.session_state.pop("preview_date", None)
+    st.session_state.pop("preview_region", None)
+    st.session_state.pop("preview_engineer", None)
+
+
 @st.fragment(run_every="5s")
 def _auto_poll_routing_status() -> None:
     server_url = str(st.session_state.get("smart_routing_server_url", "")).strip()
@@ -938,6 +993,7 @@ def _auto_poll_routing_status() -> None:
         latest_state = str(latest_status.get("status", "")).strip().lower()
         if latest_state == "completed":
             st.session_state["vrp_job_result"] = get_routing_job_result(server_url, job_id)
+            _reset_vrp_result_view()
             st.rerun()
         if latest_state == "failed":
             st.session_state["vrp_job_result"] = None
@@ -1069,6 +1125,7 @@ def _render_input_manager(server_url: str) -> None:
                         "status": str(response.get("status", "queued")).strip().lower(),
                     }
                     st.session_state["vrp_job_result"] = None
+                    _reset_vrp_result_view()
                 st.success(f"Submitted job {st.session_state.get('vrp_job_id', '')}")
             if check_col.button("Check Routing Result", width="stretch"):
                 job_id = str(st.session_state.get("vrp_job_id", "")).strip()
@@ -1081,6 +1138,7 @@ def _render_input_manager(server_url: str) -> None:
                         latest_state = str(latest_status.get("status", "")).strip().lower()
                         if latest_state == "completed":
                             st.session_state["vrp_job_result"] = get_routing_job_result(server_url, job_id)
+                            _reset_vrp_result_view()
                             st.success("Smart Routing completed. Displaying the latest result.")
                             st.rerun()
                         elif latest_state == "failed":
@@ -1102,9 +1160,7 @@ def _render_input_manager(server_url: str) -> None:
             elif current_status == "completed":
                 st.caption("Smart Routing job completed.")
                 view_options = ["Actual", "Smart Routing"]
-                current_view = st.session_state.get("vrp_compare_mode", "Actual")
-                default_index = view_options.index(current_view) if current_view in view_options else 0
-                st.radio("Assignment View", view_options, index=default_index, horizontal=True, key="vrp_compare_mode")
+                st.radio("Assignment View", view_options, horizontal=True, key="vrp_compare_mode")
 
     with list_tab:
         if display_store_df.empty:
@@ -1130,6 +1186,7 @@ def _render_input_manager(server_url: str) -> None:
                 "SVC_ENGINEER_NAME",
                 "SVC_ENGINEER_CODE",
                 "GSFS_RECEIPT_NO",
+                "fixed",
                 "PROMISE_DATE",
                 "Product Group Name",
                 "Product Name",
@@ -1187,6 +1244,7 @@ def main() -> None:
                 latest_status_value = str(refreshed_status.get("status", "")).strip().lower()
                 if latest_status_value == "completed" and not st.session_state.get("vrp_job_result"):
                     st.session_state["vrp_job_result"] = get_routing_job_result(server_url, current_job_id)
+                    _reset_vrp_result_view()
             except Exception:
                 pass
 
@@ -1200,6 +1258,7 @@ def main() -> None:
         if current_job_id and current_status == "completed" and not result_payload:
             try:
                 st.session_state["vrp_job_result"] = get_routing_job_result(server_url, current_job_id)
+                _reset_vrp_result_view()
                 result_payload = st.session_state.get("vrp_job_result")
             except Exception:
                 result_payload = None
@@ -1239,6 +1298,7 @@ def main() -> None:
                 "SVC_ENGINEER_NAME",
                 "SVC_ENGINEER_CODE",
                 "GSFS_RECEIPT_NO",
+                "fixed",
                 "visit_seq",
                 "visit_start_time",
                 "visit_end_time",
@@ -1358,6 +1418,7 @@ def main() -> None:
             "assigned_sm_name",
             "assigned_sm_code",
             "GSFS_RECEIPT_NO",
+            "fixed",
             "changed",
             "visit_seq",
             "visit_start_time",

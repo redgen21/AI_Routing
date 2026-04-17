@@ -7,6 +7,21 @@ from urllib import request as urllib_request
 import pandas as pd
 
 
+def _coerce_bool_value(value: object) -> bool:
+    if pd.isna(value):
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "1", "y", "yes", "t"}:
+        return True
+    if text in {"false", "0", "n", "no", "f", ""}:
+        return False
+    return bool(text)
+
+
 def _http_json(method: str, url: str, payload: dict | None = None, timeout_sec: int = 60) -> dict:
     data = None
     headers = {"Content-Type": "application/json; charset=utf-8"}
@@ -61,12 +76,35 @@ def build_payload_from_service_frame(
     service_working["SVC_ENGINEER_CODE"] = service_working["SVC_ENGINEER_CODE"].astype(str).str.strip()
     engineer_working = engineer_region_df.copy()
     engineer_working["SVC_ENGINEER_CODE"] = engineer_working["SVC_ENGINEER_CODE"].astype(str).str.strip()
+    job_engineer_codes = {
+        str(code).strip()
+        for code in service_working["SVC_ENGINEER_CODE"].dropna().astype(str).tolist()
+        if str(code).strip()
+    }
+    if job_engineer_codes:
+        engineer_working = engineer_working[
+            engineer_working["SVC_ENGINEER_CODE"].isin(job_engineer_codes)
+        ].copy()
     home_working = home_df.copy()
     home_working["SVC_ENGINEER_CODE"] = home_working["SVC_ENGINEER_CODE"].astype(str).str.strip()
     home_lookup = home_working.drop_duplicates(subset=["SVC_ENGINEER_CODE"])
 
+    # Sort engineers geographically (west to east, then south to north)
+    # for consistent PATH_CHEAPEST_ARC initial solution regardless of input order.
+    engineer_deduped = engineer_working.drop_duplicates(subset=["SVC_ENGINEER_CODE"]).copy()
+    engineer_deduped = engineer_deduped.merge(
+        home_lookup[["SVC_ENGINEER_CODE", "longitude", "latitude"]].rename(
+            columns={"longitude": "_sort_lng", "latitude": "_sort_lat"}
+        ),
+        on="SVC_ENGINEER_CODE",
+        how="left",
+    )
+    engineer_deduped["_sort_lng"] = pd.to_numeric(engineer_deduped["_sort_lng"], errors="coerce").fillna(0.0)
+    engineer_deduped["_sort_lat"] = pd.to_numeric(engineer_deduped["_sort_lat"], errors="coerce").fillna(0.0)
+    engineer_deduped = engineer_deduped.sort_values(["_sort_lng", "_sort_lat"]).reset_index(drop=True)
+
     technicians: list[dict] = []
-    for _, engineer in engineer_working.drop_duplicates(subset=["SVC_ENGINEER_CODE"]).iterrows():
+    for _, engineer in engineer_deduped.iterrows():
         code = str(engineer["SVC_ENGINEER_CODE"]).strip()
         home_row = home_lookup[home_lookup["SVC_ENGINEER_CODE"] == code].head(1)
         if home_row.empty:
@@ -109,7 +147,7 @@ def build_payload_from_service_frame(
                 "service_minutes": int(pd.to_numeric(pd.Series([row.get("service_time_min", 45)]), errors="coerce").fillna(45).iloc[0]),
                 "time_window": [],
                 "priority": int(pd.to_numeric(pd.Series([row.get("priority", 0)]), errors="coerce").fillna(0).iloc[0]),
-                "fixed": False,
+                "fixed": _coerce_bool_value(row.get("fixed", False)),
                 "current_employee_code": str(row.get("SVC_ENGINEER_CODE", "")).strip(),
                 "current_center_type": str(row.get("SVC_CENTER_TYPE", "")).strip().upper(),
                 "is_heavy_repair": bool(row.get("is_heavy_repair", False)),
