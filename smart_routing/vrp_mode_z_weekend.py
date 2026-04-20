@@ -81,7 +81,7 @@ def _resolve_osrm_url(city: str) -> str:
     raw_city = str(city or "").strip()
     if raw_city and raw_city in city_map:
         return str(city_map[raw_city]).rstrip("/")
-    return str(routing_cfg.get("osrm_url", "http://20.51.244.68:5000")).rstrip("/")
+    return str(routing_cfg.get("osrm_url", "")).rstrip("/")
 
 
 def _resolve_runtime_city(request_payload: dict[str, Any]) -> str:
@@ -130,7 +130,7 @@ def _osrm_route_distance_km(origin: tuple[float, float], dest: tuple[float, floa
 def _normalize_skill_priorities(skills: list[dict[str, Any]]) -> dict[str, float]:
     priorities: dict[str, float] = {}
     for skill in skills:
-        product = _text_value(skill.get("product"), skill.get("SERVICE_PRODUCT_CODE"), skill.get("역량제품명"))
+        product = _text_value(skill.get("product"), skill.get("SERVICE_PRODUCT_CODE"))
         if product:
             priority = float(
                 pd.to_numeric(
@@ -163,10 +163,10 @@ def _solve_jobs(
     valid_jobs: list[dict[str, Any]] = []
     invalid_jobs: list[dict[str, Any]] = []
     for job in jobs:
-        receipt_no = _text_value(job.get("receipt_no"), job.get("salesforce_id"), job.get("접수번호"), job.get("GSFS_RECEIPT_NO"))
+        receipt_no = _text_value(job.get("receipt_no"), job.get("salesforce_id"), job.get("GSFS_RECEIPT_NO"))
         location = job.get("location") or {}
-        job_lat = _float_value(location.get("lat"), location.get("latitude"), job.get("lat"), job.get("latitude"), job.get("LATITUDE"), job.get("위도"))
-        job_lng = _float_value(location.get("lng"), location.get("longitude"), job.get("lng"), job.get("longitude"), job.get("LONGITUDE"), job.get("경도"))
+        job_lat = _float_value(location.get("lat"), location.get("latitude"), job.get("lat"), job.get("latitude"), job.get("LATITUDE"))
+        job_lng = _float_value(location.get("lng"), location.get("longitude"), job.get("lng"), job.get("longitude"), job.get("LONGITUDE"))
         if not receipt_no or job_lat is None or job_lng is None:
             invalid_jobs.append(
                 {
@@ -182,7 +182,7 @@ def _solve_jobs(
                 "receipt_no": receipt_no,
                 "job_lat": float(job_lat),
                 "job_lng": float(job_lng),
-                "product": _text_value(job.get("product"), job.get("SERVICE_PRODUCT_CODE"), job.get("역량제품명"), job.get("접수제품명")),
+                "product": _text_value(job.get("product"), job.get("SERVICE_PRODUCT_CODE")),
                 "service_minutes": int(
                     pd.to_numeric(
                         pd.Series([job.get("service_minutes", job.get("SERVICE_MINUTES", 45))]),

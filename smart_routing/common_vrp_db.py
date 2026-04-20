@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 import psycopg2
-from psycopg2.extras import RealDictCursor, execute_values
+from psycopg2.extras import execute_values
 
 from .area_map import get_latest_geocoded_service_file
 from .census_geocoder import normalize_postal_code
@@ -386,114 +386,6 @@ def list_heavy_repair_rules(config_path: Path = COMMON_CONFIG_PATH) -> pd.DataFr
         """,
         config_path=config_path,
     )
-
-
-def list_jobs(subsidiary_name: str, strategic_city_name: str, config_path: Path = COMMON_CONFIG_PATH) -> pd.DataFrame:
-    return _fetch_df(
-        """
-        select *
-        from common_job_input
-        where subsidiary_name = %s and strategic_city_name = %s
-        order by promise_date desc, gsfs_receipt_no
-        """,
-        (subsidiary_name, strategic_city_name),
-        config_path=config_path,
-    )
-
-
-def upsert_jobs(job_rows: list[dict[str, Any]], config_path: Path = COMMON_CONFIG_PATH) -> int:
-    columns = [
-        "record_id",
-        "subsidiary_name",
-        "strategic_city_name",
-        "svc_engineer_code",
-        "svc_engineer_name",
-        "service_product_group_code",
-        "service_product_code",
-        "receipt_detail_symptom_code",
-        "gsfs_receipt_no",
-        "promise_date",
-        "city_name",
-        "state_name",
-        "country_name",
-        "postal_code",
-        "address_line1_info",
-        "latitude",
-        "longitude",
-        "source",
-    ]
-    rows = [tuple(job.get(col) for col in columns) for job in job_rows]
-    return _execute_values_upsert(
-        "common_job_input",
-        columns,
-        rows,
-        ["subsidiary_name", "strategic_city_name", "gsfs_receipt_no"],
-        [col for col in columns if col not in {"record_id", "subsidiary_name", "strategic_city_name", "gsfs_receipt_no"}],
-        config_path=config_path,
-    )
-
-
-def list_request_technicians(
-    subsidiary_name: str,
-    strategic_city_name: str,
-    promise_date: str,
-    config_path: Path = COMMON_CONFIG_PATH,
-) -> pd.DataFrame:
-    return _fetch_df(
-        """
-        select *
-        from common_request_technician_input
-        where subsidiary_name = %s and strategic_city_name = %s and promise_date = %s
-        order by employee_name, employee_code
-        """,
-        (subsidiary_name, strategic_city_name, promise_date),
-        config_path=config_path,
-    )
-
-
-def replace_request_technicians(
-    subsidiary_name: str,
-    strategic_city_name: str,
-    promise_date: str,
-    rows_in: list[dict[str, Any]],
-    config_path: Path = COMMON_CONFIG_PATH,
-) -> int:
-    columns = [
-        "record_id",
-        "subsidiary_name",
-        "strategic_city_name",
-        "promise_date",
-        "employee_code",
-        "employee_name",
-        "center_type",
-        "shift_start",
-        "shift_end",
-        "slot_count",
-        "max_jobs",
-        "available",
-        "start_location_type",
-        "start_location_address",
-        "source",
-    ]
-    rows = [tuple(item.get(col) for col in columns) for item in rows_in]
-    with get_db_connection(config_path) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                delete from common_request_technician_input
-                where subsidiary_name = %s and strategic_city_name = %s and promise_date = %s
-                """,
-                (subsidiary_name, strategic_city_name, promise_date),
-            )
-            if rows:
-                insert_cols = ", ".join(columns)
-                execute_values(
-                    cur,
-                    f"insert into common_request_technician_input ({insert_cols}) values %s",
-                    rows,
-                )
-        conn.commit()
-    return len(rows)
 
 
 def upsert_routing_request(request_row: dict[str, Any], config_path: Path = COMMON_CONFIG_PATH) -> int:

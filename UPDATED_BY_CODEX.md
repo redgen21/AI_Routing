@@ -1,123 +1,134 @@
 ﻿# UPDATED BY CODEX
 
-## 2026-03-18
-
-### 異붽? 諛섏쁺 ?댁슜
-
-- 吏???듦퀎 吏묎퀎 ??`AREA_NAME` 臾몄옄???뺢퇋??濡쒖쭅 異붽?
-- ?묒? ?먮낯??以꾨컮轅? ?욌뮘 怨듬갚, 以묐났 怨듬갚 ?뚮Ц??`area_km2=0`?쇰줈 蹂댁씠??吏???듦퀎 蹂댁젙
-- `STRATEGIC_CITY_NAME`, `SVC_ENGINEER_CODE`, `SVC_CENTER_TYPE`, ?щ’ ?대쫫 而щ읆??媛숈? 諛⑹떇?쇰줈 ?뺢퇋??- 吏??愿??蹂댁젙 硫붾え瑜?`docs/area_map_notes_20260318.md`??湲곕줉
-- ?꾩떆蹂?吏???꾩쿂由?寃곌낵瑜?`data/cache/area_map` ?꾨옒 pickle 罹먯떆濡???ν븯?꾨줉 異붽?
-- ?먮낯 ?꾨줈???뚯씪, ZCTA ZIP ?뚯씪, geocoded ?쒕퉬???뚯씪??寃쎈줈? ?섏젙?쒓컖??媛숈쑝硫?罹먯떆瑜??ъ궗?⑺븯?꾨줉 援ъ꽦
-- 吏???쒖떆??ZIP/AREA/context geometry瑜??⑥닚?뷀븳 ??罹먯떆????ν븯?꾨줉 異붽?
-- Streamlit?먯꽌 `city + area + service point ?쒖떆 ?щ?` 湲곗??쇰줈 吏??HTML 罹먯떆 異붽?
-- 吏???됱긽??24媛?怨좎젙 ?붾젅?????吏???섏뿉 留욌뒗 ?숈쟻 ?됱긽 ?앹꽦 諛⑹떇?쇰줈 蹂寃?- 吏???띾룄 議곗젅??`Show Service Points` 泥댄겕諛뺤뒪 異붽?
-- ZIP/AREA 吏??tooltip 媛믪쓣 `Slot Sum`?먯꽌 `POSTAL_CODE` 湲곗? ?ㅼ젣 ?쒕퉬??嫄댁닔(`service_count`)濡?蹂寃?- ?쒕퉬??嫄댁닔 而щ읆 異붽???留욎떠 area map 罹먯떆 踰꾩쟾 媛깆떊
-- ZIP 寃쎄퀎?좎쓣 ?뉗? 以묐┰?됱쑝濡?蹂寃쏀븯怨?AREA ?덉씠?대쭔 吏???됱쓣 媛吏?꾨줉 ?쒓컖??議곗젙
-- AREA ?덉씠??hover 媛뺤“瑜?異붽???吏??寃쎄퀎? ?고렪踰덊샇 寃쎄퀎瑜????쎄쾶 援щ텇?섎룄濡?蹂댁젙
-- 吏?꾩슜 area geometry瑜?ZIP蹂??ㅼ쨷 諛곗젙 ?꾩껜媛 ?꾨땲??`???AREA_NAME` 湲곗? 鍮꾩쨷蹂??곸뿭?쇰줈 ?ш뎄??- LA ?깆뿉??留덉슦???ㅻ쾭 ???щ윭 吏??씠 ?숈떆???≫엳??寃뱀묠 臾몄젣? popup 遺덉씪移?臾몄젣瑜??꾪솕?섎룄濡??섏젙
-- `smart_routing/profile_sync.py`? `sr_update_profile_from_service.py` 異붽?
-- `DMS/DMS2` ?쒕퉬???곗씠?곕? 湲곗??쇰줈 `Zip Coverage`? `Slot` ?낅뜲?댄듃 CSV ?앹꽦 濡쒖쭅 異붽?
-- ?앹꽦 ?뚯씪:
-  - `260310/input/Zip_Coverage_updated_Service_202603181109.csv`
-  - `260310/input/Slot_updated_Service_202603181109.csv`
-  - `260310/output/unmatched_service_sm_Service_202603181109.csv`
-  - `260310/output/profile_sync_summary_Service_202603181109.csv`
-- profile sync??`Zip Coverage` ?낅뜲?댄듃 ??以묐났 ZIP???щ윭 吏??뿉 ?숈떆??異붽??섏? ?딅룄濡????吏??1媛쒕쭔 ?좏깮?섎뒗 洹쒖튃 異붽?
-- ?낅뜲?댄듃??`Zip Coverage` 寃곌낵 寃利? `POSTAL_CODE + STRATEGIC_CITY_NAME + SVC_CENTER_TYPE` 湲곗? `AREA_NAME` 1媛쒕쭔 ?좎?
-- 遺곷????쇱슦??1?④퀎 沅뚯뿭 ?ㅺ퀎 紐⑤뱢 `smart_routing/region_design.py` 諛??ㅽ뻾 ?ㅽ겕由쏀듃 `sr_region_design.py` 異붽?
-- 沅뚯뿭 ?ㅺ퀎 湲곗?:
-  - `DMS/DMS2` ?쒕퉬?ㅻ쭔 ???  - ?꾩떆蹂??됯퇏 Slot ?⑸웾 湲곗? ?꾩슂 SM ??怨꾩궛
-  - ?고렪踰덊샇 以묒떖?먭낵 ?쒕퉬?ㅺ굔??媛以묒튂 湲곕컲 ?대윭?ㅽ꽣留곸쑝濡??듯빀 沅뚯뿭 ?ㅺ퀎
-- ?앹꽦 ?뚯씪:
-  - `260310/output/region_design_city_summary_Service_202603181109_geocoded.csv`
-  - `260310/output/region_design_region_summary_Service_202603181109_geocoded.csv`
-  - `260310/input/region_design_postal_Service_202603181109_geocoded.csv`
-  - `260310/input/region_design_service_Service_202603181109_geocoded.csv`
-
 ## 2026-03-10
 
-### 諛섏쁺 ?댁슜
+### 반영 내용
 
-- 臾몄꽌 愿由?洹쒖튃???꾨줈?앺듃 ?댁쁺 ?먯튃?쇰줈 ?뺤젙
-- `docs` ?대뜑 湲곕컲 ?ㅺ퀎 臾몄꽌 愿由?諛⑹떇 ?뺤쓽
-- 猷⑦듃??Codex 蹂寃??대젰 臾몄꽌 ?좎? 洹쒖튃 ?뺤쓽
-- 遺곷? ?쇱슦???꾨줈?앺듃???꾩옱 援ъ“ ?먯튃怨??곗씠?????洹쒖튃???ㅺ퀎??珥덉븞?쇰줈 湲곕줉
+- 문서 관리 규칙을 프로젝트 운영 장치로 확정
+- `docs` 폴더 기반 설계 문서 관리 방식을 정의
+- 루트의 Codex 변경 이력 문서 유지 규칙을 정의
+- 북미 라우팅 프로젝트의 현재 구조, 운영 장치, 데이터 기준에 대한 설계 초안을 기록
 
-### ?앹꽦 ?뚯씪
+### 생성 파일
 
-- `docs/?꾨줈?앺듃_?ㅺ퀎??md`
+- `docs/프로젝트_설계서.md`
 - `UPDATED_BY_CODEX.md`
 
-### 硫붾え
+### 메모
 
-- ?꾩옱 ?곗씠?곕뒗 理쒖쥌蹂몄씠 ?꾨땲誘濡?臾몄꽌??援ъ“ 以묒떖?쇰줈 ?묒꽦
-- ?댄썑 援ъ“ 蹂寃? ?ㅺ퀎 蹂寃? 肄붾뱶 ?앹꽦 ????臾몄꽌瑜?怨꾩냽 ?꾩쟻 媛깆떊
+- 현재 문서는 최종본이 아니라 구조 정리용 초안으로 작성
+- 이후 구조 변경, 설계 변경, 코드 생성 내역을 계속 추적 갱신
 
 ## 2026-03-16
 
-### 諛섏쁺 ?댁슜
+### 반영 내용
 
-- 誘멸뎅 二쇱냼 ?꾧꼍??蹂??湲곕낯 諛⑹떇??`US Census Geocoder`濡??뺤젙
-- ?섎（ 理쒕? 10,000嫄??좉퇋 二쇱냼留?蹂?섑븯怨??ㅼ쓬 ???댁뼱??異붽? 蹂?섑븯??援ъ“ ?ㅺ퀎
-- ?대? 蹂?섑븳 二쇱냼瑜??ъ궗?⑺븯湲??꾪븳 罹먯떆 ?뚯씪 援ъ“ 諛섏쁺
-- ?쒕퉬???뚯씪怨?吏?ㅼ퐫??寃곌낵瑜?蹂묓빀?섎뒗 CLI ?ㅽ겕由쏀듃 異붽?
+- 미국 주소 지오코딩 기본 방식을 `US Census Geocoder`로 확정
+- 하루 최대 10,000건의 신규 주소만 변환하고 이후 실행에서는 캐시를 재사용하는 구조 설계
+- 이미 변환한 주소 재사용을 위한 캐시 파일 구조 반영
+- 서비스 파일과 지오코드 결과를 병합하는 CLI 스크립트 추가
 
-### ?앹꽦 ?뚯씪
+### 생성 파일
 
 - `smart_routing/__init__.py`
 - `smart_routing/census_geocoder.py`
 - `sr_geocode.py`
 
-### ?섏젙 ?뚯씪
+### 수정 파일
 
-- `docs/?꾨줈?앺듃_?ㅺ퀎??md`
+- `docs/프로젝트_설계서.md`
 - `UPDATED_BY_CODEX.md`
 
-### 硫붾え
+### 메모
 
-- ?꾩옱 援ы쁽? 誘멸뎅 二쇱냼留???곸쑝濡??숈옉
-- ?낅젰 ?쒕퉬???뚯씪? CSV? Excel??紐⑤몢 吏??- 寃곌낵??罹먯떆 ?꾩쟻 ??`input` ?대뜑??蹂묓빀 CSV濡????- Census ?묐떟 ??꾩븘?껋쓣 ?쇳븯湲??꾪빐 ?대? ?붿껌???뚮같移섎줈 遺꾪븷
-- 吏?ㅼ퐫???ㅽ뻾 ???ㅼ젣 誘명빐寃?二쇱냼 湲곗??쇰줈 ?붿뿬 嫄댁닔 怨꾩궛 蹂댁젙
-- Census ?묐떟 醫뚰몴 ?꾨뱶 ?뚯떛 ?ㅻ쪟 ?섏젙
-- Census 誘명빐寃?二쇱냼????댁꽌留?Google Geocoding API fallback 援ъ“ 異붽?
-- 吏?ㅼ퐫???ㅼ젙怨?Google API ?ㅻ? 猷⑦듃 `config.json`?먯꽌 ?쎈룄濡?蹂寃?- Google API ?쒕룄 ?대젰 ?뚯씪??異붽?????踰??쒕룄??二쇱냼 ?ы샇異?諛⑹?
-- Google API ?붽컙 ?쒕룄 嫄댁닔 吏묎퀎 諛?10,000嫄?珥덇낵 諛⑹? 濡쒖쭅 異붽?
-- Google `REQUEST_DENIED` ?묐떟???쇰? 二쇱냼?먯꽌 諛쒖깮?대룄 ?꾩껜 ?ㅽ뻾??以묐떒?섏? ?딅룄濡?泥섎━
-- Google ?몄텧 以?SSL/?ㅽ듃?뚰겕 ?ㅻ쪟媛 諛쒖깮?대룄 ?꾩껜 ?ㅽ뻾??以묐떒?섏? ?딅룄濡?泥섎━
-- 吏?ㅼ퐫????二쇱냼 臾몄옄???꾩쿂由щ? 異붽???`ADDRESS_LINE1_INFO` ??以묐났??city/state/postal/country瑜??쒓굅
-- 怨쇨굅 Google ?ㅽ뙣 ?대젰???대쾲 ??踰덈쭔 臾댁떆?섍퀬 ?ъ떆?꾪븷 ???덈뒗 1?뚯꽦 ?듭뀡 異붽?
-- ?쒕퉬????蹂묓빀 ?쒖뿉???뺤젣??二쇱냼 湲곗? ?ㅻ? ?ъ슜?섎룄濡??섏젙??以묐났 二쇱냼 ?됱뿉 ?숈씪 醫뚰몴媛 梨꾩썙吏寃?蹂댁젙
-- 理쒖쥌 蹂묓빀 寃곌낵?먯꽌 醫뚰몴 誘몄깮???됱쓽 `source`瑜?`failed`濡??쒓린?섎룄濡??섏젙
-- ?ㅽ뻾 濡쒓렇??Census ?④퀎 寃곌낵? 理쒖쥌 蹂묓빀 寃곌낵瑜?遺꾨━??異쒕젰?섎룄濡?媛쒖꽑
+- 현재 구현은 미국 주소만 대상으로 동작
+- 입력 서비스 파일은 CSV와 Excel을 모두 지원
+- 결과는 캐시 누적 후 `input` 폴더의 병합 CSV로 저장
+- Census 응답 제한을 피하기 위해 대량 요청을 배치로 분할
+- 지오코드 실행 전 실제 미해결 주소 기준으로 요청 건수 계산을 보정
+- Census 응답 좌표 필드 파싱 오류 수정
+- Census 미해결 주소에 한해 Google Geocoding API fallback 추가
+- 지오코드 설정과 Google API 경로를 루트 `config.json`에서 읽도록 변경
+- Google API 시도 이력 파일을 추가하고 과도한 재시도를 막는 보호 로직 반영
+- Google API 일별 시도 건수 집계와 10,000건 초과 방지 로직 추가
+- Google `REQUEST_DENIED` 응답이 발생해도 전체 실행이 중단되지 않도록 처리
+- Google 호출 중 SSL/네트워크 오류가 발생해도 전체 실행이 중단되지 않도록 처리
+- 주소 전처리를 추가해 `ADDRESS_LINE1_INFO`에 중복 포함된 city/state/postal/country를 제거
+- 과거 Google 실패 이력을 1회성으로 무시하고 재시도할 수 있는 옵션 추가
+- 서비스 병합 시 정제된 주소 기준을 우선 사용하도록 조정해 중복 주소의 좌표 일관성을 보정
+- 최종 병합 결과에서 좌표 미생성 행의 `source`를 `failed`로 표기하도록 수정
+- 실행 로그에서 Census 단계 결과와 최종 병합 결과를 분리해 출력하도록 개선
 
 ## 2026-03-18
 
-### 諛섏쁺 ?댁슜
+### 추가 반영 내용
 
-- 誘멸뎅 Census ZCTA 怨듭떇 ZIP 寃쎄퀎 ?뚯씪 ?ㅼ슫濡쒕뱶
-- `Atlanta, GA` ?꾩슜 ZIP/AREA 寃?좎슜 吏???곗씠??濡쒖쭅 異붽?
-- Streamlit 湲곕컲 吏??寃??吏????異붽?
-- ZIP ?덉씠?댁? AREA dissolve ?덉씠?대? ?④퍡 ?쒖떆?섎룄濡?援ы쁽
+- 지도 통계 집계 시 `AREA_NAME` 문자열 정규화 로직 추가
+- 지역명의 줄바꿈, 앞뒤 공백, 중복 공백 때문에 `area_km2=0`처럼 보이던 경계 문제를 보정
+- `STRATEGIC_CITY_NAME`, `SVC_ENGINEER_CODE`, `SVC_CENTER_TYPE` 등 주요 텍스트 컬럼도 같은 방식으로 정규화
+- 지도 관련 보정 메모를 `docs/area_map_notes_20260318.md`에 기록
+- 지도 전처리 결과를 `data/cache/area_map` 아래 pickle 캐시로 저장하도록 추가
+- 원본 프로필 파일, ZCTA ZIP 파일, geocoded 서비스 파일의 경로와 수정 시각이 같으면 캐시를 재사용하도록 구성
+- ZIP/AREA/context geometry를 분리 캐시로 저장하도록 추가
+- Streamlit에서 `city + area + service point 표시 여부` 기준의 지도 HTML 캐시 추가
+- 지도 색상 체계를 고정 팔레트에서 지역 수에 맞는 동적 색상 생성 방식으로 변경
+- 지도 필터에 `Show Service Points` 체크박스 추가
+- ZIP/AREA tooltip 값을 `Slot Sum`에서 `POSTAL_CODE` 기준 실제 서비스 건수(`service_count`)로 변경
+- 서비스 건수 컬럼 추가에 맞춰 area map 캐시 버전 갱신
+- ZIP 경계선은 얇은 중립선으로, AREA 레이어만 강조되도록 시각화 조정
+- AREA 이름 hover 강조를 추가하고 ZIP 경계와 우편번호 경계가 더 잘 구분되도록 보정
+- 지역용 area geometry를 ZIP 조각 전체가 아니라 대표 `AREA_NAME` 기준 집계 영역으로 재구성
+- LA 화면에서 마우스 hover 겹침과 popup 충돌 문제를 완화
+- `smart_routing/profile_sync.py`와 `sr_update_profile_from_service.py` 추가
+- `DMS/DMS2` 서비스 데이터 기준으로 `Zip Coverage`와 `Slot` 업데이트 CSV 생성 로직 추가
 
-### ?앹꽦 ?뚯씪
+### 생성 파일
+
+- `260310/input/Zip_Coverage_updated_Service_202603181109.csv`
+- `260310/input/Slot_updated_Service_202603181109.csv`
+- `260310/output/unmatched_service_sm_Service_202603181109.csv`
+- `260310/output/profile_sync_summary_Service_202603181109.csv`
+- `260310/output/region_design_city_summary_Service_202603181109_geocoded.csv`
+- `260310/output/region_design_region_summary_Service_202603181109_geocoded.csv`
+- `260310/input/region_design_postal_Service_202603181109_geocoded.csv`
+- `260310/input/region_design_service_Service_202603181109_geocoded.csv`
+
+### 메모
+
+- profile sync의 `Zip Coverage` 업데이트 시 중복 ZIP이 여러 지역에 동시에 반영되지 않도록 1개 지역만 선택하는 규칙 추가
+- 업데이트 결과 검증 시 `POSTAL_CODE + STRATEGIC_CITY_NAME + SVC_CENTER_TYPE` 기준으로 `AREA_NAME`이 1개만 매핑되도록 확인
+- 북미 라우팅 1차 통합 권역 설계 모듈 `smart_routing/region_design.py`와 실행 스크립트 `sr_region_design.py` 추가
+- 권역 설계는 `DMS/DMS2` 서비스만을 대상으로 하고, 표시된 Slot 용량 기준 필요 SM 수를 계산하도록 구성
+- 우편번호 중심 좌표와 서비스 건수 가중치를 기반으로 통합 권역을 설계
+
+## 2026-03-18
+
+### 반영 내용
+
+- 미국 Census ZCTA 공식 ZIP 경계 파일 다운로드
+- `Atlanta, GA` 전용 ZIP/AREA 검토용 지도 데이터 로직 추가
+- Streamlit 기반 지도 검토 UI 추가
+- ZIP 레이어와 AREA dissolve 레이어를 함께 표시하도록 구현
+
+### 생성 파일
 
 - `smart_routing/area_map.py`
 - `sr_area_map.py`
 
-### ?섏젙 ?뚯씪
+### 수정 파일
 
-- `docs/?꾨줈?앺듃_?ㅺ퀎??md`
+- `docs/프로젝트_설계서.md`
 - `UPDATED_BY_CODEX.md`
 
-### 硫붾え
+### 메모
 
-- 誘멸뎅 ZIP 寃쎄퀎??`data/geo/tl_2024_us_zcta520.zip`?????- Atlanta ?곗씠?곗뿉?쒕뒗 ?섎굹??ZIP???щ윭 AREA/SM??以묐났 諛곗젙?섎뒗 耳?댁뒪媛 留롮쓬
-- 吏????踰붿쐞瑜?Atlanta ?꾩슜?먯꽌 誘멸뎅 ?꾩껜/?꾩떆蹂??좏깮 援ъ“濡??뺤옣
-- 吏???앹뾽??`AREA_NAME`, `SVC_ENGINEER_CODE`, `SVC_CENTER_TYPE` ?쒖떆 異붽?
-- geocoded ?쒕퉬??醫뚰몴瑜?吏?????덉씠?대줈 異붽?
-- `AREA_NAME`蹂??됱긽 援щ텇 諛?誘몃같??ZIP ?뚯깋 諛곌꼍 ?덉씠??異붽?
-- 吏???붾㈃??醫뚯슦 遺꾪븷 ?덉씠?꾩썐?쇰줈 媛쒗렪?섍퀬 吏???듦퀎???고렪踰덊샇 ?? ?쒕퉬???? 硫댁쟻) 異붽?
+- 미국 ZIP 경계는 `data/geo/tl_2024_us_zcta520.zip`을 기준으로 사용
+- Atlanta 데이터에는 하나의 ZIP이 여러 AREA/SM에 중복 배정되는 사례가 많음을 확인
+- 지도 범위를 Atlanta 전용에서 미국 전체 또는 도시 선택 구조로 확장
+- 지도 팝업에 `AREA_NAME`, `SVC_ENGINEER_CODE`, `SVC_CENTER_TYPE`를 함께 표시
+- geocoded 서비스 좌표를 지도 오버레이로 추가
+- `AREA_NAME` 기준 색상 구분과 미매핑 ZIP 강조 배경을 추가
+- 지도 화면을 좌우 분할 레이아웃으로 개편하고 통계 정보(우편번호 수, 서비스 수, 면적)를 함께 표시
 ## 2026-03-18
 
 ### Added
@@ -205,7 +216,7 @@
 - Fixed existing-region explorer data to keep all SVC_CENTER_TYPE values. Existing-region sidebar counts and marker popups now include real ASC counts instead of always showing zero; the DMS/DMS2-only filter remains applied only to integrated-region calculations.
 - Changed region design, integrated assignment, region-count sweep, and exported daily statistics to use all service jobs (including ASC) instead of filtering to only DMS/DMS2. Regenerated region design outputs, sweep summaries, and the daily statistics workbook on the full service workload.
 - Updated sr_area_map.py numbered marker styling so ASC jobs use a black border instead of a white border. This makes outsourced-service stops easier to distinguish on the map.
-- Fixed sr_area_map.py so ASC black-border numbered markers are applied only in 湲곗〈吏??mode. ?좉퇋吏??markers now use the standard white border even when the original service row came from ASC.
+- Fixed sr_area_map.py so ASC black-border numbered markers are applied only in Current Region mode. New Region markers now use the standard white border even when the original service row came from ASC.
 - Replaced the integrated-region assignment engine with a day-batch region/day routing model. For each region-day, the code now searches for the minimum SM count that satisfies the 480-minute workload limit (plus optional travel limits), instead of using the previous greedy sequential assignment.
 - Updated smart_routing/area_map.py to use the same day-batch minimum-SM assignment logic as smart_routing/routing_compare.py so map explorer integrated-region assignments stay aligned with the analytics logic.
 - Verified the modified modules compile successfully, but full Atlanta/LA sweep regeneration exceeded the current execution time limit and still needs a long run to refresh output CSV/XLSX artifacts.
@@ -314,20 +325,20 @@
   - Line Assign (Actual Attendance)
   - OSRM Assign
   - OSRM Assign (Actual Attendance)
-- Background rebuild scripts were relaunched using py.exe because the alternate python.exe on the machine did not have the equests dependency required by the routing modules.
+- Background rebuild scripts were relaunched using `py.exe` because the alternate `python.exe` on the machine did not have the `requests` dependency required by the routing modules.
 ## 2026-03-31
-- Actual Attendance ?쒗븳 濡쒖쭅???섏젙?? ?ㅼ젣 洹쇰Т??以??꾩옱 roster???녿뒗 ?붿??덉뼱?????댁긽 synthetic 湲곗궗濡?異붽??섏? ?딄퀬 current roster ?덉쓽 ?泥??몄썝?쇰줈留?移섑솚?섎룄濡?蹂寃쏀븿.
-- Line/OSRM Actual Attendance ?ъ깮?깆쓣 ?쒖옉?덇퀬, OSRM Actual Attendance 理쒖쥌 ?뚯씪? current roster only 湲곗??쇰줈 ?ъ깮???꾨즺??
-- 寃利? `atlanta_assignment_result_osrm_actual_attendance.csv`?먯꽌 non-roster `assigned_sm_code`媛 0嫄댁엫???뺤씤??
-- Actual Attendance ?꾩슜 ?ㅽ뿕 紐⑤뱶 2媛쒕? 異붽??? `Sequence Assign (Actual Attendance)`, `Iteration Assign (Actual Attendance)`.
-- Sequence 諛⑹떇? ?꾩껜 怨좉컼 ?쒖꽌瑜?nearest-neighbor濡?留뚮뱺 ??contiguous weighted chunk濡??섎닠 ?붿??덉뼱?먭쾶 諛곗젙??
-- Iteration 諛⑹떇? 湲곗〈 諛곗젙 ?댄썑 objective(`max total_work`, weighted job std, total travel)瑜?媛쒖꽑?섎뒗 one-job move瑜?諛섎났 ?곸슜??
-- `sr_production_map.py`?먯꽌 ?쇰컲 Assign 紐⑤뱶瑜??④린怨?Actual-only 紐⑤뱶 ?꾩＜濡??뺣━?덉쑝硫? ???ㅽ뿕 紐⑤뱶 ?곗텧 ?뚯씪???쎈룄濡??뺤옣??
-- 諛깃렇?쇱슫???ъ깮???ㅽ겕由쏀듃 異붽?: `sr_production_atlanta_assign_actual_attendance_sequence_chunks.py`, `sr_production_atlanta_assign_actual_attendance_iteration_chunks.py`.
-- OSRM Actual ?ㅽ뿕 紐⑤뱶 2媛쒕? 異붽??? `Sequence OSRM Assign (Actual Attendance)`, `Iteration OSRM Assign (Actual Attendance)`.
-- `production_assign_atlanta_osrm.py`??`assignment_strategy` ?뚮씪誘명꽣瑜?異붽???`sequence`/`iteration`??OSRM matrix 湲곕컲 諛곗젙 ?먮쫫?쇰줈 ?ㅽ뻾 媛?ν븯寃???
-- `sr_production_map.py`??OSRM Sequence/Iteration Actual ?곗텧 ?뚯씪怨?紐⑤뱶 ?좏깮 UI瑜?異붽???
-- 諛깃렇?쇱슫???ъ깮???ㅽ겕由쏀듃 異붽?: `sr_production_atlanta_assign_osrm_actual_attendance_sequence_chunks.py`, `sr_production_atlanta_assign_osrm_actual_attendance_iteration_chunks.py`.
+- Updated the Actual Attendance limit logic so when the current roster is smaller than the real worked headcount, the flow no longer adds synthetic engineers and instead substitutes only within the current roster.
+- Restarted Line/OSRM Actual Attendance rebuilds, and completed the OSRM Actual Attendance final output in current-roster-only mode.
+- Verified that `atlanta_assignment_result_osrm_actual_attendance.csv` contains zero non-roster `assigned_sm_code` values.
+- Added two Actual Attendance simulation modes: `Sequence Assign (Actual Attendance)` and `Iteration Assign (Actual Attendance)`.
+- The Sequence method builds a nearest-neighbor global customer order first, then splits it into contiguous weighted chunks for engineer assignment.
+- The Iteration method starts from an initial assignment and repeatedly applies one-job moves to improve the objective (`max total_work`, weighted job std, total travel).
+- Updated `sr_production_map.py` to hide the legacy general Assign mode, focus on Actual-only modes, and load the new simulation output files.
+- Added background rebuild scripts: `sr_production_atlanta_assign_actual_attendance_sequence_chunks.py`, `sr_production_atlanta_assign_actual_attendance_iteration_chunks.py`.
+- Added two OSRM Actual Attendance modes: `Sequence OSRM Assign (Actual Attendance)` and `Iteration OSRM Assign (Actual Attendance)`.
+- Added `assignment_strategy` to `production_assign_atlanta_osrm.py` so `sequence` and `iteration` OSRM-matrix assignment flows can be selected explicitly.
+- Updated `sr_production_map.py` to expose the OSRM Sequence/Iteration Actual output files and the corresponding mode-selection UI.
+- Added background rebuild scripts: `sr_production_atlanta_assign_osrm_actual_attendance_sequence_chunks.py`, `sr_production_atlanta_assign_osrm_actual_attendance_iteration_chunks.py`.
 - Reprocessed the newly downloaded service file `260310/Service_202603311508.csv`.
 - Rebuilt `260310/input/Service_202603311508_geocoded.csv` by reusing existing Census and Google geocode caches and carrying forward missing operating columns from the prior geocoded service export.
 - Regenerated profile sync outputs from the new geocoded service file:
@@ -439,3 +450,57 @@
   - fetch result
   - returned completed summary and assignments successfully
 
+2026-04-05 (VRP API stabilization and compare flow update)
+- Added restart helpers for the Smart Routing VRP API path:
+  - `restart_smart_routing_api.sh`
+  - `sr_vrp_api_server.py`
+- Expanded the VRP API stack to support the current live/compare flow:
+  - `smart_routing/vrp_api_client.py`
+  - `smart_routing/vrp_api_server.py`
+  - `smart_routing/vrp_api_service.py`
+- Updated `smart_routing/production_assign_atlanta_osrm.py` and `sr_production_map.py` so Actual / VRP / OSRM comparison runs can share the same 3-day output flow.
+- Added dedicated 3-day runners:
+  - `sr_production_atlanta_assign_osrm_actual_3days.py`
+  - `sr_production_atlanta_assign_osrm_iteration_actual_3days.py`
+  - `sr_production_atlanta_compare_actual_vrp_osrm_3days.py`
+- Refined the live-query path in:
+  - `smart_routing/live_atlanta_runtime.py`
+  - `smart_routing/select_data.sql`
+  - `sr_live_atlanta_routing.py`
+
+2026-04-15 (VRP common mode)
+- Added common VRP configuration and persistence base:
+  - `config_common_vrp.json`
+  - `smart_routing/common_vrp_db.py`
+  - `smart_routing/common_vrp_runtime.py`
+- Added common API/server entry points:
+  - `smart_routing/common_vrp_api_server.py`
+  - `sr_common_vrp_api_server.py`
+  - `restart_common_vrp_api.sh`
+- Added reusable routing modes:
+  - `smart_routing/vrp_mode_na_general.py`
+  - `smart_routing/vrp_mode_z_weekend.py`
+  - `smart_routing/vrp_api_common.py`
+- Added common client entry and seeded reference/job data:
+  - `sr_common_vrp_client.py`
+  - `data/common_vrp_job_input.parquet`
+  - `data/common_vrp_technician_input.parquet`
+  - `data/atlanta_input_store.parquet`
+  - `260310/vrp_api_jobs/*`
+- Common mode now supports DB-backed routing config, technician master loading, heavy-repair rules, and reusable request/result storage for multiple routing modes.
+
+2026-04-17 (Fixed job support and return-to-home rollback)
+- Added fixed-job support across the shared routing clients and Atlanta VRP path:
+  - `sr_common_vrp_client.py`
+  - `sr_vrp_api_client.py`
+  - `smart_routing/vrp_api_client.py`
+  - `smart_routing/production_assign_atlanta_vrp.py`
+  - `smart_routing/production_assign_atlanta.py`
+- Added an optional return-to-home routing branch during the same workstream, then removed it after review so the final behavior keeps fixed-job support without forcing return-to-home routing.
+- Updated shared runtime/mode modules to match the final behavior:
+  - `smart_routing/common_vrp_runtime.py`
+  - `smart_routing/common_vrp_api_server.py`
+  - `smart_routing/vrp_mode_na_general.py`
+- Final 2026-04-17 state:
+  - fixed jobs are preserved end-to-end
+  - return-to-home routing is not applied in the final path

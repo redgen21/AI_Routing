@@ -3,7 +3,6 @@ set -euo pipefail
 
 HOST="${1:-0.0.0.0}"
 PORT="${2:-8055}"
-APP_PATTERN="sr_vrp_api_server.py --host ${HOST} --port ${PORT}"
 OUT_LOG="smart_routing_api.out.log"
 ERR_LOG="smart_routing_api.err.log"
 

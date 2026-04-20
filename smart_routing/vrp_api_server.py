@@ -16,6 +16,7 @@ def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) 
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
+    handler.wfile.flush()
 
 
 def _read_json_request(handler: BaseHTTPRequestHandler) -> dict:

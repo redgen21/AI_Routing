@@ -229,11 +229,7 @@ class OSRMTripClient:
                 return payload
             except Exception:
                 continue
-        payload = self._fallback_ordered_route(normalized)
-        with self._lock:
-            self.route_cache[cache_key] = payload
-            self._append_route_cache(cache_key, payload, len(normalized))
-        return payload
+        return self._fallback_ordered_route(normalized)
 
     def _request_trip(self, base_url: str, coord_str: str) -> tuple[float, float]:
         url = (
