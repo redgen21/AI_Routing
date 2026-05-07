@@ -81,6 +81,9 @@ def _build_schedule_for_ordered_group(group_df: pd.DataFrame, route_client) -> t
     coord_chain = [start_coord] + stop_coords if start_coord is not None else stop_coords
     distance_mat, duration_mat = route_client.get_distance_duration_matrix(coord_chain)
     route_distance_km, route_duration_min, geometry = _build_route_geometry(route_client, coord_chain)
+    if start_coord is not None and len(coord_chain) > 1:
+        route_distance_km = max(float(route_distance_km) - float(distance_mat[0][1]), 0.0)
+        route_duration_min = max(float(route_duration_min) - float(duration_mat[0][1]), 0.0)
 
     base_date = pd.to_datetime(str(ordered_group["service_date_key"].iloc[0]), errors="coerce")
     if pd.isna(base_date):
@@ -105,6 +108,8 @@ def _build_schedule_for_ordered_group(group_df: pd.DataFrame, route_client) -> t
         matrix_from = idx - 1 if start_coord is not None else max(idx - 1, 0)
         matrix_to = idx if start_coord is not None else idx - 1
         travel_min = 0.0 if idx == 1 and start_coord is None else float(duration_mat[matrix_from][matrix_to])
+        if idx == 1 and start_coord is not None:
+            travel_min = 0.0
         arrival = current_time + pd.Timedelta(minutes=travel_min)
         lunch_flag = False
         if not lunch_taken and lunch_start_window <= arrival <= lunch_end_window:
@@ -166,9 +171,7 @@ def _solve_vrp_day(
         fixed_code_series = job_df.get("current_employee_code", pd.Series("", index=job_df.index)).fillna("").astype(str).str.strip()
         unavailable_fixed_mask = fixed_mask & fixed_code_series.ne("") & ~fixed_code_series.isin(vehicle_codes)
         if unavailable_fixed_mask.any():
-            job_df = job_df.loc[~unavailable_fixed_mask].copy().reset_index(drop=True)
-            if job_df.empty:
-                return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+            job_df.loc[unavailable_fixed_mask, "fixed"] = False
 
     job_count = len(job_df)
 
@@ -220,9 +223,9 @@ def _solve_vrp_day(
     engineer_lookup = {str(row["SVC_ENGINEER_CODE"]): row for _, row in engineer_df.iterrows()}
     for job_idx, (_, row) in enumerate(job_df.iterrows()):
         fixed_employee_code = str(row.get("current_employee_code", "")).strip()
-        if respect_fixed_jobs and bool(row.get("fixed", False)) and fixed_employee_code:
-            fixed_vehicle_idx = vehicle_index_by_code.get(fixed_employee_code)
-            allowed_vehicle_indices = [fixed_vehicle_idx] if fixed_vehicle_idx is not None else []
+        fixed_vehicle_idx = vehicle_index_by_code.get(fixed_employee_code) if fixed_employee_code else None
+        if respect_fixed_jobs and bool(row.get("fixed", False)) and fixed_vehicle_idx is not None:
+            allowed_vehicle_indices = [fixed_vehicle_idx]
         else:
             candidates_df = base._candidate_engineers(row, engineer_df)
             allowed_codes = set(candidates_df["SVC_ENGINEER_CODE"].astype(str).tolist())
@@ -230,8 +233,8 @@ def _solve_vrp_day(
         if not allowed_vehicle_indices:
             continue
         node_index = manager.NodeToIndex(job_idx)
-        routing.SetAllowedVehiclesForIndex(allowed_vehicle_indices, node_index)
-        routing.AddDisjunction([manager.NodeToIndex(job_idx)], 10_000_000)
+        routing.VehicleVar(node_index).SetValues([-1] + [int(vehicle_idx) for vehicle_idx in allowed_vehicle_indices])
+        routing.AddDisjunction([manager.NodeToIndex(job_idx)], 1_000_000_000)
 
     search_params = pywrapcp.DefaultRoutingSearchParameters()
     search_params.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
