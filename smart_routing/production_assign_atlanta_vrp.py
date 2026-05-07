@@ -13,6 +13,7 @@ PRODUCTION_OUTPUT_DIR = Path("260310/production_output")
 VRP_SOFT_WORK_MIN = base.MAX_WORK_MIN
 VRP_ABSOLUTE_WORK_MIN = 540
 VRP_OVERTIME_PENALTY_PER_UNIT = 500
+VRP_REQUIRE_ALL_AVAILABLE_TECHNICIANS = True
 
 
 @dataclass
@@ -232,6 +233,7 @@ def _solve_vrp_day(
         )
 
     engineer_lookup = {str(row["SVC_ENGINEER_CODE"]): row for _, row in engineer_df.iterrows()}
+    vehicle_has_candidate_job = [False] * vehicle_count
     for job_idx, (_, row) in enumerate(job_df.iterrows()):
         fixed_employee_code = str(row.get("current_employee_code", "")).strip()
         fixed_vehicle_idx = vehicle_index_by_code.get(fixed_employee_code) if fixed_employee_code else None
@@ -243,9 +245,21 @@ def _solve_vrp_day(
             allowed_vehicle_indices = [int(vehicle_idx) for vehicle_idx, code in enumerate(vehicle_codes) if code in allowed_codes]
         if not allowed_vehicle_indices:
             continue
+        for vehicle_idx in allowed_vehicle_indices:
+            vehicle_has_candidate_job[int(vehicle_idx)] = True
         node_index = manager.NodeToIndex(job_idx)
         routing.VehicleVar(node_index).SetValues([-1] + [int(vehicle_idx) for vehicle_idx in allowed_vehicle_indices])
         routing.AddDisjunction([manager.NodeToIndex(job_idx)], 1_000_000_000)
+
+    required_vehicle_indices = [
+        vehicle_idx
+        for vehicle_idx, has_candidate in enumerate(vehicle_has_candidate_job)
+        if has_candidate
+    ]
+    if VRP_REQUIRE_ALL_AVAILABLE_TECHNICIANS and job_count >= len(required_vehicle_indices):
+        solver = routing.solver()
+        for vehicle_idx in required_vehicle_indices:
+            solver.Add(routing.NextVar(routing.Start(vehicle_idx)) != routing.End(vehicle_idx))
 
     search_params = pywrapcp.DefaultRoutingSearchParameters()
     search_params.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
