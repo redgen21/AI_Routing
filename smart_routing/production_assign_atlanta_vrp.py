@@ -10,6 +10,9 @@ import smart_routing.production_assign_atlanta as base
 
 
 PRODUCTION_OUTPUT_DIR = Path("260310/production_output")
+VRP_SOFT_WORK_MIN = base.MAX_WORK_MIN
+VRP_ABSOLUTE_WORK_MIN = 540
+VRP_OVERTIME_PENALTY_PER_UNIT = 500
 
 
 @dataclass
@@ -216,9 +219,17 @@ def _solve_vrp_day(
     transit_callback_index = routing.RegisterTransitCallback(transit_cost_callback)
     time_callback_index = routing.RegisterTransitCallback(time_callback)
     routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
-    routing.AddDimension(time_callback_index, 0, int(base.MAX_WORK_MIN * 100), True, "Time")
+    soft_work_limit = int(VRP_SOFT_WORK_MIN * 100)
+    absolute_work_limit = int(max(VRP_ABSOLUTE_WORK_MIN, VRP_SOFT_WORK_MIN) * 100)
+    routing.AddDimension(time_callback_index, 0, absolute_work_limit, True, "Time")
     time_dimension = routing.GetDimensionOrDie("Time")
     time_dimension.SetGlobalSpanCostCoefficient(100)
+    for vehicle_idx in range(vehicle_count):
+        time_dimension.SetCumulVarSoftUpperBound(
+            routing.End(vehicle_idx),
+            soft_work_limit,
+            VRP_OVERTIME_PENALTY_PER_UNIT,
+        )
 
     engineer_lookup = {str(row["SVC_ENGINEER_CODE"]): row for _, row in engineer_df.iterrows()}
     for job_idx, (_, row) in enumerate(job_df.iterrows()):
@@ -312,7 +323,13 @@ def _solve_vrp_day(
             pd.to_numeric(summary_df["service_time_min"], errors="coerce").fillna(0)
             + pd.to_numeric(summary_df["travel_time_min"], errors="coerce").fillna(0)
         ).round(2)
-        summary_df["overflow_480"] = summary_df["total_work_min"] > base.MAX_WORK_MIN
+        summary_df["overtime_min"] = (
+            pd.to_numeric(summary_df["total_work_min"], errors="coerce").fillna(0)
+            - float(VRP_SOFT_WORK_MIN)
+        ).clip(lower=0).round(2)
+        summary_df["over_soft_limit"] = summary_df["overtime_min"] > 0
+        summary_df["over_absolute_limit"] = summary_df["total_work_min"] > float(VRP_ABSOLUTE_WORK_MIN)
+        summary_df["overflow_480"] = summary_df["over_soft_limit"]
     return assignment_df, summary_df, schedule_result_df
 
 
