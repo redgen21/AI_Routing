@@ -1,0 +1,15 @@
+[Unit]
+Description=Common VRP Streamlit Client
+After=network.target common-vrp.service
+
+[Service]
+Type=simple
+User=csda
+WorkingDirectory=/home/csda/AI_Routing
+Environment=PATH=/home/csda/AI_Routing/.venv/bin:/home/csda/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash -lc 'cd /home/csda/AI_Routing && exec streamlit run sr_common_vrp_client_server.py --server.port 8501 --server.address 0.0.0.0'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

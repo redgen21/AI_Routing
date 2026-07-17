@@ -11,6 +11,7 @@ import pandas as pd
 from .area_map import get_latest_geocoded_service_file
 from .census_geocoder import load_geocode_cache, merge_service_with_geocodes
 from .google_geocoder import GoogleGeocoder
+from .here_geocoder import HereGeocoder
 from .region_sweep import _assign_city_regions
 
 
@@ -327,11 +328,14 @@ def _build_engineer_region_df(
 def _geocode_home_address_df(address_df: pd.DataFrame, config: dict) -> pd.DataFrame:
     geocoding_cfg = config.get("geocoding", {})
     cache_file = Path(str(geocoding_cfg.get("census_cache_file", "data/geocode_cache_us_census.csv")))
+    here_cache_file = Path(str(geocoding_cfg.get("here_cache_file", "data/geocode_cache_here.csv")))
+    here_attempt_log_file = Path(str(geocoding_cfg.get("here_attempt_log_file", "data/geocode_attempted_here.csv")))
+    here_api_key = geocoding_cfg.get("here_api_key")
     google_cache_file = Path(str(geocoding_cfg.get("google_cache_file", "data/geocode_cache_google.csv")))
     google_attempt_log_file = Path(str(geocoding_cfg.get("google_attempt_log_file", "data/geocode_attempted_google.csv")))
     google_api_key = geocoding_cfg.get("google_api_key")
 
-    temp_df = address_df.copy()
+    temp_df = address_df.copy().reset_index(drop=True)
     temp_df["ADDRESS_LINE1_INFO"] = temp_df["Home Street Address"]
     temp_df["CITY_NAME"] = temp_df["City "]
     temp_df["STATE_NAME"] = temp_df["State"]
@@ -339,16 +343,47 @@ def _geocode_home_address_df(address_df: pd.DataFrame, config: dict) -> pd.DataF
     temp_df["COUNTRY_NAME"] = "USA"
     temp_df["GSFS_RECEIPT_NO"] = temp_df["SVC_ENGINEER_CODE"]
 
-    cache_df = pd.concat([load_geocode_cache(cache_file), load_geocode_cache(google_cache_file)], ignore_index=True)
+    cache_df = pd.concat(
+        [load_geocode_cache(cache_file), load_geocode_cache(here_cache_file), load_geocode_cache(google_cache_file)],
+        ignore_index=True,
+    )
     cache_df = cache_df.drop_duplicates(subset=["address_key"], keep="first").reset_index(drop=True)
     merged_df = merge_service_with_geocodes(temp_df, cache_df)
 
     failed_mask = merged_df["source"].astype(str).eq("failed")
+    if failed_mask.any() and here_api_key:
+        with tempfile.TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+            temp_service_path = tmp_dir / "atlanta_engineer_home_address_unmatched_here.csv"
+            temp_df.iloc[failed_mask.to_numpy()].to_csv(temp_service_path, index=False, encoding="utf-8-sig")
+            here = HereGeocoder(
+                api_key=str(here_api_key),
+                cache_path=here_cache_file,
+                attempt_log_path=here_attempt_log_file,
+                monthly_limit=int(geocoding_cfg.get("here_monthly_limit", 10000)),
+                sleep_sec=float(geocoding_cfg.get("here_sleep_sec", 0.05)),
+                min_query_score=float(geocoding_cfg.get("here_min_query_score", 0.7)),
+                min_field_score=float(geocoding_cfg.get("here_min_field_score", 0.7)),
+            )
+            here.run_for_unmatched(
+                service_path=temp_service_path,
+                census_cache_path=cache_file,
+                run_date=None,
+                ignore_attempt_log_once=True,
+            )
+        cache_df = pd.concat(
+            [load_geocode_cache(cache_file), load_geocode_cache(here_cache_file), load_geocode_cache(google_cache_file)],
+            ignore_index=True,
+        )
+        cache_df = cache_df.drop_duplicates(subset=["address_key"], keep="first").reset_index(drop=True)
+        merged_df = merge_service_with_geocodes(temp_df, cache_df)
+        failed_mask = merged_df["source"].astype(str).eq("failed")
+
     if failed_mask.any() and google_api_key:
         with tempfile.TemporaryDirectory() as tmp_dir_str:
             tmp_dir = Path(tmp_dir_str)
             temp_service_path = tmp_dir / "atlanta_engineer_home_address_unmatched.csv"
-            temp_df.loc[failed_mask].to_csv(temp_service_path, index=False, encoding="utf-8-sig")
+            temp_df.iloc[failed_mask.to_numpy()].to_csv(temp_service_path, index=False, encoding="utf-8-sig")
             google = GoogleGeocoder(
                 api_key=str(google_api_key),
                 cache_path=google_cache_file,
@@ -362,7 +397,10 @@ def _geocode_home_address_df(address_df: pd.DataFrame, config: dict) -> pd.DataF
                 run_date=None,
                 ignore_attempt_log_once=True,
             )
-        cache_df = pd.concat([load_geocode_cache(cache_file), load_geocode_cache(google_cache_file)], ignore_index=True)
+        cache_df = pd.concat(
+            [load_geocode_cache(cache_file), load_geocode_cache(here_cache_file), load_geocode_cache(google_cache_file)],
+            ignore_index=True,
+        )
         cache_df = cache_df.drop_duplicates(subset=["address_key"], keep="first").reset_index(drop=True)
         merged_df = merge_service_with_geocodes(temp_df, cache_df)
 

@@ -1,0 +1,2 @@
+size,requests,success,failed,success_rate,scenario_elapsed_sec,throughput_rps,latency_avg_ms,latency_p50_ms,latency_p95_ms,latency_max_ms,response_bytes_avg,errors
+100,1,1,0,1.0,0.6648417001124471,1.5041174460489863,650.4615999292582,650.4615999292582,650.4615999292582,650.4615999292582,22204,{}

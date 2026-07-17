@@ -1,0 +1,14 @@
+﻿subsidiary_name,strategic_city_name,employee_name,employee_code,center_type,available,shift_start,shift_end,slot_count,priority_group,start_location_type,start_location_address
+LGEAI,"Atlanta, GA",Adolph Scarlett,AI103264,DMS,TRUE,9:00,18:00,8,B,Home,4842 Tower View Dr.
+LGEAI,"Atlanta, GA",Arthur Gloster,AI103146,DMS,FALSE,9:00,18:00,8,B,Home,3355 Bethany Bend
+LGEAI,"Atlanta, GA",Frank Hooks,AI105116,DMS,TRUE,9:00,18:00,8,B,Home,5157 St. Claire Pl
+LGEAI,"Atlanta, GA",Gilbert Dupree,AI102448,DMS,TRUE,9:00,18:00,8,B,Home,660 Goldenwood Ct.
+LGEAI,"Atlanta, GA",Horace Bull,AI103261,DMS,TRUE,9:00,18:00,8,B,Home,1310 Aberdare Dr.
+LGEAI,"Atlanta, GA",Ivan Zimic,AI103128,DMS,TRUE,9:00,18:00,8,B,Home,295 Fernbrooke Trail
+LGEAI,"Atlanta, GA",Jason Patterson,AI105115,DMS,TRUE,9:00,18:00,8,B,Home,175 Tommys Trl
+LGEAI,"Atlanta, GA",Marcus Harmon,AI102087,DMS,TRUE,9:00,18:00,8,B,Home,1367 Hardy Circle
+LGEAI,"Atlanta, GA",Nicholas Foskin,AI102961,DMS,TRUE,9:00,18:00,8,B,Home,1253 Pensacola Ln
+LGEAI,"Atlanta, GA",RUDY EDOLE,AI005576,DMS,TRUE,9:00,18:00,8,B,Home,5735 Hearn Road
+LGEAI,"Atlanta, GA",Richardo Brooks,AI102933,DMS,TRUE,9:00,18:00,8,B,Home,133 Avondale Blvd 30013
+LGEAI,"Atlanta, GA",Sergey Ashihmin,AI102608,DMS,TRUE,9:00,18:00,8,B,Home,115 Centennial Ridge Dr
+LGEAI,"Atlanta, GA",Yu Zheng,AI102977,DMS,TRUE,9:00,18:00,8,B,Home,2824 Sudbury Court

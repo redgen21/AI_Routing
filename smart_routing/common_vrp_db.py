@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -14,8 +15,15 @@ from .live_atlanta_runtime import _load_config as _load_runtime_config
 from .live_atlanta_runtime import _merge_service_geocodes
 
 
+warnings.filterwarnings(
+    "ignore",
+    message="pandas only supports SQLAlchemy connectable.*",
+    category=UserWarning,
+)
+
+
 COMMON_CONFIG_PATH = Path("config_common_vrp.json")
-PROFILE_PATH = Path("260310/Top 10_DMS_DMS2_Profile_20260317.xlsx")
+PROFILE_PATH = Path("260310/production_input/Top 10_DMS_DMS2_Profile_20260317_production.xlsx")
 DEFAULT_REGION_ZIP_PATH = Path("260310/production_input/atlanta_fixed_region_zip_3.csv")
 DEFAULT_HEAVY_REPAIR_LOOKUP_PATH = Path("260310/production_input/atlanta_heavy_repair_lookup.csv")
 DEFAULT_SYMPTOM_FILE = Path("data/Notification_Symptom_mapping_20241120_3depth.xlsx")
@@ -26,6 +34,34 @@ def _clean_text(value: Any) -> str:
         return ""
     text = str(value).strip()
     return "" if text.lower() in {"nan", "none", "nat"} else text
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if pd.isna(value):
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "1", "y", "yes", "t"}:
+        return True
+    if text in {"false", "0", "n", "no", "f", ""}:
+        return False
+    return default
+
+
+def _coerce_priority_group_label(value: Any, default: str = "B") -> str:
+    if pd.isna(value):
+        return default
+    text = str(value).strip().upper()
+    if text in {"A", "HIGH", "P3", "PRIORITY 3", "3"}:
+        return "A"
+    if text in {"C", "LOW", "P1", "PRIORITY 1", "1"}:
+        return "C"
+    if text in {"B", "MEDIUM", "MID", "P2", "PRIORITY 2", "2"}:
+        return "B"
+    return default
 
 
 def _geocode_technician_home_df(home_df: pd.DataFrame) -> pd.DataFrame:
@@ -70,6 +106,10 @@ create table if not exists common_routing_config_master (
     max_work_min_per_sm_day integer,
     max_travel_min_per_sm_day integer,
     max_travel_km_per_sm_day integer,
+    max_single_leg_min integer,
+    max_home_to_job_min integer,
+    long_leg_penalty_start_min integer,
+    long_leg_penalty_multiplier numeric,
     timezone_offset text,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
@@ -82,6 +122,7 @@ create table if not exists common_region_master (
     postal_code text not null,
     region_seq integer not null,
     region_name text not null,
+    area_type text,
     region_center_latitude double precision,
     region_center_longitude double precision,
     created_at timestamptz not null default now(),
@@ -103,6 +144,8 @@ create table if not exists common_technician_master (
     home_latitude double precision,
     home_longitude double precision,
     active_flag boolean not null default true,
+    priority_group text not null default 'B',
+    max_home_to_job_min integer,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
     primary key (subsidiary_name, strategic_city_name, employee_code)
@@ -148,13 +191,16 @@ create table if not exists common_job_input (
     country_name text,
     postal_code text,
     address_line1_info text,
+    fixed boolean not null default false,
+    reschedule boolean not null default false,
+    job_slot_count integer not null default 1,
     latitude double precision,
     longitude double precision,
     source text,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
     primary key (record_id),
-    unique (subsidiary_name, strategic_city_name, gsfs_receipt_no)
+    unique (subsidiary_name, strategic_city_name, promise_date, gsfs_receipt_no)
 );
 
 create table if not exists common_request_technician_input (
@@ -168,6 +214,9 @@ create table if not exists common_request_technician_input (
     shift_start text,
     shift_end text,
     slot_count integer,
+    priority_group text not null default 'B',
+    preferred_region_name text,
+    max_minutes integer,
     max_jobs integer,
     available boolean not null default true,
     start_location_type text,
@@ -201,6 +250,64 @@ create table if not exists common_routing_result (
     updated_at timestamptz not null default now(),
     primary key (request_id)
 );
+
+create table if not exists common_avoid_area (
+    avoid_area_id text not null,
+    subsidiary_name text not null,
+    strategic_city_name text not null,
+    area_name text not null,
+    description text,
+    geometry_json text not null,
+    active_flag boolean not null default true,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    primary key (avoid_area_id)
+);
+
+create table if not exists common_geocode_cache (
+    address_key text not null,
+    source_bucket text not null,
+    address_line1 text,
+    city text,
+    state text,
+    postal_code text,
+    country_name text,
+    matched_address text,
+    match_indicator text,
+    match_type text,
+    longitude double precision,
+    latitude double precision,
+    tiger_line_id text,
+    tiger_line_side text,
+    census_state_fips text,
+    census_county_fips text,
+    census_tract text,
+    census_block text,
+    geocoded_date date,
+    source text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    primary key (address_key, source_bucket)
+);
+
+create table if not exists common_geocode_attempt_log (
+    address_key text not null,
+    attempted_date date not null,
+    status text,
+    source text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    primary key (address_key, attempted_date)
+);
+
+create table if not exists common_geocode_daily_log (
+    run_date date not null,
+    source_bucket text not null,
+    used_count integer not null default 0,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    primary key (run_date, source_bucket)
+);
 """
 
 
@@ -208,6 +315,36 @@ def init_schema(config_path: Path = COMMON_CONFIG_PATH) -> None:
     with get_db_connection(config_path) as conn:
         with conn.cursor() as cur:
             cur.execute(SCHEMA_SQL)
+            cur.execute(
+                """
+                alter table if exists common_routing_config_master
+                add column if not exists max_single_leg_min integer
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_routing_config_master
+                add column if not exists max_home_to_job_min integer
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_routing_config_master
+                add column if not exists long_leg_penalty_start_min integer
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_routing_config_master
+                add column if not exists long_leg_penalty_multiplier numeric
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_region_master
+                add column if not exists area_type text
+                """
+            )
             cur.execute(
                 """
                 alter table if exists common_request_technician_input
@@ -218,6 +355,184 @@ def init_schema(config_path: Path = COMMON_CONFIG_PATH) -> None:
                 """
                 alter table if exists common_request_technician_input
                 add column if not exists source text
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_request_technician_input
+                add column if not exists priority_group text not null default 'B'
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_request_technician_input
+                add column if not exists max_minutes integer
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_request_technician_input
+                add column if not exists preferred_region_name text
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_request_technician_input
+                alter column priority_group drop default
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_request_technician_input
+                alter column priority_group type text
+                using case
+                    when upper(priority_group::text) in ('A', '3', 'P3', 'PRIORITY 3') then 'A'
+                    when upper(priority_group::text) in ('C', '1', 'P1', 'PRIORITY 1') then 'C'
+                    else 'B'
+                end,
+                alter column priority_group set default 'B'
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_technician_master
+                add column if not exists max_home_to_job_min integer
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_technician_master
+                add column if not exists priority_group text not null default 'B'
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_technician_master
+                alter column priority_group drop default
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_technician_master
+                alter column priority_group type text
+                using case
+                    when upper(priority_group::text) in ('A', '3', 'P3', 'PRIORITY 3') then 'A'
+                    when upper(priority_group::text) in ('C', '1', 'P1', 'PRIORITY 1') then 'C'
+                    else 'B'
+                end,
+                alter column priority_group set default 'B'
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_job_input
+                add column if not exists fixed boolean not null default false
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_job_input
+                add column if not exists reschedule boolean not null default false
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_job_input
+                add column if not exists job_slot_count integer not null default 1
+                """
+            )
+            cur.execute(
+                """
+                do $$
+                begin
+                    if exists (
+                        select 1
+                        from information_schema.columns
+                        where table_name = 'common_job_input'
+                          and column_name = 'two_slot_job'
+                    ) then
+                        update common_job_input
+                        set job_slot_count = case when two_slot_job then greatest(job_slot_count, 2) else job_slot_count end;
+                    end if;
+                end $$;
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_job_input
+                drop column if exists two_slot_job
+                """
+            )
+            cur.execute(
+                """
+                create index if not exists common_geocode_cache_updated_at_idx
+                on common_geocode_cache (updated_at)
+                """
+            )
+            cur.execute(
+                """
+                create index if not exists common_geocode_attempt_log_updated_at_idx
+                on common_geocode_attempt_log (updated_at)
+                """
+            )
+            cur.execute(
+                """
+                delete from common_geocode_cache
+                where updated_at < now() - interval '7 days'
+                """
+            )
+            cur.execute(
+                """
+                delete from common_geocode_attempt_log
+                where updated_at < now() - interval '7 days'
+                """
+            )
+            cur.execute(
+                """
+                delete from common_geocode_daily_log
+                where updated_at < now() - interval '7 days'
+                """
+            )
+            cur.execute(
+                """
+                do $$
+                declare
+                    old_constraint_name text;
+                begin
+                    select c.conname
+                    into old_constraint_name
+                    from pg_constraint c
+                    join pg_class t on t.oid = c.conrelid
+                    join pg_namespace n on n.oid = t.relnamespace
+                    where t.relname = 'common_job_input'
+                      and n.nspname = current_schema()
+                      and c.contype = 'u'
+                      and (
+                          select array_agg(att.attname::text order by u.ord)
+                          from unnest(c.conkey) with ordinality as u(attnum, ord)
+                          join pg_attribute att on att.attrelid = c.conrelid and att.attnum = u.attnum
+                      ) = array['subsidiary_name', 'strategic_city_name', 'gsfs_receipt_no']::text[];
+                    if old_constraint_name is not null then
+                        execute format('alter table common_job_input drop constraint %I', old_constraint_name);
+                    end if;
+                end $$;
+                """
+            )
+            cur.execute(
+                """
+                do $$
+                begin
+                    if not exists (
+                        select 1
+                        from information_schema.table_constraints
+                        where table_name = 'common_job_input'
+                          and constraint_name = 'common_job_input_context_date_receipt_key'
+                    ) then
+                        alter table common_job_input
+                        add constraint common_job_input_context_date_receipt_key
+                        unique (subsidiary_name, strategic_city_name, promise_date, gsfs_receipt_no);
+                    end if;
+                end $$;
                 """
             )
             cur.execute(
@@ -290,7 +605,180 @@ def _execute_values_upsert(
     return len(rows)
 
 
-def list_contexts(config_path: Path = COMMON_CONFIG_PATH) -> dict[str, list[str]]:
+GEOCODE_CACHE_COLUMNS = [
+    "address_key",
+    "address_line1",
+    "city",
+    "state",
+    "postal_code",
+    "country_name",
+    "matched_address",
+    "match_indicator",
+    "match_type",
+    "longitude",
+    "latitude",
+    "tiger_line_id",
+    "tiger_line_side",
+    "census_state_fips",
+    "census_county_fips",
+    "census_tract",
+    "census_block",
+    "geocoded_date",
+    "source",
+]
+
+
+def _source_bucket_from_path(path: Path | str) -> str:
+    text = str(path).lower()
+    if "here" in text:
+        return "here"
+    if "google" in text:
+        return "google"
+    if "census" in text:
+        return "census"
+    return "default"
+
+
+def cleanup_geocode_cache(retention_days: int = 7, config_path: Path = COMMON_CONFIG_PATH) -> None:
+    with get_db_connection(config_path) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "delete from common_geocode_cache where updated_at < now() - (%s || ' days')::interval",
+                (int(retention_days),),
+            )
+            cur.execute(
+                "delete from common_geocode_attempt_log where updated_at < now() - (%s || ' days')::interval",
+                (int(retention_days),),
+            )
+            cur.execute(
+                "delete from common_geocode_daily_log where updated_at < now() - (%s || ' days')::interval",
+                (int(retention_days),),
+            )
+        conn.commit()
+
+
+def load_geocode_cache_df(path: Path | str, config_path: Path = COMMON_CONFIG_PATH) -> pd.DataFrame:
+    bucket = _source_bucket_from_path(path)
+    df = _fetch_df(
+        f"""
+        select {", ".join(GEOCODE_CACHE_COLUMNS)}
+        from common_geocode_cache
+        where source_bucket = %s
+          and updated_at >= now() - interval '7 days'
+        order by updated_at desc
+        """,
+        (bucket,),
+        config_path=config_path,
+    )
+    return df
+
+
+def upsert_geocode_cache_df(path: Path | str, df: pd.DataFrame, config_path: Path = COMMON_CONFIG_PATH) -> int:
+    if df.empty:
+        return 0
+    bucket = _source_bucket_from_path(path)
+    working = df.copy()
+    for col in GEOCODE_CACHE_COLUMNS:
+        if col not in working.columns:
+            working[col] = None
+    working = working[working["address_key"].astype(str).str.strip() != ""].copy()
+    if working.empty:
+        return 0
+    for col in ["longitude", "latitude"]:
+        working[col] = pd.to_numeric(working[col], errors="coerce")
+    working["geocoded_date"] = pd.to_datetime(working["geocoded_date"], errors="coerce").dt.date
+    working = working.where(pd.notna(working), None)
+    working["source_bucket"] = bucket
+    columns = ["address_key", "source_bucket"] + [col for col in GEOCODE_CACHE_COLUMNS if col != "address_key"]
+    rows = [tuple(row.get(col) for col in columns) for _, row in working.iterrows()]
+    return _execute_values_upsert(
+        "common_geocode_cache",
+        columns,
+        rows,
+        ["address_key", "source_bucket"],
+        [col for col in columns if col not in {"address_key", "source_bucket"}],
+        config_path=config_path,
+    )
+
+
+def load_geocode_daily_log(source_bucket: str = "census", config_path: Path = COMMON_CONFIG_PATH) -> dict[str, int]:
+    df = _fetch_df(
+        """
+        select run_date, used_count
+        from common_geocode_daily_log
+        where source_bucket = %s and updated_at >= now() - interval '7 days'
+        """,
+        (source_bucket,),
+        config_path=config_path,
+    )
+    if df.empty:
+        return {}
+    return {str(pd.to_datetime(row["run_date"]).date()): int(row["used_count"] or 0) for _, row in df.iterrows()}
+
+
+def increment_geocode_daily_log(
+    run_date: str,
+    added_count: int,
+    source_bucket: str = "census",
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> None:
+    if int(added_count) <= 0:
+        return
+    with get_db_connection(config_path) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into common_geocode_daily_log (run_date, source_bucket, used_count)
+                values (%s, %s, %s)
+                on conflict (run_date, source_bucket)
+                do update set used_count = common_geocode_daily_log.used_count + excluded.used_count,
+                              updated_at = now()
+                """,
+                (run_date, source_bucket, int(added_count)),
+            )
+        conn.commit()
+
+
+def load_geocode_attempt_log_df(path: Path | str, config_path: Path = COMMON_CONFIG_PATH) -> pd.DataFrame:
+    df = _fetch_df(
+        """
+        select address_key, attempted_date, status, source
+        from common_geocode_attempt_log
+        where updated_at >= now() - interval '7 days'
+        order by updated_at desc
+        """,
+        config_path=config_path,
+    )
+    return df
+
+
+def upsert_geocode_attempt_log_df(path: Path | str, df: pd.DataFrame, config_path: Path = COMMON_CONFIG_PATH) -> int:
+    if df.empty:
+        return 0
+    working = df.copy()
+    for col in ["address_key", "attempted_date", "status", "source"]:
+        if col not in working.columns:
+            working[col] = None
+    working = working[working["address_key"].astype(str).str.strip() != ""].copy()
+    if working.empty:
+        return 0
+    working["attempted_date"] = pd.to_datetime(working["attempted_date"], errors="coerce").dt.date
+    working = working[working["attempted_date"].notna()].copy()
+    if working.empty:
+        return 0
+    working = working.where(pd.notna(working), None)
+    rows = [tuple(row.get(col) for col in ["address_key", "attempted_date", "status", "source"]) for _, row in working.iterrows()]
+    return _execute_values_upsert(
+        "common_geocode_attempt_log",
+        ["address_key", "attempted_date", "status", "source"],
+        rows,
+        ["address_key", "attempted_date"],
+        ["status", "source"],
+        config_path=config_path,
+    )
+
+
+def list_contexts(config_path: Path = COMMON_CONFIG_PATH) -> dict[str, Any]:
     df = _fetch_df(
         """
         select distinct subsidiary_name, strategic_city_name
@@ -299,9 +787,16 @@ def list_contexts(config_path: Path = COMMON_CONFIG_PATH) -> dict[str, list[str]
         """,
         config_path=config_path,
     )
+    cities_by_subsidiary: dict[str, list[str]] = {}
+    if not df.empty:
+        for subsidiary_name, group in df.dropna(subset=["subsidiary_name", "strategic_city_name"]).groupby("subsidiary_name"):
+            cities_by_subsidiary[str(subsidiary_name)] = sorted(
+                group["strategic_city_name"].dropna().astype(str).unique().tolist()
+            )
     return {
         "subsidiaries": sorted(df["subsidiary_name"].dropna().astype(str).unique().tolist()),
         "cities": sorted(df["strategic_city_name"].dropna().astype(str).unique().tolist()),
+        "cities_by_subsidiary": cities_by_subsidiary,
     }
 
 
@@ -338,6 +833,10 @@ def upsert_routing_config(config_row: dict[str, Any], config_path: Path = COMMON
         "max_work_min_per_sm_day",
         "max_travel_min_per_sm_day",
         "max_travel_km_per_sm_day",
+        "max_single_leg_min",
+        "max_home_to_job_min",
+        "long_leg_penalty_start_min",
+        "long_leg_penalty_multiplier",
         "timezone_offset",
     ]
     row = tuple(config_row.get(col) for col in columns)
@@ -364,6 +863,139 @@ def list_engineers(subsidiary_name: str, strategic_city_name: str, config_path: 
     )
 
 
+def upsert_technician_master(technician_row: dict[str, Any], config_path: Path = COMMON_CONFIG_PATH) -> int:
+    subsidiary_name = _clean_text(technician_row.get("subsidiary_name"))
+    strategic_city_name = _clean_text(technician_row.get("strategic_city_name"))
+    employee_code = _clean_text(technician_row.get("employee_code"))
+    employee_name = _clean_text(technician_row.get("employee_name")) or employee_code
+    if not subsidiary_name or not strategic_city_name or not employee_code:
+        raise ValueError("subsidiary_name, strategic_city_name, and employee_code are required.")
+
+    home_address = _clean_text(technician_row.get("home_address"))
+    home_city = _clean_text(technician_row.get("home_city"))
+    home_state = _clean_text(technician_row.get("home_state"))
+    home_country = _clean_text(technician_row.get("home_country")) or "USA"
+    home_postal_code = normalize_postal_code(technician_row.get("home_postal_code"))
+    home_latitude = pd.to_numeric(pd.Series([technician_row.get("home_latitude")]), errors="coerce").iloc[0]
+    home_longitude = pd.to_numeric(pd.Series([technician_row.get("home_longitude")]), errors="coerce").iloc[0]
+    priority_group = _coerce_priority_group_label(technician_row.get("priority_group", "B"))
+    max_home_to_job_min = pd.to_numeric(pd.Series([technician_row.get("max_home_to_job_min")]), errors="coerce").iloc[0]
+
+    if pd.isna(home_latitude) or pd.isna(home_longitude):
+        if any([home_address, home_city, home_state, home_postal_code]):
+            geocode_input = pd.DataFrame(
+                [
+                    {
+                        "GSFS_RECEIPT_NO": employee_code,
+                        "ADDRESS_LINE1_INFO": home_address,
+                        "CITY_NAME": home_city,
+                        "STATE_NAME": home_state,
+                        "COUNTRY_NAME": home_country,
+                        "POSTAL_CODE": home_postal_code,
+                    }
+                ]
+            )
+            geocoded_df = _geocode_technician_home_df(geocode_input)
+            if not geocoded_df.empty:
+                first_row = geocoded_df.iloc[0]
+                home_latitude = pd.to_numeric(pd.Series([first_row.get("latitude")]), errors="coerce").iloc[0]
+                home_longitude = pd.to_numeric(pd.Series([first_row.get("longitude")]), errors="coerce").iloc[0]
+
+    row = (
+        subsidiary_name,
+        strategic_city_name,
+        employee_code,
+        employee_name,
+        _clean_text(technician_row.get("center_type", "")).upper() or "DMS",
+        home_address,
+        home_city,
+        home_state,
+        home_country,
+        home_postal_code,
+        float(home_latitude) if pd.notna(home_latitude) else None,
+        float(home_longitude) if pd.notna(home_longitude) else None,
+        bool(technician_row.get("active_flag", True)),
+        priority_group,
+        int(max_home_to_job_min) if pd.notna(max_home_to_job_min) else None,
+    )
+    return _execute_values_upsert(
+        "common_technician_master",
+        [
+            "subsidiary_name",
+            "strategic_city_name",
+            "employee_code",
+            "employee_name",
+            "center_type",
+            "home_address",
+            "home_city",
+            "home_state",
+            "home_country",
+            "home_postal_code",
+            "home_latitude",
+            "home_longitude",
+            "active_flag",
+            "priority_group",
+            "max_home_to_job_min",
+        ],
+        [row],
+        ["subsidiary_name", "strategic_city_name", "employee_code"],
+        [
+            "employee_name",
+            "center_type",
+            "home_address",
+            "home_city",
+            "home_state",
+            "home_country",
+            "home_postal_code",
+            "home_latitude",
+            "home_longitude",
+            "active_flag",
+            "priority_group",
+            "max_home_to_job_min",
+        ],
+        config_path=config_path,
+    )
+
+
+def delete_technician_master(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    employee_code: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> int:
+    subsidiary_name = _clean_text(subsidiary_name)
+    strategic_city_name = _clean_text(strategic_city_name)
+    employee_code = _clean_text(employee_code)
+    if not subsidiary_name or not strategic_city_name or not employee_code:
+        raise ValueError("subsidiary_name, strategic_city_name, and employee_code are required.")
+    with get_db_connection(config_path) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                delete from common_technician_capability_master
+                where subsidiary_name = %s and strategic_city_name = %s and employee_code = %s
+                """,
+                (subsidiary_name, strategic_city_name, employee_code),
+            )
+            cur.execute(
+                """
+                delete from common_request_technician_input
+                where subsidiary_name = %s and strategic_city_name = %s and employee_code = %s
+                """,
+                (subsidiary_name, strategic_city_name, employee_code),
+            )
+            cur.execute(
+                """
+                delete from common_technician_master
+                where subsidiary_name = %s and strategic_city_name = %s and employee_code = %s
+                """,
+                (subsidiary_name, strategic_city_name, employee_code),
+            )
+            deleted = int(cur.rowcount or 0)
+        conn.commit()
+    return deleted
+
+
 def list_capabilities(subsidiary_name: str, strategic_city_name: str, config_path: Path = COMMON_CONFIG_PATH) -> pd.DataFrame:
     return _fetch_df(
         """
@@ -373,6 +1005,196 @@ def list_capabilities(subsidiary_name: str, strategic_city_name: str, config_pat
         order by employee_code, product_group_code, product_code
         """,
         (subsidiary_name, strategic_city_name),
+        config_path=config_path,
+    )
+
+
+def list_jobs(subsidiary_name: str, strategic_city_name: str, config_path: Path = COMMON_CONFIG_PATH) -> pd.DataFrame:
+    return _fetch_df(
+        """
+        select *
+        from common_job_input
+        where subsidiary_name = %s and strategic_city_name = %s
+        order by promise_date desc, gsfs_receipt_no
+        """,
+        (subsidiary_name, strategic_city_name),
+        config_path=config_path,
+    )
+
+
+def upsert_jobs(rows: list[dict[str, Any]], config_path: Path = COMMON_CONFIG_PATH) -> int:
+    columns = [
+        "record_id",
+        "subsidiary_name",
+        "strategic_city_name",
+        "svc_engineer_code",
+        "svc_engineer_name",
+        "service_product_group_code",
+        "service_product_code",
+        "receipt_detail_symptom_code",
+        "gsfs_receipt_no",
+        "promise_date",
+        "city_name",
+        "state_name",
+        "country_name",
+        "postal_code",
+        "address_line1_info",
+        "fixed",
+        "reschedule",
+        "job_slot_count",
+        "latitude",
+        "longitude",
+        "source",
+    ]
+    normalized_rows: list[dict[str, Any]] = []
+    for row in rows:
+        normalized = dict(row)
+        normalized["fixed"] = _coerce_bool(normalized.get("fixed", False), default=False)
+        normalized["reschedule"] = _coerce_bool(normalized.get("reschedule", False), default=False)
+        numeric_slot = pd.to_numeric(pd.Series([normalized.get("job_slot_count")]), errors="coerce").iloc[0]
+        if pd.isna(numeric_slot):
+            normalized["job_slot_count"] = 2 if _coerce_bool(normalized.get("two_slot_job", False), default=False) else 1
+        else:
+            normalized["job_slot_count"] = max(1, int(numeric_slot))
+        normalized_rows.append(normalized)
+    value_rows = [tuple(row.get(col) for col in columns) for row in normalized_rows]
+    if not value_rows:
+        return 0
+    delete_keys = [
+        (
+            _clean_text(row.get("record_id")),
+            _clean_text(row.get("subsidiary_name")),
+            _clean_text(row.get("strategic_city_name")),
+            _clean_text(row.get("promise_date")),
+            _clean_text(row.get("gsfs_receipt_no")),
+        )
+        for row in normalized_rows
+    ]
+    insert_cols = ", ".join(columns)
+    update_cols = [col for col in columns if col not in {"subsidiary_name", "strategic_city_name", "promise_date", "gsfs_receipt_no"}]
+    update_expr = ", ".join([f"{col}=excluded.{col}" for col in update_cols] + ["updated_at=now()"])
+    insert_sql = f"""
+        insert into common_job_input ({insert_cols})
+        values %s
+        on conflict (subsidiary_name, strategic_city_name, promise_date, gsfs_receipt_no)
+        do update set {update_expr}
+    """
+    with get_db_connection(config_path) as conn:
+        with conn.cursor() as cur:
+            execute_values(
+                cur,
+                """
+                delete from common_job_input existing
+                using (values %s) as incoming(record_id, subsidiary_name, strategic_city_name, promise_date, gsfs_receipt_no)
+                where existing.subsidiary_name = incoming.subsidiary_name
+                  and existing.strategic_city_name = incoming.strategic_city_name
+                  and (
+                    (
+                      incoming.promise_date <> ''
+                      and incoming.gsfs_receipt_no <> ''
+                      and existing.promise_date = incoming.promise_date
+                      and existing.gsfs_receipt_no = incoming.gsfs_receipt_no
+                    )
+                    or (incoming.record_id <> '' and existing.record_id = incoming.record_id)
+                  )
+                """,
+                delete_keys,
+            )
+            execute_values(cur, insert_sql, value_rows)
+        conn.commit()
+    return len(value_rows)
+
+
+def delete_job(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    record_id: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> int:
+    with get_db_connection(config_path) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                delete from common_job_input
+                where subsidiary_name = %s and strategic_city_name = %s and record_id = %s
+                """,
+                (subsidiary_name, strategic_city_name, record_id),
+            )
+            deleted = int(cur.rowcount or 0)
+        conn.commit()
+    return deleted
+
+
+def list_request_technicians(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    promise_date: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> pd.DataFrame:
+    return _fetch_df(
+        """
+        select *
+        from common_request_technician_input
+        where subsidiary_name = %s and strategic_city_name = %s and promise_date = %s
+        order by employee_name, employee_code
+        """,
+        (subsidiary_name, strategic_city_name, promise_date),
+        config_path=config_path,
+    )
+
+
+def replace_request_technicians(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    promise_date: str,
+    rows: list[dict[str, Any]],
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> int:
+    with get_db_connection(config_path) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                delete from common_request_technician_input
+                where subsidiary_name = %s and strategic_city_name = %s and promise_date = %s
+                """,
+                (subsidiary_name, strategic_city_name, promise_date),
+            )
+        conn.commit()
+
+    columns = [
+        "record_id",
+        "subsidiary_name",
+        "strategic_city_name",
+        "promise_date",
+        "employee_code",
+        "employee_name",
+        "center_type",
+        "shift_start",
+        "shift_end",
+        "slot_count",
+        "priority_group",
+        "preferred_region_name",
+        "max_minutes",
+        "max_jobs",
+        "available",
+        "start_location_type",
+        "start_location_address",
+        "source",
+    ]
+    normalized_rows: list[tuple[Any, ...]] = []
+    for row in rows:
+        working = dict(row)
+        working["subsidiary_name"] = subsidiary_name
+        working["strategic_city_name"] = strategic_city_name
+        working["promise_date"] = promise_date
+        working["priority_group"] = _coerce_priority_group_label(working.get("priority_group", "B"))
+        normalized_rows.append(tuple(working.get(col) for col in columns))
+    return _execute_values_upsert(
+        "common_request_technician_input",
+        columns,
+        normalized_rows,
+        ["record_id"],
+        [col for col in columns if col != "record_id"],
         config_path=config_path,
     )
 
@@ -408,6 +1230,64 @@ def upsert_routing_request(request_row: dict[str, Any], config_path: Path = COMM
         [col for col in columns if col != "request_id"],
         config_path=config_path,
     )
+
+
+def delete_routing_requests_for_date(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    promise_date: str,
+    keep_request_id: str | None = None,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> None:
+    params: list[Any] = [subsidiary_name, strategic_city_name, str(promise_date)]
+    keep_clause = ""
+    if keep_request_id:
+        keep_clause = "and request_id <> %s"
+        params.append(str(keep_request_id))
+
+    with get_db_connection(config_path) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                delete from common_routing_result
+                where request_id in (
+                    select request_id
+                    from common_routing_request
+                    where subsidiary_name = %s
+                      and strategic_city_name = %s
+                      and promise_date = %s
+                      {keep_clause}
+                )
+                """,
+                tuple(params),
+            )
+            cur.execute(
+                f"""
+                delete from common_routing_request
+                where subsidiary_name = %s
+                  and strategic_city_name = %s
+                  and promise_date = %s
+                  {keep_clause}
+                """,
+                tuple(params),
+            )
+        conn.commit()
+
+
+def delete_routing_result(request_id: str, config_path: Path = COMMON_CONFIG_PATH) -> None:
+    request_id = str(request_id or "").strip()
+    if not request_id:
+        return
+    with get_db_connection(config_path) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                delete from common_routing_result
+                where request_id = %s
+                """,
+                (request_id,),
+            )
+        conn.commit()
 
 
 def get_routing_request(request_id: str, config_path: Path = COMMON_CONFIG_PATH) -> dict[str, Any] | None:
@@ -455,6 +1335,26 @@ def get_latest_routing_request(
     return row
 
 
+def list_routing_request_dates(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> list[str]:
+    df = _fetch_df(
+        """
+        select distinct promise_date
+        from common_routing_request
+        where subsidiary_name = %s and strategic_city_name = %s
+        order by promise_date desc
+        """,
+        (subsidiary_name, strategic_city_name),
+        config_path=config_path,
+    )
+    if df.empty:
+        return []
+    return [str(value).strip() for value in df["promise_date"].dropna().astype(str).tolist() if str(value).strip()]
+
+
 def upsert_routing_result(result_row: dict[str, Any], config_path: Path = COMMON_CONFIG_PATH) -> int:
     columns = ["request_id", "routing_job_id", "result_json"]
     row = tuple(result_row.get(col) for col in columns)
@@ -500,31 +1400,168 @@ def list_regions(subsidiary_name: str, strategic_city_name: str, config_path: Pa
     )
 
 
+def list_avoid_areas(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    active_only: bool = False,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> pd.DataFrame:
+    params: list[Any] = [subsidiary_name, strategic_city_name]
+    active_clause = ""
+    if active_only:
+        active_clause = "and active_flag = true"
+    return _fetch_df(
+        f"""
+        select *
+        from common_avoid_area
+        where subsidiary_name = %s and strategic_city_name = %s
+          {active_clause}
+        order by active_flag desc, updated_at desc, area_name
+        """,
+        tuple(params),
+        config_path=config_path,
+    )
+
+
+def upsert_avoid_area(area_row: dict[str, Any], config_path: Path = COMMON_CONFIG_PATH) -> int:
+    avoid_area_id = _clean_text(area_row.get("avoid_area_id")) or _clean_text(area_row.get("id"))
+    if not avoid_area_id:
+        import uuid
+
+        avoid_area_id = uuid.uuid4().hex
+    subsidiary_name = _clean_text(area_row.get("subsidiary_name"))
+    strategic_city_name = _clean_text(area_row.get("strategic_city_name"))
+    area_name = _clean_text(area_row.get("area_name")) or "Avoid Area"
+    geometry = area_row.get("geometry")
+    geometry_json = area_row.get("geometry_json")
+    if geometry_json is None and geometry is not None:
+        geometry_json = json.dumps(geometry, ensure_ascii=False)
+    geometry_json = _clean_text(geometry_json)
+    if not subsidiary_name or not strategic_city_name or not geometry_json:
+        raise ValueError("subsidiary_name, strategic_city_name, and geometry are required.")
+
+    return _execute_values_upsert(
+        "common_avoid_area",
+        [
+            "avoid_area_id",
+            "subsidiary_name",
+            "strategic_city_name",
+            "area_name",
+            "description",
+            "geometry_json",
+            "active_flag",
+        ],
+        [
+            (
+                avoid_area_id,
+                subsidiary_name,
+                strategic_city_name,
+                area_name,
+                _clean_text(area_row.get("description")),
+                geometry_json,
+                _coerce_bool(area_row.get("active_flag", True), default=True),
+            )
+        ],
+        ["avoid_area_id"],
+        ["subsidiary_name", "strategic_city_name", "area_name", "description", "geometry_json", "active_flag"],
+        config_path=config_path,
+    )
+
+
+def delete_avoid_area(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    avoid_area_id: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> int:
+    with get_db_connection(config_path) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                delete from common_avoid_area
+                where subsidiary_name = %s and strategic_city_name = %s and avoid_area_id = %s
+                """,
+                (subsidiary_name, strategic_city_name, avoid_area_id),
+            )
+            deleted = int(cur.rowcount or 0)
+        conn.commit()
+    return deleted
+
+
 def _seed_routing_config(config_path: Path = COMMON_CONFIG_PATH) -> None:
     cfg = load_common_config(config_path)
     seed = cfg.get("routing_seed", {})
     defaults = cfg.get("defaults", {})
-    strategic_city_name = defaults.get("strategic_city_name", "Atlanta, GA")
     city_osrm_urls = seed.get("city_osrm_urls", {}) or {}
-    resolved_osrm_url = city_osrm_urls.get(str(strategic_city_name), seed.get("osrm_url"))
-    upsert_routing_config(
-        {
-            "subsidiary_name": defaults.get("subsidiary_name", "LGEAI"),
-            "strategic_city_name": strategic_city_name,
-            "distance_backend": seed.get("distance_backend"),
-            "assignment_distance_backend": seed.get("assignment_distance_backend"),
-            "osrm_url": resolved_osrm_url,
-            "osrm_profile": seed.get("osrm_profile"),
-            "effective_service_per_sm": seed.get("effective_service_per_sm"),
-            "target_sm_per_region": seed.get("target_sm_per_region"),
-            "service_time_per_job_min": seed.get("service_time_per_job_min"),
-            "max_work_min_per_sm_day": seed.get("max_work_min_per_sm_day"),
-            "max_travel_min_per_sm_day": seed.get("max_travel_min_per_sm_day"),
-            "max_travel_km_per_sm_day": seed.get("max_travel_km_per_sm_day"),
-            "timezone_offset": seed.get("timezone_offset", "-04:00"),
-        },
-        config_path=config_path,
-    )
+    city_overrides = seed.get("city_overrides", {}) or {}
+    context_seed = cfg.get("context_seed", {}) if isinstance(cfg.get("context_seed", {}), dict) else {}
+    context_subsidiaries = context_seed.get("subsidiaries", {}) if isinstance(context_seed.get("subsidiaries", {}), dict) else {}
+
+    context_rows: list[tuple[str, str]] = []
+    if context_subsidiaries:
+        for subsidiary_name, city_names in context_subsidiaries.items():
+            for city_name in list(city_names or []):
+                clean_subsidiary = _clean_text(subsidiary_name)
+                clean_city = _clean_text(city_name)
+                if clean_subsidiary and clean_city:
+                    context_rows.append((clean_subsidiary, clean_city))
+    else:
+        strategic_city_names = [str(defaults.get("strategic_city_name", "Atlanta, GA"))]
+        strategic_city_names.extend(str(city_name) for city_name in city_osrm_urls.keys())
+        strategic_city_names.extend(str(city_name) for city_name in city_overrides.keys())
+        context_rows = [
+            (_clean_text(defaults.get("subsidiary_name", "LGEAI")), _clean_text(city_name))
+            for city_name in dict.fromkeys(name for name in strategic_city_names if str(name).strip())
+        ]
+
+    context_rows = list(dict.fromkeys(row for row in context_rows if row[0] and row[1]))
+    if bool(context_seed.get("replace", False)) and context_rows:
+        configured_subsidiaries = sorted({subsidiary_name for subsidiary_name, _ in context_rows})
+        with get_db_connection(config_path) as conn:
+            with conn.cursor() as cur:
+                for subsidiary_name in configured_subsidiaries:
+                    allowed_cities = [city for sub, city in context_rows if sub == subsidiary_name]
+                    cur.execute(
+                        """
+                        delete from common_routing_config_master
+                        where subsidiary_name = %s
+                          and not (strategic_city_name = any(%s))
+                        """,
+                        (subsidiary_name, allowed_cities),
+                    )
+            conn.commit()
+
+    for subsidiary_name, strategic_city_name in context_rows:
+        resolved_osrm_url = city_osrm_urls.get(str(strategic_city_name), seed.get("osrm_url"))
+        city_seed = dict(seed)
+        city_seed.pop("city_osrm_urls", None)
+        city_seed.pop("city_overrides", None)
+        city_seed.pop("context_seed", None)
+        override = city_overrides.get(str(strategic_city_name), {})
+        if isinstance(override, dict):
+            city_seed.update(override)
+        upsert_routing_config(
+            {
+                "subsidiary_name": subsidiary_name,
+                "strategic_city_name": strategic_city_name,
+                "distance_backend": city_seed.get("distance_backend"),
+                "assignment_distance_backend": city_seed.get("assignment_distance_backend"),
+                "osrm_url": resolved_osrm_url,
+                "osrm_profile": city_seed.get("osrm_profile"),
+                "effective_service_per_sm": city_seed.get("effective_service_per_sm"),
+                "target_sm_per_region": city_seed.get("target_sm_per_region"),
+                "service_time_per_job_min": city_seed.get("service_time_per_job_min"),
+                "max_work_min_per_sm_day": city_seed.get("max_work_min_per_sm_day"),
+                "max_travel_min_per_sm_day": city_seed.get("max_travel_min_per_sm_day"),
+                "max_travel_km_per_sm_day": city_seed.get("max_travel_km_per_sm_day"),
+                "max_single_leg_min": city_seed.get("max_single_leg_min"),
+                "max_home_to_job_min": city_seed.get("max_home_to_job_min"),
+                "long_leg_penalty_start_min": city_seed.get("long_leg_penalty_start_min"),
+                "long_leg_penalty_multiplier": city_seed.get("long_leg_penalty_multiplier"),
+                "timezone_offset": city_seed.get("timezone_offset", "-04:00"),
+            },
+            config_path=config_path,
+        )
 
 
 def _seed_technician_master(config_path: Path = COMMON_CONFIG_PATH) -> None:
@@ -596,6 +1633,8 @@ def _seed_technician_master(config_path: Path = COMMON_CONFIG_PATH) -> None:
                 home_latitude,
                 home_longitude,
                 True,
+                "B",
+                None,
             )
         )
     _execute_values_upsert(
@@ -614,10 +1653,12 @@ def _seed_technician_master(config_path: Path = COMMON_CONFIG_PATH) -> None:
             "home_latitude",
             "home_longitude",
             "active_flag",
+            "priority_group",
+            "max_home_to_job_min",
         ],
         rows,
         ["subsidiary_name", "strategic_city_name", "employee_code"],
-        ["employee_name", "center_type", "home_address", "home_city", "home_state", "home_country", "home_postal_code", "home_latitude", "home_longitude", "active_flag"],
+        ["employee_name", "center_type", "home_address", "home_city", "home_state", "home_country", "home_postal_code", "home_latitude", "home_longitude", "active_flag", "priority_group", "max_home_to_job_min"],
         config_path=config_path,
     )
 
@@ -671,11 +1712,53 @@ def _seed_technician_capabilities(config_path: Path = COMMON_CONFIG_PATH) -> Non
     )
 
 
-def _seed_region_master(config_path: Path = COMMON_CONFIG_PATH) -> None:
-    defaults = load_common_config(config_path).get("defaults", {})
-    region_df = pd.read_csv(DEFAULT_REGION_ZIP_PATH, encoding="utf-8-sig")
-    region_df["POSTAL_CODE"] = region_df["POSTAL_CODE"].astype(str).str.zfill(5)
+def _region_seed_specs(config_path: Path = COMMON_CONFIG_PATH) -> list[dict[str, Any]]:
+    cfg = load_common_config(config_path)
+    defaults = cfg.get("defaults", {}) if isinstance(cfg.get("defaults", {}), dict) else {}
+    specs = cfg.get("region_seed_files")
+    if not isinstance(specs, list) or not specs:
+        specs = [
+            {
+                "subsidiary_name": defaults.get("subsidiary_name", "LGEAI"),
+                "strategic_city_name": defaults.get("strategic_city_name", "Atlanta, GA"),
+                "file": str(DEFAULT_REGION_ZIP_PATH),
+            }
+        ]
+
+    normalized_specs: list[dict[str, Any]] = []
+    for spec in specs:
+        if not isinstance(spec, dict):
+            continue
+        seed_file = _clean_text(spec.get("file") or spec.get("path"))
+        if not seed_file:
+            continue
+        normalized_specs.append(
+            {
+                "subsidiary_name": _clean_text(spec.get("subsidiary_name")) or defaults.get("subsidiary_name", "LGEAI"),
+                "strategic_city_name": _clean_text(spec.get("strategic_city_name"))
+                or defaults.get("strategic_city_name", "Atlanta, GA"),
+                "file": seed_file,
+                "region_name_prefix": _clean_text(spec.get("region_name_prefix")),
+            }
+        )
+    return normalized_specs
+
+
+def _region_center_lookup(region_df: pd.DataFrame) -> dict[int, tuple[float | None, float | None]]:
     centers: dict[int, tuple[float | None, float | None]] = {}
+    if {"latitude", "longitude", "region_seq"}.issubset(region_df.columns):
+        region_df["latitude"] = pd.to_numeric(region_df["latitude"], errors="coerce")
+        region_df["longitude"] = pd.to_numeric(region_df["longitude"], errors="coerce")
+        center_df = region_df.dropna(subset=["latitude", "longitude", "region_seq"]).groupby("region_seq").agg(
+            region_center_latitude=("latitude", "mean"),
+            region_center_longitude=("longitude", "mean"),
+        )
+        if not center_df.empty:
+            return {
+                int(idx): (float(row["region_center_latitude"]), float(row["region_center_longitude"]))
+                for idx, row in center_df.reset_index().set_index("region_seq").iterrows()
+            }
+
     latest_service = get_latest_geocoded_service_file()
     if latest_service and latest_service.exists():
         service_df = pd.read_csv(latest_service, encoding="utf-8-sig", low_memory=False)
@@ -692,21 +1775,37 @@ def _seed_region_master(config_path: Path = COMMON_CONFIG_PATH) -> None:
                 int(idx): (float(row["region_center_latitude"]), float(row["region_center_longitude"]))
                 for idx, row in center_df.reset_index().set_index("region_seq").iterrows()
             }
-    rows = []
-    for _, row in region_df.drop_duplicates(subset=["POSTAL_CODE"]).iterrows():
-        center = centers.get(int(row["region_seq"]), (None, None))
-        rows.append(
-            (
-                defaults.get("subsidiary_name", "LGEAI"),
-                defaults.get("strategic_city_name", "Atlanta, GA"),
-                str(row["POSTAL_CODE"]).zfill(5),
-                int(row["region_seq"]),
-                str(row["new_region_name"]),
-                center[0],
-                center[1],
+    return centers
+
+
+def _region_name_for_seed(row: pd.Series, prefix: str = "") -> str:
+    if prefix:
+        return f"{prefix} {int(row['region_seq'])}"
+    for col in ["new_region_name", "region_name", "AREA_NAME"]:
+        if col in row.index:
+            value = _clean_text(row.get(col))
+            if value:
+                return value
+    return f"Region {int(row['region_seq'])}"
+
+
+def _replace_region_master_rows(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    rows: list[tuple[Any, ...]],
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> int:
+    with get_db_connection(config_path) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                delete from common_region_master
+                where subsidiary_name = %s and strategic_city_name = %s
+                """,
+                (subsidiary_name, strategic_city_name),
             )
-        )
-    _execute_values_upsert(
+        conn.commit()
+    return _execute_values_upsert(
         "common_region_master",
         [
             "subsidiary_name",
@@ -714,14 +1813,55 @@ def _seed_region_master(config_path: Path = COMMON_CONFIG_PATH) -> None:
             "postal_code",
             "region_seq",
             "region_name",
+            "area_type",
             "region_center_latitude",
             "region_center_longitude",
         ],
         rows,
         ["subsidiary_name", "strategic_city_name", "postal_code"],
-        ["region_seq", "region_name", "region_center_latitude", "region_center_longitude"],
+        ["region_seq", "region_name", "area_type", "region_center_latitude", "region_center_longitude"],
         config_path=config_path,
     )
+
+
+def _seed_region_master(config_path: Path = COMMON_CONFIG_PATH) -> None:
+    for spec in _region_seed_specs(config_path):
+        seed_path = Path(spec["file"])
+        if not seed_path.exists():
+            continue
+        subsidiary_name = str(spec["subsidiary_name"])
+        strategic_city_name = str(spec["strategic_city_name"])
+        region_df = pd.read_csv(seed_path, encoding="utf-8-sig", dtype={"POSTAL_CODE": str}, low_memory=False)
+        if "POSTAL_CODE" not in region_df.columns or "region_seq" not in region_df.columns:
+            continue
+        if "STRATEGIC_CITY_NAME" in region_df.columns:
+            city_mask = region_df["STRATEGIC_CITY_NAME"].map(_clean_text).eq(strategic_city_name)
+            if city_mask.any():
+                region_df = region_df[city_mask].copy()
+        region_df["POSTAL_CODE"] = region_df["POSTAL_CODE"].astype(str).str.replace(r"\.0+$", "", regex=True).str.strip().str.zfill(5)
+        region_df["region_seq"] = pd.to_numeric(region_df["region_seq"], errors="coerce")
+        region_df = region_df[region_df["POSTAL_CODE"].ne("") & region_df["region_seq"].notna()].copy()
+        if region_df.empty:
+            continue
+        region_df["region_seq"] = region_df["region_seq"].astype(int)
+        centers = _region_center_lookup(region_df)
+        region_name_prefix = str(spec.get("region_name_prefix") or "")
+        rows = []
+        for _, row in region_df.drop_duplicates(subset=["POSTAL_CODE"]).iterrows():
+            center = centers.get(int(row["region_seq"]), (None, None))
+            rows.append(
+                (
+                    subsidiary_name,
+                    strategic_city_name,
+                    str(row["POSTAL_CODE"]).zfill(5),
+                    int(row["region_seq"]),
+                    _region_name_for_seed(row, region_name_prefix),
+                    _clean_text(row.get("area_type")) or None,
+                    center[0],
+                    center[1],
+                )
+            )
+        _replace_region_master_rows(subsidiary_name, strategic_city_name, rows, config_path=config_path)
 
 
 def _seed_heavy_repair_rules(config_path: Path = COMMON_CONFIG_PATH) -> None:
@@ -751,9 +1891,12 @@ def _seed_heavy_repair_rules(config_path: Path = COMMON_CONFIG_PATH) -> None:
 
 
 def seed_default_masters(config_path: Path = COMMON_CONFIG_PATH) -> None:
+    cfg = load_common_config(config_path)
+    seed_options = cfg.get("master_seed", {}) if isinstance(cfg.get("master_seed", {}), dict) else {}
     init_schema(config_path)
     _seed_routing_config(config_path)
-    _seed_technician_master(config_path)
+    if bool(seed_options.get("technician_master", True)):
+        _seed_technician_master(config_path)
     _seed_technician_capabilities(config_path)
     _seed_region_master(config_path)
     _seed_heavy_repair_rules(config_path)

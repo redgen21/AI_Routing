@@ -56,6 +56,17 @@ def normalize_text(value: object) -> str:
     return " ".join(str(value).strip().split())
 
 
+def normalize_census_address_text(value: object) -> str:
+    text = normalize_text(value)
+    if not text:
+        return ""
+    text = text.replace("\\", " ")
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", text)
+    text = re.sub(r"[^\w\s#&'/.,-]", " ", text, flags=re.UNICODE)
+    text = re.sub(r"\s+", " ", text).strip(" ,")
+    return text
+
+
 def normalize_country_name(value: object) -> str:
     text = normalize_text(value).upper()
     if text in {"US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA"}:
@@ -82,7 +93,7 @@ def clean_street_address(
     postal_code: object,
     country_name: object,
 ) -> str:
-    text = normalize_text(address_line1)
+    text = normalize_census_address_text(address_line1)
     if not text:
         return ""
 
@@ -123,7 +134,7 @@ def clean_street_address(
                 cleaned = updated
                 changed = True
 
-    return normalize_text(cleaned)
+    return normalize_census_address_text(cleaned)
 
 
 def build_address_key(
@@ -231,6 +242,18 @@ def empty_geocode_cache_frame() -> pd.DataFrame:
 
 
 def load_geocode_cache(path: Path) -> pd.DataFrame:
+    try:
+        from .common_vrp_db import load_geocode_cache_df
+
+        db_df = load_geocode_cache_df(path)
+        if not db_df.empty:
+            base = empty_geocode_cache_frame()
+            for col in base.columns:
+                if col not in db_df.columns:
+                    db_df[col] = ""
+            return db_df[base.columns.tolist()].copy()
+    except Exception:
+        pass
     if not path.exists():
         return empty_geocode_cache_frame()
     df = pd.read_csv(path, encoding="utf-8-sig", low_memory=False)
@@ -280,6 +303,12 @@ def merge_service_with_geocodes(
     geocode_cache_df: pd.DataFrame,
 ) -> pd.DataFrame:
     merged_df = service_df.copy()
+    # Profile/address inputs may already contain coordinates. Rename them
+    # before merging so pandas does not create latitude_x/latitude_y columns.
+    if "latitude" in merged_df.columns:
+        merged_df = merged_df.rename(columns={"latitude": "_input_latitude"})
+    if "longitude" in merged_df.columns:
+        merged_df = merged_df.rename(columns={"longitude": "_input_longitude"})
     merged_df["city_norm"] = (
         merged_df["CITY_NAME"].map(normalize_text) if "CITY_NAME" in merged_df.columns else " "
     )
@@ -332,10 +361,26 @@ def merge_service_with_geocodes(
         on="address_key",
         how="left",
     )
+    if "_input_latitude" in merged_df.columns:
+        merged_df["latitude"] = pd.to_numeric(merged_df["latitude"], errors="coerce").fillna(
+            pd.to_numeric(merged_df["_input_latitude"], errors="coerce")
+        )
+    if "_input_longitude" in merged_df.columns:
+        merged_df["longitude"] = pd.to_numeric(merged_df["longitude"], errors="coerce").fillna(
+            pd.to_numeric(merged_df["_input_longitude"], errors="coerce")
+        )
     failure_mask = merged_df["latitude"].isna() | merged_df["longitude"].isna()
     merged_df.loc[failure_mask, "source"] = "failed"
     merged_df = merged_df.drop(
-        columns=["city_norm", "state_norm", "postal_norm", "country_norm", "address_line1_clean"],
+        columns=[
+            "city_norm",
+            "state_norm",
+            "postal_norm",
+            "country_norm",
+            "address_line1_clean",
+            "_input_latitude",
+            "_input_longitude",
+        ],
         errors="ignore",
     )
     return merged_df
@@ -553,6 +598,14 @@ class CensusBatchGeocoder:
         return load_geocode_cache(self.cache_path)
 
     def _save_cache(self, df: pd.DataFrame) -> None:
+        try:
+            from .common_vrp_db import cleanup_geocode_cache, upsert_geocode_cache_df
+
+            upsert_geocode_cache_df(self.cache_path, df)
+            cleanup_geocode_cache(retention_days=7)
+            return
+        except Exception:
+            pass
         self._ensure_parent(self.cache_path)
         df.to_csv(self.cache_path, index=False, encoding="utf-8-sig")
 
@@ -562,6 +615,12 @@ class CensusBatchGeocoder:
         return merged
 
     def _load_daily_log(self) -> dict[str, int]:
+        try:
+            from .common_vrp_db import load_geocode_daily_log
+
+            return load_geocode_daily_log("census")
+        except Exception:
+            pass
         if not self.log_path.exists():
             return {}
         with self.log_path.open("r", encoding="utf-8") as handle:
@@ -571,6 +630,13 @@ class CensusBatchGeocoder:
     def _append_daily_log(self, run_date: str, added_count: int) -> None:
         if added_count <= 0:
             return
+        try:
+            from .common_vrp_db import increment_geocode_daily_log
+
+            increment_geocode_daily_log(run_date, added_count, "census")
+            return
+        except Exception:
+            pass
         daily_log = self._load_daily_log()
         daily_log[run_date] = int(daily_log.get(run_date, 0)) + int(added_count)
         self._ensure_parent(self.log_path)

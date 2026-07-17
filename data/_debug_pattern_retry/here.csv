@@ -1,0 +1,2 @@
+﻿address_key,address_line1,city,state,postal_code,country_name,matched_address,match_indicator,match_type,longitude,latitude,tiger_line_id,tiger_line_side,census_state_fips,census_county_fips,census_tract,census_block,geocoded_date,source,here_query_variant
+"1881 2ND AVENUE DECATUR ,GA ,30032 ATLANTA ,GA ,30339|ATLANTA|GA|30339|USA","1881 2nd Avenue, Decatur, GA 30032, USA",,,,,"1881 Second Ave, Decatur, GA 30032-4411, United States",Match,HERE_1.00,-84.30974,33.7367,,,,,,,2026-06-17,here_geocoding_api,embedded_city_state_zip

@@ -8,7 +8,6 @@ from pathlib import Path
 import folium
 import pandas as pd
 import streamlit as st
-from folium.plugins import MarkerCluster
 
 import smart_routing.live_atlanta_runtime as live_runtime
 from smart_routing.area_map import load_city_map_data
@@ -531,7 +530,7 @@ def _direct_input_dialog(master_df: pd.DataFrame, store_df: pd.DataFrame, edit_r
                 prepared_df.loc[:, "created_at"] = str(edit_record.get("created_at", pd.Timestamp.now().isoformat()))
             geocoded_df, failed_df = _geocode_input_df(prepared_df)
             if not failed_df.empty:
-                st.error("Address error. Google geocoding could not resolve the address.")
+                st.error("Address error. Geocoding failed.")
                 st.dataframe(failed_df[["GSFS_RECEIPT_NO", "ADDRESS_LINE1_INFO", "CITY_NAME", "POSTAL_CODE"]], width="stretch", hide_index=True)
                 return
             next_store_df = store_df.copy()
@@ -641,7 +640,7 @@ def _build_route_groups(schedule_df: pd.DataFrame):
             start_coord = (float(group.iloc[0]["home_start_longitude"]), float(group.iloc[0]["home_start_latitude"]))
         stop_coords = [(float(row["longitude"]), float(row["latitude"])) for _, row in group.iterrows()]
         coord_chain = [start_coord] + stop_coords if start_coord is not None else stop_coords
-        route_payload = get_route_client().build_ordered_route(tuple(coord_chain), preserve_first=start_coord is not None)
+        route_payload = get_route_client().build_route_in_order(tuple(coord_chain))
         route_groups.append(
             {
                 "engineer_code": str(engineer_code),
@@ -798,6 +797,7 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
                 changed_text = ""
                 if "changed" in row:
                     changed_text = f"<b>Changed</b>: {'Y' if bool(row.get('changed', False)) else 'N'}<br>"
+                heavy_text = "Y" if _coerce_bool_value(row.get("is_heavy_repair", False)) else "N"
                 popup_html = (
                     f"<b>Engineer</b>: {row.get('assigned_sm_name', '')}<br>"
                     f"<b>Engineer Code</b>: {row.get('assigned_sm_code', '')} | "
@@ -807,6 +807,7 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
                     f"{changed_text}"
                     f"<b>Home Region</b>: {row.get('assigned_region_name', '')}<br>"
                     f"<b>Product Group</b>: {row.get('SERVICE_PRODUCT_GROUP_CODE', '')}<br>"
+                    f"<b>Heavy</b>: {heavy_text}<br>"
                     f"<b>Start</b>: {row.get('visit_start_time', '')} | "
                     f"<b>End</b>: {row.get('visit_end_time', '')}"
                 )
@@ -822,26 +823,6 @@ def build_map(region_name: str, display_service_df: pd.DataFrame, home_df: pd.Da
                     ),
                     popup=_popup(popup_html, width=460),
                 ).add_to(route_layer)
-    else:
-        point_cluster = MarkerCluster(name="Service Points").add_to(fmap)
-        for _, row in display_service_df.iterrows():
-            if pd.isna(row.get("latitude")) or pd.isna(row.get("longitude")):
-                continue
-            folium.CircleMarker(
-                location=[float(row["latitude"]), float(row["longitude"])],
-                radius=4,
-                color=region_colors.get(str(row.get("new_region_name", "")), "#555555"),
-                weight=1,
-                fill=True,
-                fill_color=region_colors.get(str(row.get("new_region_name", "")), "#555555"),
-                fill_opacity=0.75,
-                popup=_popup(
-                    f"<b>Receipt</b>: {row.get('GSFS_RECEIPT_NO', '')} | "
-                    f"<b>Region</b>: {row.get('new_region_name', '')}<br>"
-                    f"<b>Product Group</b>: {row.get('SERVICE_PRODUCT_GROUP_CODE', '')}",
-                    width=420,
-                ),
-            ).add_to(point_cluster)
 
     home_group = folium.FeatureGroup(name="Engineer Homes").add_to(fmap)
     for _, row in home_df.iterrows():
@@ -1034,7 +1015,7 @@ def _render_input_manager(server_url: str) -> None:
                             if duplicate_receipts:
                                 st.warning(f"Skipped duplicates: {', '.join(duplicate_receipts)}")
                             if not failed_df.empty:
-                                st.error("Address error. Google geocoding could not resolve some uploaded addresses.")
+                                st.error("Address error. Geocoding failed for some uploaded addresses.")
                                 st.dataframe(
                                     failed_df[["GSFS_RECEIPT_NO", "ADDRESS_LINE1_INFO", "CITY_NAME", "POSTAL_CODE"]],
                                     width="stretch",

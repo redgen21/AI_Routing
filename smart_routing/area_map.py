@@ -12,19 +12,71 @@ from .region_sweep import _assign_city_regions
 from .routing_compare import _batch_assign_region_day_jobs
 
 PROFILE_FILE = Path("260310/Top 10_DMS_DMS2_Profile_20260317.xlsx")
+TECH_LIST_FILE = Path("260310/Top10 City Tech List.xlsx")
 ZCTA_ZIP_FILE = Path("data/geo/tl_2024_us_zcta520.zip")
 INPUT_DIR = Path("260310/input")
+DEFAULT_CONFIG_FILE = Path("config.json")
 CACHE_OUTPUT_DIR = Path("260310/output")
 CACHE_DIR = Path("data/cache/area_map")
 ROUTE_EXPLORER_CACHE_DIR = Path("data/cache/route_explorer")
+FIXED_REGION_MAP_DIR = Path("260310/input/fixed_region_maps")
+BUCKET_SIM_DRAFT_REGION_COUNT = -901
+AREA_TYPE_CLUSTER_REGION_COUNT = -902
 DEFAULT_CITY = "Atlanta, GA"
 ALL_CITIES = "ALL"
-CACHE_VERSION = "2026-03-22-route-explorer-v6"
+CACHE_VERSION = "2026-07-15-fixed-region-cache-v16"
 ZIP_SIMPLIFY_TOLERANCE_M = 120
 AREA_SIMPLIFY_TOLERANCE_M = 180
 CONTEXT_SIMPLIFY_TOLERANCE_M = 250
 EXPLORER_CITIES = ["Atlanta, GA", "Los Angeles, CA"]
 REQUIRED_SERVICE_COLUMNS = {"STRATEGIC_CITY_NAME", "POSTAL_CODE", "GSFS_RECEIPT_NO", "SVC_ENGINEER_CODE", "latitude", "longitude"}
+DEFAULT_OSRM_URL = "http://20.51.244.68:5000"
+DEFAULT_CITY_OSRM_URLS = {
+    "Los Angeles, CA": "http://20.51.244.68:5001",
+    "Atlanta, GA": "http://20.51.244.68:5002",
+}
+ROUTE_CITY_ALIASES = {
+    "North Jersey, NJ": "Northeast",
+    "Philadelphia, PA": "Northeast",
+}
+ASIA_COUNTRY_CODES = {"IDN", "THA", "MYS"}
+
+# LA의 특수 Area View는 일반 region count와 별도의 내부 식별값을 사용한다.
+LA_SPECIAL_REGION_FILE_MAPPINGS = {
+    AREA_TYPE_CLUSTER_REGION_COUNT: {
+        "filename": "fixed_region_postal_los_angeles_ca_6_area_type.csv",
+        "type": "area_type",
+    },
+    BUCKET_SIM_DRAFT_REGION_COUNT: {
+        "filename": "fixed_region_postal_los_angeles_ca_bucket_sim_draft.csv",
+        "type": "bucket_sim_draft",
+    },
+}
+
+
+def _route_client_key(city_name: object) -> str:
+    city_text = str(city_name).strip()
+    return ROUTE_CITY_ALIASES.get(city_text, city_text)
+
+
+def _configured_area_map_path(key: str, default_path: Path, config_section: str = "area_map") -> Path:
+    config = _load_json_config(DEFAULT_CONFIG_FILE)
+    area_map_cfg = config.get(config_section, {})
+    value = str(area_map_cfg.get(key, "")).strip()
+    return Path(value) if value else default_path
+
+
+def _is_asia_service_df(service_df: pd.DataFrame) -> bool:
+    if service_df.empty or "COUNTRY_NAME" not in service_df.columns:
+        return False
+    countries = {str(value).strip().upper() for value in service_df["COUNTRY_NAME"].dropna().unique()}
+    return bool(countries & ASIA_COUNTRY_CODES)
+
+
+def _use_postal_geometry_for_area_map(config_section: str = "area_map") -> bool:
+    config = _load_json_config(DEFAULT_CONFIG_FILE)
+    area_map_cfg = config.get(config_section, {})
+    return bool(area_map_cfg.get("use_postal_geometry", True))
 
 
 @dataclass
@@ -63,6 +115,94 @@ def _slugify_city_name(city_name: str) -> str:
     while "__" in safe:
         safe = safe.replace("__", "_")
     return safe.strip("_") or "all"
+
+
+def _fixed_region_map_path(city_name: str, region_count: int | None) -> Path | None:
+    if region_count is None or city_name == ALL_CITIES:
+        return None
+
+    slugified_city = _slugify_city_name(city_name)
+    if str(city_name).strip() == "Los Angeles, CA":
+        special_option = LA_SPECIAL_REGION_FILE_MAPPINGS.get(int(region_count))
+        if special_option:
+            candidate_path = FIXED_REGION_MAP_DIR / str(special_option["filename"])
+            if candidate_path.exists():
+                return candidate_path
+
+    if int(region_count) == AREA_TYPE_CLUSTER_REGION_COUNT:
+        area_type_candidates = sorted(
+            FIXED_REGION_MAP_DIR.glob(f"fixed_region_postal_{slugified_city}_*_area_type.csv")
+        )
+        return area_type_candidates[0] if area_type_candidates else None
+
+    base_name_prefix = f"fixed_region_postal_{slugified_city}_{int(region_count)}"
+
+    generic_candidate = FIXED_REGION_MAP_DIR / f"{base_name_prefix}.csv"
+    if generic_candidate.exists():
+        return generic_candidate
+
+    area_type_candidate = FIXED_REGION_MAP_DIR / f"{base_name_prefix}_area_type.csv"
+    if area_type_candidate.exists():
+        return area_type_candidate
+
+    return None
+
+
+def _get_all_available_fixed_region_options(city_name: str) -> list[tuple[int, str]]:
+    if city_name == ALL_CITIES:
+        return []
+
+    options: dict[int, str] = {}
+    base_city_name = str(city_name).strip().split(" - ")[0].strip()
+    if base_city_name == "Los Angeles, CA":
+        for option_count, option in LA_SPECIAL_REGION_FILE_MAPPINGS.items():
+            candidate_path = FIXED_REGION_MAP_DIR / str(option["filename"])
+            if candidate_path.exists():
+                options[option_count] = str(option["type"])
+
+    slugified_city = _slugify_city_name(base_city_name)
+    area_type_paths = sorted(
+        FIXED_REGION_MAP_DIR.glob(f"fixed_region_postal_{slugified_city}_*_area_type.csv")
+    )
+    if area_type_paths:
+        options[AREA_TYPE_CLUSTER_REGION_COUNT] = "area_type"
+
+    for path in FIXED_REGION_MAP_DIR.glob(f"fixed_region_postal_{slugified_city}_*.csv"):
+        if base_city_name == "Los Angeles, CA" and path.name in {
+            str(option["filename"])
+            for option in LA_SPECIAL_REGION_FILE_MAPPINGS.values()
+        }:
+            continue
+        if path.stem.endswith("_area_type"):
+            continue
+        else:
+            suffix = path.stem.removeprefix(f"fixed_region_postal_{slugified_city}_")
+            if suffix.isdigit():
+                count = int(suffix)
+                if count not in options:
+                    options[count] = "fixed"
+
+    return sorted([(count, type_label) for count, type_label in options.items()])
+
+
+def load_region_count_options(city_name: str, output_dir: Path = CACHE_OUTPUT_DIR) -> list[int]:
+    if city_name == ALL_CITIES:
+        return []
+
+    all_counts: set[int] = set()
+
+    fixed_region_options_with_types = _get_all_available_fixed_region_options(city_name)
+    for count, _type_label in fixed_region_options_with_types:
+        all_counts.add(count)
+
+    base_city_name = str(city_name).strip().split(" - ")[0].strip()
+    if base_city_name != "Los Angeles, CA":
+        df = load_region_count_sweep_summary(output_dir)
+        if not df.empty:
+            sweep_options = df[df["STRATEGIC_CITY_NAME"] == city_name]["candidate_region_count"].dropna().astype(int).unique().tolist()
+            all_counts.update(sweep_options)
+
+    return sorted(list(all_counts))
 
 
 def _cache_file_map(city_name: str) -> dict[str, Path]:
@@ -108,6 +248,8 @@ def _build_cache_meta(
         "city_name": city_name,
         "profile_path": str(profile_path.resolve()),
         "profile_mtime": profile_path.stat().st_mtime if profile_path.exists() else None,
+        "tech_list_path": str(TECH_LIST_FILE.resolve()),
+        "tech_list_mtime": TECH_LIST_FILE.stat().st_mtime if TECH_LIST_FILE.exists() else None,
         "zcta_zip_path": str(zcta_zip_path.resolve()),
         "zcta_zip_mtime": zcta_zip_path.stat().st_mtime if zcta_zip_path.exists() else None,
         "service_file": str(service_file.resolve()) if service_file and service_file.exists() else None,
@@ -129,7 +271,7 @@ def _load_cached_city_map(cache_files: dict[str, Path]) -> CityMapData:
     )
 
 
-def _is_city_map_content_valid(city_data: CityMapData) -> bool:
+def _is_city_map_content_valid(city_data: CityMapData, require_zip_layer: bool = False) -> bool:
     required_zip_cols = {"POSTAL_CODE", "geometry"}
     required_coverage_cols = {"POSTAL_CODE", "AREA_NAME", "SVC_ENGINEER_CODE"}
     required_service_cols = {"POSTAL_CODE", "SVC_ENGINEER_CODE", "service_date"}
@@ -138,6 +280,10 @@ def _is_city_map_content_valid(city_data: CityMapData) -> bool:
     if not required_coverage_cols.issubset(set(city_data.zip_coverage_df.columns)):
         return False
     if not city_data.service_df.empty and not required_service_cols.issubset(set(city_data.service_df.columns)):
+        return False
+    if "tech_detail" not in city_data.area_layer.columns:
+        return False
+    if require_zip_layer and not city_data.zip_coverage_df.empty and city_data.zip_layer.empty:
         return False
     return True
 
@@ -209,6 +355,11 @@ def _build_route_explorer_meta(
     config_file: Path,
 ) -> dict[str, object]:
     routing_cfg = _load_json_config(config_file).get("routing", {})
+    fixed_region_path = (
+        _fixed_region_map_path(city_name, selected_region_count)
+        if selected_region_count is not None
+        else None
+    )
     relevant_cfg = {
         "distance_backend": routing_cfg.get("distance_backend"),
         "assignment_distance_backend": routing_cfg.get("assignment_distance_backend"),
@@ -226,12 +377,20 @@ def _build_route_explorer_meta(
         "selected_region_count": ("current" if selected_region_count is None else int(selected_region_count)),
         "profile_path": str(profile_path),
         "profile_mtime_ns": profile_path.stat().st_mtime_ns if profile_path.exists() else None,
+        "tech_list_path": str(TECH_LIST_FILE),
+        "tech_list_mtime_ns": TECH_LIST_FILE.stat().st_mtime_ns if TECH_LIST_FILE.exists() else None,
         "zcta_zip_path": str(zcta_zip_path),
         "zcta_zip_mtime_ns": zcta_zip_path.stat().st_mtime_ns if zcta_zip_path.exists() else None,
         "service_file": (str(service_file) if service_file is not None else None),
         "service_file_mtime_ns": (service_file.stat().st_mtime_ns if service_file is not None and service_file.exists() else None),
         "config_file": str(config_file),
         "config_mtime_ns": config_file.stat().st_mtime_ns if config_file.exists() else None,
+        "fixed_region_file": str(fixed_region_path) if fixed_region_path is not None else None,
+        "fixed_region_file_mtime_ns": (
+            fixed_region_path.stat().st_mtime_ns
+            if fixed_region_path is not None and fixed_region_path.exists()
+            else None
+        ),
         "routing_cfg": relevant_cfg,
     }
 
@@ -265,6 +424,16 @@ def load_profile_data(profile_path: Path = PROFILE_FILE) -> tuple[pd.DataFrame, 
     return zip_df, slot_df, product_df
 
 
+def load_tech_list_data(tech_list_path: Path = TECH_LIST_FILE) -> pd.DataFrame:
+    if not tech_list_path.exists():
+        return pd.DataFrame(columns=["Tech Market", "EMP_NUMBER", "Tech Name", "ASM", "RSM"])
+    tech_df = pd.read_excel(tech_list_path, dtype={"EMP_NUMBER": str})
+    for col in ["Tech Market", "EMP_NUMBER", "Tech Name", "ASM", "RSM"]:
+        if col in tech_df.columns:
+            tech_df[col] = tech_df[col].map(_normalize_text)
+    return tech_df
+
+
 def load_available_cities(profile_path: Path = PROFILE_FILE) -> list[str]:
     zip_df, slot_df, _ = load_profile_data(profile_path)
     cities = sorted(
@@ -284,7 +453,20 @@ def _is_valid_service_file(service_file: Path) -> bool:
     return REQUIRED_SERVICE_COLUMNS.issubset(set(sample_df.columns))
 
 
-def get_latest_geocoded_service_file(input_dir: Path = INPUT_DIR) -> Path | None:
+def _configured_service_file(config_file: Path = DEFAULT_CONFIG_FILE, config_section: str = "area_map") -> Path | None:
+    config = _load_json_config(config_file)
+    area_map_cfg = config.get(config_section, {})
+    service_file = str(area_map_cfg.get("service_file", "")).strip()
+    if not service_file:
+        return None
+    candidate = Path(service_file)
+    return candidate if _is_valid_service_file(candidate) else None
+
+
+def get_latest_geocoded_service_file(input_dir: Path = INPUT_DIR, config_section: str = "area_map") -> Path | None:
+    configured = _configured_service_file(config_section=config_section)
+    if configured is not None:
+        return configured
     candidates = sorted(input_dir.glob("Service_*_geocoded.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
     for candidate in candidates:
         if _is_valid_service_file(candidate):
@@ -297,27 +479,34 @@ def load_city_map_data(
     profile_path: Path = PROFILE_FILE,
     zcta_zip_path: Path = ZCTA_ZIP_FILE,
     service_file: Path | None = None,
+    config_section: str = "area_map",
 ) -> CityMapData:
-    resolved_service_file = service_file or get_latest_geocoded_service_file()
+    profile_path = _configured_area_map_path("profile_file", profile_path, config_section=config_section)
+    zcta_zip_path = _configured_area_map_path("zcta_zip_file", zcta_zip_path, config_section=config_section)
+    resolved_service_file = service_file or get_latest_geocoded_service_file(config_section=config_section)
+    service_df = load_service_points(resolved_service_file)
+    if not _use_postal_geometry_for_area_map(config_section=config_section) or _is_asia_service_df(service_df):
+        zcta_zip_path = Path("")
     cache_files = _cache_file_map(city_name)
     expected_meta = _build_cache_meta(city_name, profile_path, zcta_zip_path, resolved_service_file)
     if _is_cache_valid(cache_files, expected_meta):
         cached_city_data = _load_cached_city_map(cache_files)
-        if _is_city_map_content_valid(cached_city_data):
+        if _is_city_map_content_valid(cached_city_data, require_zip_layer=bool(str(zcta_zip_path).strip())):
             return cached_city_data
 
     zip_df, slot_df, product_df = load_profile_data(profile_path)
-    service_df = load_service_points(resolved_service_file)
+    tech_df = load_tech_list_data()
 
     if city_name == ALL_CITIES:
         zip_city = zip_df.copy()
         slot_city = slot_df.copy()
         service_city = service_df.copy()
     else:
-        zip_city = zip_df[zip_df["STRATEGIC_CITY_NAME"].astype(str).str.strip() == city_name].copy()
-        slot_city = slot_df[slot_df["STRATEGIC_CITY_NAME"].astype(str).str.strip() == city_name].copy()
+        city_key = str(city_name).strip().casefold()
+        zip_city = zip_df[zip_df["STRATEGIC_CITY_NAME"].astype(str).str.strip().str.casefold() == city_key].copy()
+        slot_city = slot_df[slot_df["STRATEGIC_CITY_NAME"].astype(str).str.strip().str.casefold() == city_key].copy()
         if not service_df.empty and "STRATEGIC_CITY_NAME" in service_df.columns:
-            service_city = service_df[service_df["STRATEGIC_CITY_NAME"].astype(str).str.strip() == city_name].copy()
+            service_city = service_df[service_df["STRATEGIC_CITY_NAME"].astype(str).str.strip().str.casefold() == city_key].copy()
         else:
             service_city = service_df.copy()
     city_sms = set(zip_city["SVC_ENGINEER_CODE"]).union(set(slot_city["SVC_ENGINEER_CODE"]))
@@ -328,6 +517,7 @@ def load_city_map_data(
 
     zip_layer = _build_zip_layer(zcta, zip_city, slot_city, product_city, service_city)
     area_layer = _build_area_layer(zip_layer)
+    area_layer = _enrich_area_layer_with_tech(area_layer, zip_city, city_name, tech_df)
     context_zip_layer = _build_context_zip_layer(zcta_zip_path, zip_layer, city_name)
     area_stats_df = _build_area_stats(zip_city, service_city, zip_layer, area_layer)
     zip_layer = _simplify_geometry_layer(zip_layer, ZIP_SIMPLIFY_TOLERANCE_M)
@@ -354,20 +544,24 @@ def load_service_points(service_file: Path | None) -> pd.DataFrame:
     df = pd.read_csv(service_file, encoding="utf-8-sig", low_memory=False)
     if not REQUIRED_SERVICE_COLUMNS.issubset(set(df.columns)):
         return pd.DataFrame()
-    for col in ["SVC_ENGINEER_CODE", "SVC_ENGINEER_NAME", "STRATEGIC_CITY_NAME", "GSFS_RECEIPT_NO", "POSTAL_CODE", "ADDRESS_LINE1_INFO", "source"]:
+    if "SVC_CENTER_TYPE" not in df.columns and "SERVICE_CENTER_TYPE" in df.columns:
+        df["SVC_CENTER_TYPE"] = df["SERVICE_CENTER_TYPE"]
+    for col in ["SVC_ENGINEER_CODE", "SVC_ENGINEER_NAME", "STRATEGIC_CITY_NAME", "GSFS_RECEIPT_NO", "POSTAL_CODE", "ADDRESS_LINE1_INFO", "SVC_CENTER_TYPE", "SVC_RECEIPT_TYPE", "SVC_TYPE_CODE", "source"]:
         if col in df.columns:
-            df[col] = df[col].astype(str).str.strip()
+            df[col] = df[col].map(_normalize_text)
     for col in ["latitude", "longitude"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     date_candidates = [
+        "PROMISE_DATE",
         "REPAIR_END_DATE_YYYYMMDD",
         "REPAIR_RECEIPT_DATE_YYYYMMDD",
         "GERP_INPUT_DATE_YYYYMMDD_ID_LAST",
     ]
     for date_col in date_candidates:
         if date_col in df.columns:
-            df["service_date"] = pd.to_datetime(df[date_col].astype(str), format="%Y%m%d", errors="coerce")
+            date_text = df[date_col].astype(str).str.replace(r"\.0+$", "", regex=True).str.strip()
+            df["service_date"] = pd.to_datetime(date_text, format="%Y%m%d", errors="coerce")
             if df["service_date"].notna().any():
                 break
     if "source" in df.columns:
@@ -392,22 +586,45 @@ def _build_service_count_by_postal(service_city: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def _build_primary_area_assignment(zip_city: pd.DataFrame) -> pd.DataFrame:
+def _build_primary_area_assignment(zip_city: pd.DataFrame, tech_df: pd.DataFrame | None = None) -> pd.DataFrame:
+    working_df = zip_city.copy()
+    working_df["is_top10_tech_match"] = False
+
+    if tech_df is None:
+        tech_df = load_tech_list_data()
+    if not tech_df.empty and {"Tech Market", "EMP_NUMBER"}.issubset(set(tech_df.columns)):
+        city_names = sorted(
+            {
+                str(value).strip()
+                for value in working_df["STRATEGIC_CITY_NAME"].dropna().unique()
+                if str(value).strip()
+            }
+        )
+        city_tech_df = tech_df.copy()
+        if len(city_names) == 1:
+            city_tech_df = city_tech_df[city_tech_df["Tech Market"].astype(str).str.strip().eq(city_names[0])].copy()
+        matched_codes = set(city_tech_df["EMP_NUMBER"].dropna().astype(str).str.strip())
+        working_df["is_top10_tech_match"] = working_df["SVC_ENGINEER_CODE"].astype(str).str.strip().isin(matched_codes)
+
     assignment_counts = (
-        zip_city.groupby(["POSTAL_CODE", "AREA_NAME"])
+        working_df.groupby(["POSTAL_CODE", "AREA_NAME"])
         .agg(
             assignment_rows=("AREA_NAME", "size"),
+            matched_assignment_rows=("is_top10_tech_match", "sum"),
             strategic_city_name=("STRATEGIC_CITY_NAME", "first"),
         )
         .reset_index()
-        .sort_values(["POSTAL_CODE", "assignment_rows", "AREA_NAME"], ascending=[True, False, True])
+        .sort_values(
+            ["POSTAL_CODE", "matched_assignment_rows", "assignment_rows", "AREA_NAME"],
+            ascending=[True, False, False, True],
+        )
     )
     return assignment_counts.drop_duplicates(subset=["POSTAL_CODE"], keep="first").copy()
 
 
 def _load_zcta_subset(zcta_zip_path: Path, zips: list[str]) -> gpd.GeoDataFrame:
-    if not zcta_zip_path.exists():
-        raise FileNotFoundError(f"Missing ZCTA zip file: {zcta_zip_path}")
+    if not str(zcta_zip_path).strip() or str(zcta_zip_path) == "." or not zcta_zip_path.exists():
+        return gpd.GeoDataFrame(columns=["ZCTA5CE20", "INTPTLAT20", "INTPTLON20", "POSTAL_CODE", "geometry"], geometry="geometry", crs="EPSG:4326")
 
     where = None
     if zips:
@@ -424,6 +641,17 @@ def _load_zcta_subset(zcta_zip_path: Path, zips: list[str]) -> gpd.GeoDataFrame:
     return gdf.to_crs(epsg=4326)
 
 
+def load_zcta_geometry(postal_codes: list[str], config_section: str = "area_map") -> gpd.GeoDataFrame:
+    """Load ZCTA geometry for an explicit postal-code list.
+
+    This is used by server-backed views whose region ZIP list comes from the
+    database and can be broader than the service/profile ZIP coverage.
+    """
+    zcta_zip_path = _configured_area_map_path("zcta_zip_file", ZCTA_ZIP_FILE, config_section=config_section)
+    zips = sorted({str(value).replace(".0", "").strip().zfill(5) for value in postal_codes if str(value).strip()})
+    return _load_zcta_subset(zcta_zip_path, zips)
+
+
 def _build_zip_layer(
     zcta: gpd.GeoDataFrame,
     zip_city: pd.DataFrame,
@@ -431,6 +659,29 @@ def _build_zip_layer(
     product_city: pd.DataFrame,
     service_city: pd.DataFrame,
 ) -> gpd.GeoDataFrame:
+    empty_columns = [
+        "ZCTA5CE20",
+        "INTPTLAT20",
+        "INTPTLON20",
+        "POSTAL_CODE",
+        "strategic_city_name",
+        "strategic_city_count",
+        "area_count",
+        "area_names",
+        "sm_count",
+        "sm_codes",
+        "center_types",
+        "primary_area_name",
+        "slot_sum",
+        "slot_avg",
+        "sm_detail",
+        "area_sm_pairs",
+        "service_count",
+        "geometry",
+    ]
+    if zcta.empty or zip_city.empty:
+        return gpd.GeoDataFrame(columns=empty_columns, geometry="geometry", crs="EPSG:4326")
+
     slot_summary = (
         slot_city.groupby("SVC_ENGINEER_CODE")
         .agg(slot=("Slot", "first"), engineer_name=("Name", "first"))
@@ -499,6 +750,21 @@ def _build_zip_layer(
 
 
 def _build_area_layer(zip_layer: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    area_columns = [
+        "AREA_NAME",
+        "strategic_city_name",
+        "postal_count",
+        "postal_codes",
+        "sm_codes",
+        "center_types",
+        "slot_sum",
+        "service_count",
+        "sm_detail",
+        "area_km2",
+        "geometry",
+    ]
+    if zip_layer.empty:
+        return gpd.GeoDataFrame(columns=area_columns, geometry="geometry", crs="EPSG:4326")
     area_gdf = zip_layer[[
         "strategic_city_name",
         "primary_area_name",
@@ -513,7 +779,7 @@ def _build_area_layer(zip_layer: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     area_gdf = area_gdf.rename(columns={"primary_area_name": "AREA_NAME"})
     area_gdf = area_gdf[area_gdf["AREA_NAME"].astype(str).str.strip().ne("")].copy()
     if area_gdf.empty:
-        return area_gdf
+        return gpd.GeoDataFrame(columns=area_columns, geometry="geometry", crs="EPSG:4326")
 
     area_layer = (
         area_gdf.groupby("AREA_NAME")
@@ -533,6 +799,77 @@ def _build_area_layer(zip_layer: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     area_layer = gpd.GeoDataFrame(area_layer, geometry="geometry", crs="EPSG:4326")
     area_layer["area_km2"] = area_layer.to_crs(epsg=3857).geometry.area / 1_000_000
     return area_layer
+
+
+def _join_clean(values: pd.Series) -> str:
+    cleaned = sorted({str(value).strip() for value in values.dropna() if str(value).strip()})
+    return " | ".join(cleaned)
+
+
+def _join_tech_detail(rows: pd.DataFrame) -> str:
+    details: list[str] = []
+    for _, row in rows.drop_duplicates(subset=["SVC_ENGINEER_CODE", "Tech Name", "ASM"]).iterrows():
+        sm_code = _normalize_text(row.get("SVC_ENGINEER_CODE", ""))
+        tech_name = _normalize_text(row.get("Tech Name", ""))
+        asm = _normalize_text(row.get("ASM", ""))
+        label_parts = [part for part in [sm_code, tech_name, asm] if part]
+        if label_parts:
+            details.append(" / ".join(label_parts))
+    return "<br>".join(sorted(set(details)))
+
+
+def _enrich_area_layer_with_tech(
+    area_layer: gpd.GeoDataFrame,
+    zip_city: pd.DataFrame,
+    city_name: str,
+    tech_df: pd.DataFrame,
+) -> gpd.GeoDataFrame:
+    enriched = area_layer.copy()
+    for col in ["tech_names", "asm_names", "tech_detail", "asm_boundary_name"]:
+        enriched[col] = ""
+    if enriched.empty or tech_df.empty:
+        enriched["asm_boundary_name"] = "Unmapped"
+        return enriched
+
+    required_cols = {"Tech Market", "EMP_NUMBER", "Tech Name", "ASM"}
+    if not required_cols.issubset(set(tech_df.columns)):
+        enriched["asm_boundary_name"] = "Unmapped"
+        return enriched
+
+    city_tech_df = tech_df[tech_df["Tech Market"].astype(str).str.strip().eq(city_name)].copy()
+    if city_tech_df.empty:
+        enriched["asm_boundary_name"] = "Unmapped"
+        return enriched
+
+    coverage_tech_df = zip_city[["AREA_NAME", "SVC_ENGINEER_CODE"]].drop_duplicates().copy()
+    coverage_tech_df = coverage_tech_df.merge(
+        city_tech_df[["EMP_NUMBER", "Tech Name", "ASM"]],
+        left_on="SVC_ENGINEER_CODE",
+        right_on="EMP_NUMBER",
+        how="left",
+    )
+
+    summaries = []
+    for area_name, group_df in coverage_tech_df.groupby("AREA_NAME", sort=True):
+        matched_df = group_df[group_df["EMP_NUMBER"].notna()].copy()
+        asm_names = _join_clean(matched_df["ASM"]) if not matched_df.empty else ""
+        summaries.append(
+            {
+                "AREA_NAME": area_name,
+                "tech_names": _join_clean(matched_df["Tech Name"]) if not matched_df.empty else "",
+                "asm_names": asm_names,
+                "tech_detail": _join_tech_detail(matched_df) if not matched_df.empty else "",
+                "asm_boundary_name": asm_names if asm_names else "Unmapped",
+            }
+        )
+
+    summary_df = pd.DataFrame(summaries)
+    enriched = enriched.drop(columns=["tech_names", "asm_names", "tech_detail", "asm_boundary_name"], errors="ignore")
+    enriched = enriched.merge(summary_df, on="AREA_NAME", how="left")
+    for col in ["tech_names", "asm_names", "tech_detail"]:
+        enriched[col] = enriched[col].fillna("")
+    enriched["asm_boundary_name"] = enriched["asm_boundary_name"].fillna("Unmapped")
+    return gpd.GeoDataFrame(enriched, geometry="geometry", crs=area_layer.crs)
 
 
 def _build_context_zip_layer(
@@ -607,10 +944,13 @@ def _build_area_stats(
     return stats
 
 
-def _load_json_config(config_file: Path = Path("config.json")) -> dict:
+def _load_json_config(config_file: Path = DEFAULT_CONFIG_FILE) -> dict:
     if not config_file.exists():
         return {}
-    return json.loads(config_file.read_text(encoding="utf-8"))
+    try:
+        return json.loads(config_file.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 def get_latest_region_count_sweep_summary_file(output_dir: Path = CACHE_OUTPUT_DIR) -> Path | None:
@@ -651,14 +991,6 @@ def load_region_count_sweep_summary(output_dir: Path = CACHE_OUTPUT_DIR) -> pd.D
     return df
 
 
-def load_region_count_options(city_name: str, output_dir: Path = CACHE_OUTPUT_DIR) -> list[int]:
-    df = load_region_count_sweep_summary(output_dir)
-    if df.empty:
-        return []
-    options = sorted(df[df["STRATEGIC_CITY_NAME"] == city_name]["candidate_region_count"].dropna().astype(int).unique().tolist())
-    return options
-
-
 def load_region_count_stats(city_name: str, output_dir: Path = CACHE_OUTPUT_DIR) -> pd.DataFrame:
     df = load_region_count_sweep_summary(output_dir)
     if df.empty:
@@ -689,16 +1021,21 @@ def load_region_count_stats(city_name: str, output_dir: Path = CACHE_OUTPUT_DIR)
 
 def _build_routing_clients(routing_cfg: dict) -> tuple[dict[str, OSRMTripClient], OSRMTripClient]:
     distance_backend = str(routing_cfg.get("distance_backend", "osrm")).strip().lower()
+    default_osrm_url = str(routing_cfg.get("osrm_url", DEFAULT_OSRM_URL) or DEFAULT_OSRM_URL).rstrip("/")
     default_client = OSRMTripClient(
         OSRMConfig(
-            osrm_url=str(routing_cfg.get("osrm_url", "https://router.project-osrm.org")).rstrip("/"),
+            osrm_url=default_osrm_url,
             mode="haversine" if distance_backend == "city_osrm_else_haversine" else distance_backend,
             osrm_profile=str(routing_cfg.get("osrm_profile", "driving")),
             cache_file=Path(str(routing_cfg.get("osrm_cache_file", "data/cache/osrm_trip_cache.csv"))),
         )
     )
     client_map: dict[str, OSRMTripClient] = {}
-    for city_name, city_url in routing_cfg.get("city_osrm_urls", {}).items():
+    city_osrm_urls = dict(DEFAULT_CITY_OSRM_URLS)
+    configured_city_urls = routing_cfg.get("city_osrm_urls", {})
+    if isinstance(configured_city_urls, dict):
+        city_osrm_urls.update({str(k): str(v) for k, v in configured_city_urls.items() if str(v).strip()})
+    for city_name, city_url in city_osrm_urls.items():
         cache_name = str(city_name).lower().replace(",", "").replace(" ", "_")
         client_map[str(city_name)] = OSRMTripClient(
             OSRMConfig(
@@ -709,7 +1046,7 @@ def _build_routing_clients(routing_cfg: dict) -> tuple[dict[str, OSRMTripClient]
                 fallback_osrm_url=(
                     None
                     if distance_backend == "city_osrm_else_haversine"
-                    else str(routing_cfg.get("osrm_url", "https://router.project-osrm.org")).rstrip("/")
+                    else default_osrm_url
                 ),
             )
         )
@@ -728,6 +1065,73 @@ def _build_current_service_assignments(service_city: pd.DataFrame, zip_city: pd.
     return current_df
 
 
+def _load_fixed_region_postal_map(city_name: str, region_count: int) -> pd.DataFrame:
+    fixed_path = _fixed_region_map_path(city_name, region_count)
+    if fixed_path is None:
+        return pd.DataFrame(columns=["POSTAL_CODE", "STRATEGIC_CITY_NAME", "region_id", "region_seq", "AREA_NAME", "area_type"])
+    fixed_df = pd.read_csv(fixed_path, encoding="utf-8-sig", dtype={"POSTAL_CODE": str}, low_memory=False)
+    required = {"POSTAL_CODE", "STRATEGIC_CITY_NAME", "region_id", "region_seq", "AREA_NAME"}
+    if not required.issubset(fixed_df.columns):
+        return pd.DataFrame(columns=["POSTAL_CODE", "STRATEGIC_CITY_NAME", "region_id", "region_seq", "AREA_NAME", "area_type"])
+    keep_cols = list(required) + (["area_type"] if "area_type" in fixed_df.columns else [])
+    fixed_df = fixed_df[keep_cols].copy()
+    if "area_type" not in fixed_df.columns:
+        fixed_df["area_type"] = ""
+    fixed_df["POSTAL_CODE"] = fixed_df["POSTAL_CODE"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip().str.zfill(5)
+    fixed_df["STRATEGIC_CITY_NAME"] = fixed_df["STRATEGIC_CITY_NAME"].map(_normalize_text)
+    fixed_df["region_seq"] = pd.to_numeric(fixed_df["region_seq"], errors="coerce")
+    fixed_df = fixed_df[fixed_df["POSTAL_CODE"].ne("") & fixed_df["region_seq"].notna()].copy()
+    fixed_df["region_seq"] = fixed_df["region_seq"].astype(int)
+    fixed_df["AREA_NAME"] = fixed_df["AREA_NAME"].map(_normalize_text)
+    fixed_df["region_id"] = fixed_df["region_id"].map(_normalize_text)
+    fixed_df["area_type"] = fixed_df["area_type"].map(_normalize_text)
+    return fixed_df.drop_duplicates(subset=["POSTAL_CODE"], keep="first").copy()
+
+
+def _build_fixed_region_assignments(
+    service_city: pd.DataFrame,
+    city_name: str,
+    region_count: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    postal_region_df = _load_fixed_region_postal_map(city_name, region_count)
+    if postal_region_df.empty:
+        empty_service = service_city.iloc[0:0].copy()
+        for col in [
+            "region_id",
+            "region_seq",
+            "AREA_NAME",
+            "assignment_unit_id",
+            "route_group_code",
+            "assigned_sm_code",
+            "scenario",
+            "display_region_name",
+            "display_region_seq",
+        ]:
+            if col not in empty_service.columns:
+                empty_service[col] = pd.NA
+        return empty_service, postal_region_df
+
+    service_work = service_city.copy()
+    service_work["POSTAL_CODE"] = service_work["POSTAL_CODE"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip().str.zfill(5)
+    assigned_df = service_work.merge(
+        postal_region_df[["POSTAL_CODE", "STRATEGIC_CITY_NAME", "region_id", "region_seq", "AREA_NAME", "area_type"]],
+        on="POSTAL_CODE",
+        how="inner",
+        suffixes=("", "_fixed"),
+    )
+    if "STRATEGIC_CITY_NAME_fixed" in assigned_df.columns:
+        assigned_df["STRATEGIC_CITY_NAME"] = assigned_df["STRATEGIC_CITY_NAME"].fillna(assigned_df["STRATEGIC_CITY_NAME_fixed"])
+        assigned_df = assigned_df.drop(columns=["STRATEGIC_CITY_NAME_fixed"])
+    assigned_df["region_seq"] = assigned_df["region_seq"].astype(int)
+    assigned_df["assignment_unit_id"] = assigned_df["region_seq"].apply(lambda n: f"R{int(n):02d}")
+    assigned_df["route_group_code"] = assigned_df["assignment_unit_id"]
+    assigned_df["assigned_sm_code"] = assigned_df["SVC_ENGINEER_CODE"].astype(str).str.strip()
+    assigned_df["scenario"] = "fixed_region"
+    assigned_df["display_region_name"] = assigned_df["AREA_NAME"]
+    assigned_df["display_region_seq"] = assigned_df["region_seq"]
+    return assigned_df, postal_region_df
+
+
 def _build_integrated_assignments(
     service_city: pd.DataFrame,
     city_name: str,
@@ -735,9 +1139,32 @@ def _build_integrated_assignments(
     routing_cfg: dict,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     assigned_df = _assign_city_regions(service_city, city_name, region_count).copy()
+    assigned_df = assigned_df[
+        assigned_df["region_id"].notna()
+        & assigned_df["region_seq"].notna()
+        & assigned_df["POSTAL_CODE"].notna()
+    ].copy()
     assigned_df["cluster_seq"] = -1
+    if assigned_df.empty:
+        empty_service = service_city.iloc[0:0].copy()
+        for col in [
+            "cluster_seq",
+            "region_id",
+            "region_seq",
+            "AREA_NAME",
+            "assignment_unit_id",
+            "route_group_code",
+            "assigned_sm_code",
+            "scenario",
+            "display_region_name",
+            "display_region_seq",
+        ]:
+            if col not in empty_service.columns:
+                empty_service[col] = pd.NA
+        empty_postal = pd.DataFrame(columns=["POSTAL_CODE", "STRATEGIC_CITY_NAME", "region_id", "region_seq", "AREA_NAME"])
+        return empty_service, empty_postal
     client_map, default_client = _build_routing_clients(routing_cfg)
-    city_client = client_map.get(city_name, default_client)
+    city_client = client_map.get(_route_client_key(city_name), default_client)
     effective_service_per_sm = float(routing_cfg.get("effective_service_per_sm", 5.0))
     assignment_distance_backend = str(routing_cfg.get("assignment_distance_backend", "haversine")).strip().lower()
     service_time_per_job_min = float(routing_cfg.get("service_time_per_job_min", 60.0))
@@ -766,7 +1193,8 @@ def _build_integrated_assignments(
         lambda row: f"R{int(row['region_seq']):02d}_SM{int(row['cluster_seq']) + 1:02d}",
         axis=1,
     )
-    assigned_df["assigned_sm_code"] = assigned_df["assignment_unit_id"]
+    assigned_df["route_group_code"] = assigned_df["assignment_unit_id"]
+    assigned_df["assigned_sm_code"] = assigned_df["SVC_ENGINEER_CODE"].astype(str).str.strip()
     assigned_df["scenario"] = "integrated"
     assigned_df["display_region_name"] = assigned_df["AREA_NAME"]
     assigned_df["display_region_seq"] = assigned_df["region_seq"]
@@ -779,8 +1207,16 @@ def _build_integrated_assignments(
     return assigned_df, postal_region_df
 
 
-def _build_integrated_zip_layer(postal_region_df: pd.DataFrame, service_df: pd.DataFrame) -> gpd.GeoDataFrame:
-    zcta = _load_zcta_subset(ZCTA_ZIP_FILE, sorted(postal_region_df["POSTAL_CODE"].unique().tolist()))
+def _build_integrated_zip_layer(
+    postal_region_df: pd.DataFrame,
+    service_df: pd.DataFrame,
+    force_postal_geometry: bool = False,
+    config_section: str = "area_map",
+) -> gpd.GeoDataFrame:
+    zcta_zip_path = _configured_area_map_path("zcta_zip_file", ZCTA_ZIP_FILE, config_section=config_section)
+    if not force_postal_geometry and (not _use_postal_geometry_for_area_map(config_section=config_section) or _is_asia_service_df(service_df)):
+        zcta_zip_path = Path("")
+    zcta = _load_zcta_subset(zcta_zip_path, sorted(postal_region_df["POSTAL_CODE"].unique().tolist()))
     zip_layer = zcta.merge(postal_region_df, on="POSTAL_CODE", how="inner")
     zip_layer = gpd.GeoDataFrame(zip_layer, geometry="geometry", crs="EPSG:4326")
     service_stats = (
@@ -800,8 +1236,11 @@ def _build_integrated_zip_layer(postal_region_df: pd.DataFrame, service_df: pd.D
 def _build_integrated_area_layer(zip_layer: gpd.GeoDataFrame, service_df: pd.DataFrame) -> gpd.GeoDataFrame:
     if zip_layer.empty:
         return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+    group_cols = ["AREA_NAME", "region_id", "region_seq"]
+    if "area_type" in zip_layer.columns:
+        group_cols.append("area_type")
     area_layer = (
-        zip_layer.groupby(["AREA_NAME", "region_id", "region_seq"])
+        zip_layer.groupby(group_cols)
         .agg(
             postal_count=("POSTAL_CODE", "nunique"),
             service_count=("service_count", "sum"),
@@ -840,11 +1279,12 @@ def load_route_explorer_data(
     region_count: int | None = None,
     profile_path: Path = PROFILE_FILE,
     config_file: Path = Path("config.json"),
+    config_section: str = "area_map",
 ) -> RouteExplorerData:
-    if city_name not in EXPLORER_CITIES:
-        raise ValueError(f"Unsupported explorer city: {city_name}")
-
-    resolved_service_file = get_latest_geocoded_service_file()
+    profile_path = _configured_area_map_path("profile_file", profile_path, config_section=config_section)
+    resolved_service_file = get_latest_geocoded_service_file(config_section=config_section)
+    service_probe_df = load_service_points(resolved_service_file)
+    zcta_zip_path = Path("") if (not _use_postal_geometry_for_area_map(config_section=config_section) or _is_asia_service_df(service_probe_df)) else ZCTA_ZIP_FILE
     routing_cfg = _load_json_config(config_file).get("routing", {})
     best_region_count = load_best_region_count_by_city().get(city_name, int(routing_cfg.get("target_sm_per_region", 5)))
     resolved_region_count = int(region_count) if region_count is not None else best_region_count
@@ -854,7 +1294,7 @@ def load_route_explorer_data(
         best_region_count=best_region_count,
         selected_region_count=region_count,
         profile_path=profile_path,
-        zcta_zip_path=ZCTA_ZIP_FILE,
+        zcta_zip_path=zcta_zip_path,
         service_file=resolved_service_file,
         config_file=config_file,
     )
@@ -863,18 +1303,61 @@ def load_route_explorer_data(
         if _is_route_explorer_content_valid(cached_explorer):
             return cached_explorer
 
-    city_data = load_city_map_data(city_name=city_name, profile_path=profile_path)
+    city_data = load_city_map_data(city_name=city_name, profile_path=profile_path, config_section=config_section)
 
     service_city_all = city_data.service_df.copy()
     current_service_df = _build_current_service_assignments(service_city_all, city_data.zip_coverage_df)
+    if region_count is None:
+        empty_zip_layer = gpd.GeoDataFrame(
+            columns=["POSTAL_CODE", "AREA_NAME", "assigned_sm_code", "service_date", "geometry"],
+            geometry="geometry",
+            crs="EPSG:4326",
+        )
+        empty_area_layer = gpd.GeoDataFrame(
+            columns=["AREA_NAME", "postal_count", "service_count", "geometry"],
+            geometry="geometry",
+            crs="EPSG:4326",
+        )
+        empty_service_df = pd.DataFrame(
+            columns=["POSTAL_CODE", "AREA_NAME", "assigned_sm_code", "service_date"]
+        )
+        explorer_data = RouteExplorerData(
+            city_name=city_name,
+            best_region_count=best_region_count,
+            selected_region_count=None,
+            current_zip_layer=city_data.zip_layer.copy(),
+            current_area_layer=city_data.area_layer.copy(),
+            current_service_df=current_service_df.copy(),
+            integrated_zip_layer=empty_zip_layer,
+            integrated_area_layer=empty_area_layer,
+            integrated_service_df=empty_service_df,
+        )
+        _save_cached_route_explorer(route_cache_files, explorer_data, expected_meta)
+        return explorer_data
+
     service_city = service_city_all.copy()
-    integrated_service_df, postal_region_df = _build_integrated_assignments(
-        service_city=service_city,
-        city_name=city_name,
-        region_count=resolved_region_count,
-        routing_cfg=routing_cfg,
+    fixed_region_path = _fixed_region_map_path(city_name, resolved_region_count)
+    if fixed_region_path is not None:
+        integrated_service_df, postal_region_df = _build_fixed_region_assignments(
+            service_city=service_city,
+            city_name=city_name,
+            region_count=resolved_region_count,
+        )
+        force_postal_geometry = True
+    else:
+        integrated_service_df, postal_region_df = _build_integrated_assignments(
+            service_city=service_city,
+            city_name=city_name,
+            region_count=resolved_region_count,
+            routing_cfg=routing_cfg,
+        )
+        force_postal_geometry = False
+    integrated_zip_layer = _build_integrated_zip_layer(
+        postal_region_df,
+        integrated_service_df,
+        force_postal_geometry=force_postal_geometry,
+        config_section=config_section,
     )
-    integrated_zip_layer = _build_integrated_zip_layer(postal_region_df, integrated_service_df)
     integrated_area_layer = _build_integrated_area_layer(integrated_zip_layer, integrated_service_df)
 
     explorer_data = RouteExplorerData(

@@ -1,27 +1,37 @@
 {
-  "cache_version": "2026-03-22-route-explorer-v6",
+  "cache_version": "2026-07-15-fixed-region-cache-v16",
   "city_name": "Atlanta, GA",
   "best_region_count": 5,
   "selected_region_count": "current",
-  "profile_path": "260310\\Top 10_DMS_DMS2_Profile_20260317.xlsx",
-  "profile_mtime_ns": 1774569671626090300,
+  "profile_path": "260310\\production_input\\Top 10_DMS_DMS2_Profile_20260317_production.xlsx",
+  "profile_mtime_ns": 1784104455421709000,
+  "tech_list_path": "260310\\Top10 City Tech List.xlsx",
+  "tech_list_mtime_ns": 1783391128692538500,
   "zcta_zip_path": "data\\geo\\tl_2024_us_zcta520.zip",
   "zcta_zip_mtime_ns": 1773807533319431000,
-  "service_file": "260310\\input\\Service_202603181109_geocoded.csv",
-  "service_file_mtime_ns": 1774511584495998000,
+  "service_file": "260310\\input\\Service_202607071543_normalized_geocoded.csv",
+  "service_file_mtime_ns": 1783490357953124000,
   "config_file": "config.json",
-  "config_mtime_ns": 1774056884377116000,
+  "config_mtime_ns": 1783490369779179000,
+  "fixed_region_file": null,
+  "fixed_region_file_mtime_ns": null,
   "routing_cfg": {
     "distance_backend": "city_osrm_else_haversine",
     "assignment_distance_backend": "haversine",
     "effective_service_per_sm": 4,
     "service_time_per_job_min": 60,
-    "max_work_min_per_sm_day": 480,
+    "max_work_min_per_sm_day": 540,
     "max_travel_min_per_sm_day": 240,
     "max_travel_km_per_sm_day": 120,
     "city_osrm_urls": {
       "Los Angeles, CA": "http://20.51.244.68:5001",
-      "Atlanta, GA": "http://20.51.244.68:5002"
+      "Atlanta, GA": "http://20.51.244.68:5002",
+      "THAILAND": "http://20.51.244.68:5003",
+      "INDONESIA": "http://20.51.244.68:5004",
+      "MALAYSIA": "http://20.51.244.68:5005",
+      "Northeast": "http://20.51.244.68:5006",
+      "San Diego, CA": "http://20.51.244.68:5008",
+      "Washington, DC": "http://20.51.244.68:5009"
     }
   }
 }

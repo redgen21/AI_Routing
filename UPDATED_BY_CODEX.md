@@ -504,3 +504,185 @@
 - Final 2026-04-17 state:
   - fixed jobs are preserved end-to-end
   - return-to-home routing is not applied in the final path
+
+2026-04-21 (Common VRP capability payload flow)
+- Updated common-mode profile sourcing to use the production profile copy:
+  - `smart_routing/common_vrp_db.py`
+  - `sr_common_vrp_client.py`
+  - source file: `260310/production_input/Top 10_DMS_DMS2_Profile_20260317_production.xlsx`
+- Changed common-mode capability handling so the client reads capability rows from sheet `3. Product` and includes them in routing payloads:
+  - `sr_common_vrp_client.py`
+  - payload now includes `capabilities`
+  - only `REPAIR_FLAG == T` rows are sent
+  - each row includes `heavy_repair_allowed`
+- Updated common-mode runtime/server flow to consume payload capabilities instead of looking up technician capability from server-side DB during routing:
+  - `smart_routing/common_vrp_runtime.py`
+  - `smart_routing/common_vrp_api_server.py`
+  - `smart_routing/vrp_mode_na_general.py`
+- Connected capability constraints into candidate-engineer filtering by deriving per-job `eligible_employee_codes` from payload capabilities:
+  - `smart_routing/common_vrp_runtime.py`
+  - `smart_routing/production_assign_atlanta.py`
+- Added `/api/v1/common/routing/submit` handling on the common API server so the current Streamlit client submit path works end-to-end.
+- Updated the Common VRP client Masters tab so the displayed capability list is sourced from the production profile file instead of the server capability DB.
+- Fixed a common API server startup regression by restoring missing DB helper functions expected by `smart_routing/common_vrp_api_server.py`:
+  - `smart_routing/common_vrp_db.py`
+  - added `list_jobs()`
+  - added `upsert_jobs()`
+  - added `list_request_technicians()`
+  - added `replace_request_technicians()`
+- Reduced common-mode capability payload size so the client now sends only capability rows matching the selected jobs' `service_product_group_code/service_product_code` pairs:
+  - `sr_common_vrp_client.py`
+- Changed common-mode receipt handling to allow the same `GSFS_RECEIPT_NO` on different dates while still blocking same-day duplicates:
+  - `sr_common_vrp_client.py`
+  - `smart_routing/common_vrp_db.py`
+  - local/DB uniqueness now uses `promise_date + gsfs_receipt_no`
+  - re-received jobs on a later date inherit the previous technician and are forced to `fixed=True`
+- Reordered the Common VRP Direct Job Input fields to:
+  - `PROMISE_DATE`
+  - `GSFS_RECEIPT_NO`
+  - `Fixed Assignment`
+  - `SVC_ENGINEER_NAME`
+- Fixed Common VRP edit-save behavior so changing `GSFS_RECEIPT_NO` on an edited row replaces the original row by `record_id` instead of leaving the old receipt as an extra row:
+  - `sr_common_vrp_client.py`
+- Added a `Delete Selected Row` action to the Common VRP Jobs list so the currently selected direct-input row can be removed by `record_id`:
+  - `sr_common_vrp_client.py`
+- Synced the Common VRP result-view default date with the currently built payload date so the right-side `Date` filter opens on the same day as `PROMISE_DATE to Build Payload`:
+  - `sr_common_vrp_client.py`
+- Updated the Common VRP result-view `Date` options to sort by latest date first and to persist the payload-linked default into session state before rendering the selectbox:
+  - `sr_common_vrp_client.py`
+- Fixed a Streamlit session-state error by moving the `common_result_date` default assignment out of `_build_result_view_state()` and applying it before rendering the `Date` widget:
+  - `sr_common_vrp_client.py`
+- Switched Common VRP routing persistence to DB-primary storage so request/status/result refresh paths now read from DB instead of relying on per-job JSON files:
+  - `smart_routing/common_vrp_runtime.py`
+- Added optional Common VRP debug file archival with config-based retention:
+  - `config_common_vrp.json`
+  - `smart_routing/common_vrp_runtime.py`
+  - new storage defaults:
+    - `save_job_files: false`
+    - `job_file_retention_days: 5`
+  - when enabled, Common VRP debug snapshots are written under `260310/common_vrp_api_jobs/` and old job folders older than 5 days are cleaned up automatically
+- Simplified the Common VRP client navigation by removing the `Routing Config` and `Masters` tabs and adding a `Routing Result` tab instead:
+  - `sr_common_vrp_client.py`
+- Added Common VRP routing-history lookup so previously routed dates can be selected and loaded without submitting a new request:
+  - `smart_routing/common_vrp_db.py`
+  - `smart_routing/common_vrp_api_server.py`
+  - `sr_common_vrp_client.py`
+  - new API: `/api/v1/common/routing/history-dates`
+  - the client now loads the latest saved snapshot for the selected `PROMISE_DATE` through `/api/v1/common/routing/latest` and reuses the existing result summary/detail view
+- Renamed the Common VRP `Payload` tab to `Routing Request` to better match the actual workflow:
+  - `sr_common_vrp_client.py`
+- Renamed the Common VRP client page title and browser header from `Common VRP Client` to `Smart Routing Client`:
+  - `sr_common_vrp_client.py`
+- Fixed the Jobs selection flow so selecting a row no longer opens the edit dialog automatically; the dialog now opens only after clicking `Edit Selected Row` or `Open Direct Job Input`:
+  - `sr_common_vrp_client.py`
+- Made the Common VRP direct job dialog non-dismissible via the title-bar close action so stale dialog session state does not reopen the previous job when a different row is selected; the dialog now closes only through the in-dialog `Close` button or after saving:
+  - `sr_common_vrp_client.py`
+- Moved the Common VRP direct job dialog action buttons (`Save Job`, `Close`) to the upper-right area of the dialog while keeping the existing save/close behavior:
+  - `sr_common_vrp_client.py`
+- Added Windows PowerShell launch scripts so the two Streamlit clients can be started on fixed ports without remembering CLI flags:
+  - `run_common_mode.ps1` -> `sr_common_vrp_client.py` on port `8501`
+  - `run_general_mode.ps1` -> `sr_vrp_api_client.py` on port `8502`
+- Added Windows batch launchers that start the Streamlit clients in separate minimized background-style PowerShell processes:
+  - `run_common_mode.bat`
+  - `run_general_mode.bat`
+  - `run_all_modes.bat`
+  - `run_all_modes.bat` launches both common mode (`8501`) and general mode (`8502`) at once
+- Added Linux watchdog scripts in the project root so the two API servers can be re-started automatically by a user-level boot hook such as `crontab @reboot`:
+  - `watch_common_vrp_api.sh`
+  - `watch_smart_routing_api.sh`
+  - each watchdog checks every 10 seconds by default and directly starts the matching API server when the target process is not running
+  - the watchdogs are now standalone and no longer depend on calling the `restart_*.sh` wrappers
+- Added OSRM watchdog/startup scripts so Korea and USA OSRM servers can be managed separately instead of relying on the unstable all-in-one startup path:
+  - `osrm/watch_osrm_korea.sh`
+  - `osrm/watch_osrm_usa.sh`
+  - `osrm/run_osrm_regions.sh`
+  - the Korea watchdog monitors `osrm-korea` on port `5000`
+  - the USA watchdog monitors both `osrm-socal` and `osrm-georgia` on ports `5001`, `5002`
+- Generalized the USA OSRM build/run/watch scripts to use a shared city-entry list instead of hard-coded SoCal/Georgia blocks:
+  - `osrm/install_osrm_usa.sh`
+  - `osrm/run_osrm_usa.sh`
+  - `osrm/watch_osrm_usa.sh`
+  - adding a new USA region now requires updating only the `CITY_ENTRIES` list in those scripts
+- Added a server auto-start operations manual covering watchdog scripts, crontab registration, manual testing, log paths, and OSRM USA city-entry management:
+  - `docs/server_auto_start_manual_20260422.md`
+- Reduced OSRM watchdog log noise by suppressing raw Docker daemon command errors during periodic checks and keeping only the watchdog-level restart messages in the logs:
+  - `osrm/watch_osrm_korea.sh`
+  - `osrm/watch_osrm_usa.sh`
+- Added systemd service templates for the two routing APIs and the two OSRM startup paths, and updated the OSRM run scripts to create Docker containers with `--restart unless-stopped`:
+  - `systemd/common-vrp.service`
+  - `systemd/smart-routing.service`
+  - `systemd/osrm-korea.service`
+  - `systemd/osrm-usa.service`
+  - `osrm/run_osrm_korea.sh`
+  - `osrm/run_osrm_usa.sh`
+- Updated the server auto-start manual with the recommended systemd-based deployment flow, status/log checks, API/OSRM health verification commands, and the cleanup step for removing old watchdog crontab entries after migration:
+  - `docs/server_auto_start_manual_20260422.md`
+- Rewrote the server auto-start manual around the final systemd-based operating model and expanded the verification section so the post-setup and post-reboot checks are explicit:
+  - `docs/server_auto_start_manual_20260422.md`
+- Added explicit OSRM update scripts so fresh PBF downloads and rebuilds are separated from both startup and install-only scripts:
+  - `osrm/update_osrm_korea.sh`
+  - `osrm/update_osrm_usa.sh`
+- Updated the systemd operations manual to include the new OSRM update scripts and the follow-up service restart step after rebuilding:
+  - `docs/server_auto_start_manual_20260422.md`
+- Added nightly OSRM update wrapper scripts that combine update + rebuild + container restart for Korea and USA:
+  - `osrm/nightly_update_osrm_korea.sh`
+  - `osrm/nightly_update_osrm_usa.sh`
+- Extended the operations manual with a daily midnight update section, including timezone-aware cron examples and log verification commands:
+  - `docs/server_auto_start_manual_20260422.md`
+- Filtered the repetitive pandas SQL warning from Common VRP API logs so `systemd` status output is cleaner during normal DB reads:
+  - `smart_routing/common_vrp_db.py`
+- Hardened the OSRM systemd templates for boot-time startup by adding a Docker readiness wait step and `Restart=on-failure` retry behavior:
+  - `systemd/osrm-korea.service`
+  - `systemd/osrm-usa.service`
+- Updated the auto-start manual to mention the OSRM Docker wait/retry behavior and the extra boot-failure checks:
+  - `docs/server_auto_start_manual_20260422.md`
+- Changed the OSRM update/nightly wrapper scripts to call nested shell scripts via `bash ...sh`, so missing execute permission on `install_osrm_*.sh` or `run_osrm_*.sh` no longer breaks the update chain:
+  - `osrm/update_osrm_korea.sh`
+  - `osrm/update_osrm_usa.sh`
+  - `osrm/nightly_update_osrm_korea.sh`
+  - `osrm/nightly_update_osrm_usa.sh`
+- Updated Common VRP slot/work-limit behavior and result KPI documentation:
+  - `smart_routing/production_assign_atlanta_vrp.py`
+    - keeps 540 minutes as the soft work limit
+    - allows ordinary overtime up to the 600-minute absolute cap
+    - allows a fixed-job-only exception using fixed required work time plus a small buffer
+    - exposes `hard_work_limit_min` in engineer summary for debugging applied daily limits
+  - `sr_common_vrp_client.py`
+  - `sr_common_vrp_client_server.py`
+    - changed Fill Rate capacity calculation to prefer technician list/master `slot_count`
+    - uses result payload `max_slots` only as fallback for technicians missing from the local master
+    - fixed-job solver-side `max_slots` expansion no longer hides capacity overfill in the KPI
+  - `config_common_vrp.json`
+    - keeps `max_work_min_per_sm_day` as the configured fallback value used during routing retries
+  - `docs/프로젝트_설계서.md`
+    - documented slot capacity source, fixed-job capacity exceptions, Fill Rate interpretation, and VRP soft/hard work-limit policy
+  - Operational note: upload both client files and the VRP solver module to the server, restart the Streamlit client server, and restart/reload the Common VRP API if the routing module is updated.
+
+## Deferred Design Notes
+
+### VRP Travel-Time Matrix Calibration
+
+- Goal: improve technician assignment accuracy by correcting the travel-time matrix passed to the VRP solver, rather than immediately changing OSRM Lua speed profiles.
+- Recommended progression:
+  1. City-level multiplier: estimate `actual_travel_time / osrm_duration` by city, then multiply OSRM duration matrix values before solving.
+  2. City + time-bucket multiplier: split by practical dispatch buckets such as morning, mid-day, afternoon, evening.
+  3. City + road-type speed model: decompose OSRM routes into road-type distance buckets and estimate speeds by city and road type.
+  4. City + time-bucket + road-type model: use only after enough actual travel logs exist, with fallback to coarser models.
+- Minimum data needed:
+  - origin latitude/longitude
+  - destination latitude/longitude
+  - actual travel time
+  - OSRM predicted travel time
+  - city
+  - movement start time
+- Better data for road-type modeling:
+  - actual travel distance
+  - OSRM route distance
+  - route distance split by road type
+- Application point:
+  - Keep OSRM Table/Route as the base network engine.
+  - Apply calibration after OSRM duration calculation and before VRP solver input.
+  - Final solver input remains a corrected duration matrix, e.g. `A -> B = 27 min`.
+- Rationale:
+  - Lua/profile changes require OSRM rebuilds and affect all routes for that city.
+  - Matrix post-processing is easier to tune, compare, roll back, and vary by city/time bucket.

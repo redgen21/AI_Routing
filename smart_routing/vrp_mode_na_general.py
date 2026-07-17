@@ -33,6 +33,21 @@ def _build_region_lookup(region_zip_df: pd.DataFrame) -> dict[str, tuple[int, st
     }
 
 
+def _coerce_bool_value(value: object, default: bool = False) -> bool:
+    if pd.isna(value):
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "1", "y", "yes", "t"}:
+        return True
+    if text in {"false", "0", "n", "no", "f", ""}:
+        return False
+    return default
+
+
 def _build_region_centers_from_service_df(service_df: pd.DataFrame) -> dict[int, tuple[float, float]]:
     if service_df.empty or "region_seq" not in service_df.columns:
         return {}
@@ -149,6 +164,39 @@ def _build_engineer_frames_from_payload(
         region_row["SVC_ENGINEER_CODE"] = code
         region_row["Name"] = name
         region_row["SVC_CENTER_TYPE"] = str(tech.get("center_type", region_row.get("SVC_CENTER_TYPE", "DMS"))).strip().upper() or "DMS"
+        if pd.notna(start_lat) and pd.notna(start_lng):
+            region_row["latitude"] = float(start_lat)
+            region_row["longitude"] = float(start_lng)
+        elif not matched_home.empty:
+            matched_home_lat = pd.to_numeric(pd.Series([matched_home.iloc[0].get("latitude")]), errors="coerce").iloc[0]
+            matched_home_lng = pd.to_numeric(pd.Series([matched_home.iloc[0].get("longitude")]), errors="coerce").iloc[0]
+            if pd.notna(matched_home_lat) and pd.notna(matched_home_lng):
+                region_row["latitude"] = float(matched_home_lat)
+                region_row["longitude"] = float(matched_home_lng)
+        priority_value = tech.get("priority_group", 2)
+        priority_group = pd.to_numeric(pd.Series([priority_value]), errors="coerce").fillna(2).iloc[0]
+        if pd.isna(pd.to_numeric(pd.Series([priority_value]), errors="coerce").iloc[0]):
+            priority_text = str(priority_value or "").strip().upper()
+            if priority_text in {"A", "HIGH", "P3", "PRIORITY 3"}:
+                priority_group = 3
+            elif priority_text in {"C", "LOW", "P1", "PRIORITY 1"}:
+                priority_group = 1
+            else:
+                priority_group = 2
+        slot_capacity = pd.to_numeric(pd.Series([tech.get("slot_count", tech.get("max_slots", tech.get("max_jobs", 8)))]), errors="coerce").fillna(8).iloc[0]
+        max_slot_capacity = max(0, int(slot_capacity))
+        max_minutes = pd.to_numeric(pd.Series([tech.get("max_minutes", 540)]), errors="coerce").fillna(540).iloc[0]
+        slot_based_max_minutes = (max_slot_capacity + 1) * 60
+        max_minutes = min(int(max_minutes), int(slot_based_max_minutes))
+        region_row["priority_group"] = min(max(int(priority_group), 1), 3)
+        region_row["preferred_region_name"] = str(
+            tech.get("preferred_region_name", tech.get("preferred_area_name", ""))
+        ).strip()
+        region_row["max_jobs"] = max_slot_capacity
+        region_row["max_slots"] = max_slot_capacity
+        region_row["max_minutes"] = max(1, int(max_minutes))
+        max_home_to_job_override = pd.to_numeric(pd.Series([tech.get("max_home_to_job_min")]), errors="coerce").iloc[0]
+        region_row["max_home_to_job_min"] = int(max_home_to_job_override) if pd.notna(max_home_to_job_override) else pd.NA
         if "ref_heavy_repair_flag" in tech:
             region_row["REF_HEAVY_REPAIR_FLAG"] = str(tech.get("ref_heavy_repair_flag", "Y")).strip().upper() or "Y"
         engineer_rows.append(region_row)
@@ -176,8 +224,14 @@ def _build_engineer_frames_from_payload(
         home_row["SVC_ENGINEER_CODE"] = code
         home_row["Name"] = name
         home_row["SVC_CENTER_TYPE"] = region_row["SVC_CENTER_TYPE"]
-        home_row["latitude"] = float(start_lat) if pd.notna(start_lat) else pd.NA
-        home_row["longitude"] = float(start_lng) if pd.notna(start_lng) else pd.NA
+        if pd.notna(start_lat) and pd.notna(start_lng):
+            home_row["latitude"] = float(start_lat)
+            home_row["longitude"] = float(start_lng)
+        else:
+            if "latitude" not in home_row:
+                home_row["latitude"] = pd.NA
+            if "longitude" not in home_row:
+                home_row["longitude"] = pd.NA
         home_rows.append(home_row)
 
     if not engineer_rows and requested_codes:
@@ -219,6 +273,24 @@ def _build_service_frame_from_payload(
         center_type = str(job.get("current_center_type", "")).strip().upper() or "DMS"
         if not prod.ENABLE_DMS2 and center_type == prod.DMS2_CENTER_TYPE:
             center_type = prod.DMS_CENTER_TYPE
+        numeric_slot = pd.to_numeric(pd.Series([job.get("job_slot_count")]), errors="coerce").iloc[0]
+        if pd.isna(numeric_slot):
+            two_slot_text = str(job.get("two_slot_job", job.get("2slot_job", False))).strip().lower()
+            job_slot_count = 2 if two_slot_text in {"true", "1", "y", "yes", "t"} else 1
+        else:
+            job_slot_count = max(1, int(numeric_slot))
+        service_minutes = pd.to_numeric(pd.Series([job.get("service_minutes")]), errors="coerce").iloc[0]
+        if pd.isna(service_minutes):
+            heavy_text = str(job.get("is_heavy_repair", False)).strip().lower()
+            is_heavy_repair = bool(job.get("is_heavy_repair", False)) if heavy_text not in {"true", "1", "y", "yes", "t", "false", "0", "n", "no", "f", ""} else heavy_text in {"true", "1", "y", "yes", "t"}
+            slot_minutes = 45 * job_slot_count
+            service_minutes = max(slot_minutes, 100 if is_heavy_repair else 45)
+        raw_eligible_codes = job.get("eligible_employee_codes")
+        eligible_employee_codes = (
+            list(raw_eligible_codes)
+            if isinstance(raw_eligible_codes, list)
+            else pd.NA
+        )
         rows.append(
             {
                 "salesforce_id": salesforce_id,
@@ -242,12 +314,21 @@ def _build_service_frame_from_payload(
                 "time_window_start": str(time_window[0]).strip() if len(time_window) >= 1 else "",
                 "time_window_end": str(time_window[1]).strip() if len(time_window) >= 2 else "",
                 "priority": int(pd.to_numeric(pd.Series([job.get('priority', 0)]), errors='coerce').fillna(0).iloc[0]),
-                "fixed": bool(job.get("fixed", False)),
+                "fixed": _coerce_bool_value(job.get("fixed", False)),
+                "reschedule": (
+                    _coerce_bool_value(job.get("reschedule", False))
+                    and not _coerce_bool_value(job.get("fixed", False))
+                ),
+                "job_slot_count": job_slot_count,
                 "current_employee_code": str(job.get("current_employee_code", "")).strip(),
+                "eligible_employee_codes": eligible_employee_codes,
                 "region_seq": int(region_seq) if pd.notna(region_seq) else pd.NA,
                 "new_region_name": region_name,
+                "area_type": str(job.get("area_type", "")).strip().upper(),
                 "SVC_CENTER_TYPE": center_type,
                 "is_tv_job": bool(job.get("is_tv_job", False)),
+                "is_heavy_repair": bool(job.get("is_heavy_repair", False)),
+                "service_time_min": int(service_minutes),
             }
         )
     df = pd.DataFrame(rows)
@@ -264,8 +345,17 @@ def _build_service_frame_from_payload(
                 df.at[idx, "region_seq"] = int(region_seq)
                 df.at[idx, "new_region_name"] = region_name
         df = df.sort_values(["service_date_key", "GSFS_RECEIPT_NO"]).reset_index(drop=True)
+        payload_service_times = (
+            df.set_index("GSFS_RECEIPT_NO")["service_time_min"].to_dict()
+            if "service_time_min" in df.columns
+            else {}
+        )
         heavy_lookup_df = prod._build_heavy_repair_lookup(prod.DEFAULT_SYMPTOM_FILE)
         df = prod._enrich_service_df(df, heavy_lookup_df)
+        if payload_service_times:
+            df["service_time_min"] = df["GSFS_RECEIPT_NO"].map(payload_service_times).fillna(df["service_time_min"])
+            df["service_time_min"] = pd.to_numeric(df["service_time_min"], errors="coerce").fillna(45)
+            df["is_heavy_repair"] = df["service_time_min"].astype(float).gt(45)
     return df
 
 
@@ -273,6 +363,7 @@ def _build_response_payload(
     request_payload: dict[str, Any],
     summary_df: pd.DataFrame,
     schedule_df: pd.DataFrame,
+    diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     planning_date = str(request_payload.get("planning_date", "")).strip()
     timezone_offset = str(request_payload.get("options", {}).get("timezone_offset", DEFAULT_TIMEZONE_OFFSET)).strip() or DEFAULT_TIMEZONE_OFFSET
@@ -280,6 +371,11 @@ def _build_response_payload(
     job_lookup = {
         str(job.get("receipt_no", "") or job.get("salesforce_id", "")).strip(): job
         for job in jobs
+    }
+    technician_codes = {
+        str(tech.get("employee_code", "")).strip()
+        for tech in request_payload.get("technicians", [])
+        if str(tech.get("employee_code", "")).strip()
     }
     assigned_receipts: set[str] = set()
     assignments: list[dict[str, Any]] = []
@@ -289,6 +385,22 @@ def _build_response_payload(
             payload_job = job_lookup.get(receipt_no, {})
             assigned_receipts.add(receipt_no)
             current_employee_code = str(payload_job.get("current_employee_code", "")).strip()
+            numeric_slot = pd.to_numeric(
+                pd.Series([row.get("job_slot_count", payload_job.get("job_slot_count", 1))]),
+                errors="coerce",
+            ).iloc[0]
+            service_time_min = pd.to_numeric(
+                pd.Series([row.get("service_time_min", payload_job.get("service_minutes", 45))]),
+                errors="coerce",
+            ).fillna(45).iloc[0]
+            base_service_time_min = pd.to_numeric(
+                pd.Series([row.get("base_service_time_min", payload_job.get("service_minutes", service_time_min))]),
+                errors="coerce",
+            ).fillna(service_time_min).iloc[0]
+            service_time_multiplier = pd.to_numeric(
+                pd.Series([row.get("service_time_multiplier", 1.0)]),
+                errors="coerce",
+            ).fillna(1.0).iloc[0]
             assignments.append(
                 {
                     "salesforce_id": str(payload_job.get("salesforce_id", row.get("salesforce_id", ""))).strip(),
@@ -298,24 +410,98 @@ def _build_response_payload(
                     "planned_start": format_planned_timestamp(str(row.get("service_date_key", planning_date)), str(row.get("visit_start_time", "")), timezone_offset),
                     "planned_end": format_planned_timestamp(str(row.get("service_date_key", planning_date)), str(row.get("visit_end_time", "")), timezone_offset),
                     "changed": bool(current_employee_code and current_employee_code != str(row.get("assigned_sm_code", "")).strip()),
+                    "job_slot_count": max(1, int(numeric_slot)) if pd.notna(numeric_slot) else 1,
+                    "base_service_time_min": round(float(base_service_time_min), 2),
+                    "service_time_multiplier": round(float(service_time_multiplier), 3),
+                    "service_time_min": round(float(service_time_min), 2),
+                    "priority_minimums_relaxed": _coerce_bool_value(row.get("priority_minimums_relaxed", False)),
+                    "fixed_capacity_forced": _coerce_bool_value(row.get("fixed_capacity_forced", False)),
+                    "reschedule_mandatory_relaxed": _coerce_bool_value(row.get("reschedule_mandatory_relaxed", False)),
+                    "distance_caps_relaxed": _coerce_bool_value(row.get("distance_caps_relaxed", False)),
                 }
             )
 
+    diagnostics_payload = dict(diagnostics or {})
+    relaxations_applied = {
+        "fixed_capacity_override": bool(diagnostics_payload.get("fixed_capacity_violations")),
+        "priority_minimums_relaxed": any(bool(item.get("priority_minimums_relaxed")) for item in assignments),
+        "fixed_capacity_forced": any(bool(item.get("fixed_capacity_forced")) for item in assignments),
+        "reschedule_mandatory_relaxed": any(bool(item.get("reschedule_mandatory_relaxed")) for item in assignments),
+        "distance_caps_relaxed": any(bool(item.get("distance_caps_relaxed")) for item in assignments),
+    }
+    messages: list[str] = []
+    routing_engine = str(diagnostics_payload.get("routing_engine", "")).strip()
+    if routing_engine:
+        messages.append(f"Routing engine: {routing_engine}")
+    fixed_violations = diagnostics_payload.get("fixed_capacity_violations") or {}
+    if isinstance(fixed_violations, dict) and fixed_violations:
+        labels = []
+        for employee_code, info in fixed_violations.items():
+            if not isinstance(info, dict):
+                continue
+            name = str(info.get("employee_name", "")).strip()
+            label = f"{name} ({employee_code})" if name else str(employee_code)
+            labels.append(
+                f"{label}: fixed slots {info.get('fixed_slots', 0)} > slot_count {info.get('slot_capacity', 0)}"
+            )
+        messages.append("Fixed capacity override: " + "; ".join(labels))
+    if relaxations_applied["priority_minimums_relaxed"]:
+        messages.append("Priority minimums relaxed: technician minimum slot targets were softened to find a feasible route.")
+    if relaxations_applied["fixed_capacity_forced"]:
+        messages.append("Fixed capacity forced: fixed calls were assigned to their fixed technicians even when fixed slots exceeded slot_count or full routing was infeasible.")
+    if relaxations_applied["reschedule_mandatory_relaxed"]:
+        messages.append("Reschedule mandatory relaxed: some reschedule calls were allowed to be unassigned if needed for feasibility.")
+    if relaxations_applied["distance_caps_relaxed"]:
+        messages.append("Distance caps relaxed: max home-to-job, single-leg, or daily travel caps were relaxed to avoid full routing failure.")
+    invalid_location_count = int(diagnostics_payload.get("invalid_location_count", 0) or 0)
+    if invalid_location_count:
+        sample = ", ".join(str(value) for value in diagnostics_payload.get("invalid_location_receipts", [])[:10])
+        messages.append(
+            f"Invalid location skipped: {invalid_location_count} job(s) had missing/invalid coordinates"
+            + (f" ({sample})" if sample else "")
+        )
+    if not messages:
+        messages.append("Standard routing: no feasibility relaxation was applied.")
+    diagnostics_payload["relaxations_applied"] = relaxations_applied
+    diagnostics_payload["routing_condition_messages"] = messages
+
     unassigned: list[dict[str, Any]] = []
+    invalid_location_receipts = set(diagnostics_payload.get("invalid_location_receipts", []))
     for job in jobs:
         receipt_no = str(job.get("receipt_no", "") or job.get("salesforce_id", "")).strip()
         if receipt_no in assigned_receipts:
             continue
+        eligible_codes = job.get("eligible_employee_codes")
+        fixed = _coerce_bool_value(job.get("fixed", False))
+        reschedule = _coerce_bool_value(job.get("reschedule", False)) and not fixed
+        current_employee_code = str(job.get("current_employee_code", "")).strip()
+        if receipt_no in invalid_location_receipts:
+            reason = "INVALID_LOCATION"
+        elif isinstance(eligible_codes, list) and len(eligible_codes) == 0:
+            reason = "NO_ELIGIBLE_TECHNICIAN"
+        elif fixed and current_employee_code and current_employee_code not in technician_codes:
+            reason = "FIXED_TECHNICIAN_NOT_AVAILABLE"
+        elif fixed or reschedule:
+            reason = "NO_FEASIBLE_MANDATORY_ROUTE"
+        else:
+            reason = "NO_FEASIBLE_ROUTE"
         unassigned.append(
             {
                 "salesforce_id": str(job.get("salesforce_id", "")).strip(),
                 "receipt_no": receipt_no,
-                "reason": "NO_FEASIBLE_ROUTE",
+                "reason": reason,
+                "product_group": str(job.get("product_group", "")).strip(),
+                "product": str(job.get("product", "")).strip(),
+                "eligible_employee_count": len(eligible_codes) if isinstance(eligible_codes, list) else None,
+                "fixed": fixed,
+                "reschedule": reschedule,
+                "current_employee_code": current_employee_code,
             }
         )
 
     return {
         "request_id": str(request_payload.get("request_id", "")).strip(),
+        "routing_job_id": str(request_payload.get("routing_job_id", "")).strip(),
         "mode": normalize_mode(request_payload.get("mode")),
         "city": normalize_city(request_payload.get("city")),
         "status": "completed",
@@ -327,6 +513,132 @@ def _build_response_payload(
         "assignments": assignments,
         "unassigned": unassigned,
         "engineer_summary": summary_df.to_dict("records") if not summary_df.empty else [],
+        "diagnostics": diagnostics_payload,
+    }
+
+
+def _build_routing_diagnostics(
+    request_payload: dict[str, Any],
+    service_df: pd.DataFrame,
+    engineer_region_df: pd.DataFrame,
+    home_df: pd.DataFrame,
+) -> dict[str, Any]:
+    jobs = list(request_payload.get("jobs", []))
+    technicians = list(request_payload.get("technicians", []))
+    payload_area_type_counts: dict[str, int] = {}
+    for job in jobs:
+        area_type = str(job.get("area_type", "") or "").strip().upper() or "BLANK"
+        payload_area_type_counts[area_type] = payload_area_type_counts.get(area_type, 0) + 1
+    service_area_type_counts: dict[str, int] = {}
+    if not service_df.empty and "area_type" in service_df.columns:
+        for area_type in service_df["area_type"].fillna("").astype(str).str.strip().str.upper().tolist():
+            key = area_type or "BLANK"
+            service_area_type_counts[key] = service_area_type_counts.get(key, 0) + 1
+    no_eligible = [
+        str(job.get("receipt_no", "") or job.get("salesforce_id", "")).strip()
+        for job in jobs
+        if isinstance(job.get("eligible_employee_codes"), list) and len(job.get("eligible_employee_codes", [])) == 0
+    ]
+    fixed_jobs = [
+        str(job.get("receipt_no", "") or job.get("salesforce_id", "")).strip()
+        for job in jobs
+        if _coerce_bool_value(job.get("fixed", False))
+    ]
+    reschedule_jobs = [
+        str(job.get("receipt_no", "") or job.get("salesforce_id", "")).strip()
+        for job in jobs
+        if _coerce_bool_value(job.get("reschedule", False)) and not _coerce_bool_value(job.get("fixed", False))
+    ]
+    technician_codes = {
+        str(tech.get("employee_code", "")).strip()
+        for tech in technicians
+        if str(tech.get("employee_code", "")).strip()
+    }
+    unavailable_fixed = [
+        str(job.get("receipt_no", "") or job.get("salesforce_id", "")).strip()
+        for job in jobs
+        if _coerce_bool_value(job.get("fixed", False))
+        and str(job.get("current_employee_code", "")).strip()
+        and str(job.get("current_employee_code", "")).strip() not in technician_codes
+    ]
+    technician_slot_capacity: dict[str, int] = {}
+    technician_name_lookup: dict[str, str] = {}
+    for tech in technicians:
+        employee_code = str(tech.get("employee_code", "")).strip()
+        if not employee_code:
+            continue
+        technician_name_lookup[employee_code] = str(tech.get("employee_name", employee_code)).strip() or employee_code
+        slot_value = pd.to_numeric(pd.Series([tech.get("slot_count", tech.get("max_slots", 8))]), errors="coerce").fillna(8).iloc[0]
+        technician_slot_capacity[employee_code] = max(0, int(slot_value))
+
+    fixed_slots_by_employee: dict[str, int] = {}
+    fixed_jobs_by_employee: dict[str, int] = {}
+    reschedule_slot_count = 0
+    total_slots = 0
+    for job in jobs:
+        slot_value = pd.to_numeric(pd.Series([job.get("job_slot_count", 1)]), errors="coerce").fillna(1).iloc[0]
+        job_slots = max(1, int(slot_value))
+        total_slots += job_slots
+        if _coerce_bool_value(job.get("fixed", False)):
+            employee_code = str(job.get("current_employee_code", "")).strip()
+            fixed_slots_by_employee[employee_code] = fixed_slots_by_employee.get(employee_code, 0) + job_slots
+            fixed_jobs_by_employee[employee_code] = fixed_jobs_by_employee.get(employee_code, 0) + 1
+        elif _coerce_bool_value(job.get("reschedule", False)):
+            reschedule_slot_count += job_slots
+    total_capacity = sum(technician_slot_capacity.values())
+    service_receipts = set()
+    if not service_df.empty and "GSFS_RECEIPT_NO" in service_df.columns:
+        service_receipts = {
+            str(value).strip()
+            for value in service_df["GSFS_RECEIPT_NO"].dropna().astype(str).tolist()
+            if str(value).strip()
+        }
+    all_receipts = [
+        str(job.get("receipt_no", "") or job.get("salesforce_id", "")).strip()
+        for job in jobs
+    ]
+    invalid_location_receipts = [
+        receipt
+        for receipt in all_receipts
+        if receipt and receipt not in service_receipts
+    ]
+    fixed_capacity_violations = {
+        employee_code: {
+            "employee_name": technician_name_lookup.get(employee_code, employee_code),
+            "fixed_jobs": fixed_jobs_by_employee.get(employee_code, 0),
+            "fixed_slots": fixed_slots,
+            "slot_capacity": technician_slot_capacity.get(employee_code, 0),
+        }
+        for employee_code, fixed_slots in sorted(fixed_slots_by_employee.items())
+        if employee_code and fixed_slots > technician_slot_capacity.get(employee_code, 0)
+    }
+    return {
+        "job_count": len(jobs),
+        "service_frame_count": int(len(service_df)),
+        "payload_area_type_counts": payload_area_type_counts,
+        "service_area_type_counts": service_area_type_counts,
+        "technician_count": len(technicians),
+        "engineer_frame_count": int(len(engineer_region_df)),
+        "home_frame_count": int(len(home_df)),
+        "capability_count": len(list(request_payload.get("capabilities", []))),
+        "jobs_without_eligible_technician_count": len(no_eligible),
+        "jobs_without_eligible_technician_sample": no_eligible[:20],
+        "fixed_job_count": len(fixed_jobs),
+        "reschedule_job_count": len(reschedule_jobs),
+        "mandatory_job_count": len(fixed_jobs) + len(reschedule_jobs),
+        "unavailable_fixed_job_count": len(unavailable_fixed),
+        "unavailable_fixed_job_sample": unavailable_fixed[:20],
+        "total_job_slots": int(total_slots),
+        "total_technician_slots": int(total_capacity),
+        "reschedule_slot_count": int(reschedule_slot_count),
+        "technician_slot_capacity": technician_slot_capacity,
+        "technician_names": technician_name_lookup,
+        "fixed_jobs_by_employee": fixed_jobs_by_employee,
+        "fixed_slots_by_employee": fixed_slots_by_employee,
+        "fixed_capacity_violation_employee_codes": list(fixed_capacity_violations.keys()),
+        "fixed_capacity_violations": fixed_capacity_violations,
+        "invalid_location_count": len(invalid_location_receipts),
+        "invalid_location_receipts": invalid_location_receipts[:50],
     }
 
 
@@ -343,7 +655,11 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
         reference_home_df,
         region_centers,
     )
-    if engineer_region_df.empty or home_df.empty or service_df.empty:
+    diagnostics = _build_routing_diagnostics(request_payload, service_df, engineer_region_df, home_df)
+    diagnostics["routing_engine"] = "na_general"
+    if service_df.empty:
+        return _build_response_payload(request_payload, pd.DataFrame(), pd.DataFrame(), diagnostics=diagnostics)
+    if engineer_region_df.empty or home_df.empty:
         return build_empty_result(request_payload, reason="INVALID_INPUT_DATA", mode="na_general")
 
     time_limit_seconds = int(pd.to_numeric(
@@ -351,12 +667,66 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
         errors="coerce",
     ).fillna(20).clip(lower=10).iloc[0])
     respect_fixed_jobs = bool(request_payload.get("options", {}).get("respect_fixed_jobs", True))
-    _, summary_df, schedule_df = build_atlanta_production_assignment_vrp_from_frames(
+    avoid_polygons = list(request_payload.get("options", {}).get("avoid_polygons", []) or [])
+    avoid_penalty_multiplier = float(
+        pd.to_numeric(
+            pd.Series([request_payload.get("options", {}).get("avoid_penalty_multiplier", 4.0)]),
+            errors="coerce",
+        ).fillna(4.0).iloc[0]
+    )
+    max_travel_min_per_sm_day = pd.to_numeric(
+        pd.Series([request_payload.get("options", {}).get("max_travel_min_per_sm_day")]),
+        errors="coerce",
+    ).iloc[0]
+    max_work_min_per_sm_day = pd.to_numeric(
+        pd.Series([request_payload.get("options", {}).get("max_work_min_per_sm_day")]),
+        errors="coerce",
+    ).iloc[0]
+    max_travel_km_per_sm_day = pd.to_numeric(
+        pd.Series([request_payload.get("options", {}).get("max_travel_km_per_sm_day")]),
+        errors="coerce",
+    ).iloc[0]
+    max_single_leg_min = pd.to_numeric(
+        pd.Series([request_payload.get("options", {}).get("max_single_leg_min")]),
+        errors="coerce",
+    ).iloc[0]
+    max_home_to_job_min = pd.to_numeric(
+        pd.Series([request_payload.get("options", {}).get("max_home_to_job_min")]),
+        errors="coerce",
+    ).iloc[0]
+    long_leg_penalty_start_min = pd.to_numeric(
+        pd.Series([request_payload.get("options", {}).get("long_leg_penalty_start_min")]),
+        errors="coerce",
+    ).iloc[0]
+    long_leg_penalty_multiplier = pd.to_numeric(
+        pd.Series([request_payload.get("options", {}).get("long_leg_penalty_multiplier")]),
+        errors="coerce",
+    ).iloc[0]
+    assignment_df, summary_df, schedule_df = build_atlanta_production_assignment_vrp_from_frames(
         engineer_region_df=engineer_region_df,
         home_df=home_df,
         service_df=service_df,
         attendance_limited=False,
         time_limit_seconds=time_limit_seconds,
         respect_fixed_jobs=respect_fixed_jobs,
+        avoid_polygons=avoid_polygons,
+        avoid_penalty_multiplier=avoid_penalty_multiplier,
+        max_work_min_per_sm_day=float(max_work_min_per_sm_day) if pd.notna(max_work_min_per_sm_day) and float(max_work_min_per_sm_day) > 0 else None,
+        max_travel_min_per_sm_day=float(max_travel_min_per_sm_day) if pd.notna(max_travel_min_per_sm_day) and float(max_travel_min_per_sm_day) > 0 else None,
+        max_travel_km_per_sm_day=float(max_travel_km_per_sm_day) if pd.notna(max_travel_km_per_sm_day) and float(max_travel_km_per_sm_day) > 0 else None,
+        max_single_leg_min=float(max_single_leg_min) if pd.notna(max_single_leg_min) and float(max_single_leg_min) > 0 else None,
+        max_home_to_job_min=float(max_home_to_job_min) if pd.notna(max_home_to_job_min) and float(max_home_to_job_min) > 0 else None,
+        long_leg_penalty_start_min=float(long_leg_penalty_start_min) if pd.notna(long_leg_penalty_start_min) and float(long_leg_penalty_start_min) > 0 else None,
+        long_leg_penalty_multiplier=float(long_leg_penalty_multiplier) if pd.notna(long_leg_penalty_multiplier) and float(long_leg_penalty_multiplier) > 0 else None,
     )
-    return _build_response_payload(request_payload, summary_df, schedule_df)
+    diagnostics["assignment_frame_count"] = int(len(assignment_df)) if assignment_df is not None else 0
+    diagnostics["summary_frame_count"] = int(len(summary_df)) if summary_df is not None else 0
+    diagnostics["schedule_frame_count"] = int(len(schedule_df)) if schedule_df is not None else 0
+    if schedule_df.empty and not assignment_df.empty:
+        schedule_df = assignment_df.copy()
+        if "visit_seq" not in schedule_df.columns:
+            schedule_df["visit_seq"] = schedule_df.get("vrp_visit_seq", 0)
+        schedule_df["visit_seq"] = pd.to_numeric(schedule_df["visit_seq"], errors="coerce").fillna(0).astype(int)
+        schedule_df["visit_start_time"] = schedule_df.get("visit_start_time", "")
+        schedule_df["visit_end_time"] = schedule_df.get("visit_end_time", "")
+    return _build_response_payload(request_payload, summary_df, schedule_df, diagnostics=diagnostics)

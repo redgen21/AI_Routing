@@ -21,6 +21,17 @@ from .region_design import (
 INPUT_DIR = Path("260310/input")
 OUTPUT_DIR = Path("260310/output")
 DEFAULT_SERVICE_FILE = INPUT_DIR / "Service_202603181109_geocoded.csv"
+ROUTE_CITY_ALIASES = {
+    "North Jersey, NJ": "Northeast",
+    "Philadelphia, PA": "Northeast",
+}
+
+
+def _route_client_key(city_name: object) -> str:
+    city_text = str(city_name).strip()
+    return ROUTE_CITY_ALIASES.get(city_text, city_text)
+
+
 def _haversine_km_pair(a: tuple[float, float], b: tuple[float, float]) -> float:
     lon1, lat1 = a
     lon2, lat2 = b
@@ -138,8 +149,22 @@ def _estimate_group_route(group_df: pd.DataFrame, client: OSRMTripClient) -> dic
     }
 
 
+def _assignment_route_client(client: OSRMTripClient, assignment_distance_backend: str) -> OSRMTripClient:
+    backend = str(assignment_distance_backend or "haversine").strip().lower()
+    if backend == "osrm":
+        return client
+    return OSRMTripClient(
+        OSRMConfig(
+            osrm_url=client.cfg.osrm_url,
+            mode="haversine",
+            osrm_profile=client.cfg.osrm_profile,
+            cache_file=client.cfg.cache_file,
+        )
+    )
+
+
 def _get_client_for_city(city_name: str, client_map: dict[str, OSRMTripClient], default_client: OSRMTripClient) -> OSRMTripClient:
-    return client_map.get(city_name, default_client)
+    return client_map.get(_route_client_key(city_name), default_client)
 
 
 def _build_current_routes(service_df: pd.DataFrame, client_map: dict[str, OSRMTripClient], default_client: OSRMTripClient) -> pd.DataFrame:
@@ -198,6 +223,7 @@ def _batch_assign_region_day_jobs(
 ) -> pd.Series:
     if group_df.empty:
         return pd.Series(dtype=int)
+    route_client = _assignment_route_client(client, assignment_distance_backend)
     min_sm_count = max(1, math.ceil(len(group_df) / max(effective_service_per_sm, 1.0)))
     max_sm_count = max(1, len(group_df))
     accepted_labels: pd.Series | None = None
@@ -206,7 +232,7 @@ def _batch_assign_region_day_jobs(
         labels = _build_region_day_cluster_labels(group_df, sm_count)
         is_valid = True
         for _, cluster_df in group_df.groupby(labels, sort=True):
-            metrics = _estimate_group_route(cluster_df, client)
+            metrics = _estimate_group_route(cluster_df, route_client)
             total_work_min = float(metrics["duration_min"]) + float(metrics["job_count"]) * service_time_per_job_min
             if total_work_min > max_work_min_per_sm_day:
                 is_valid = False
@@ -226,7 +252,7 @@ def _batch_assign_region_day_jobs(
     return _reassign_single_job_clusters(
         group_df=group_df,
         labels=accepted_labels.astype(int),
-        client=client,
+        client=route_client,
         service_time_per_job_min=service_time_per_job_min,
         max_work_min_per_sm_day=max_work_min_per_sm_day,
         candidate_job_cap=4,

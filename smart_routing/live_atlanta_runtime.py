@@ -7,10 +7,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from .census_geocoder import CensusBatchGeocoder, load_geocode_cache, merge_service_with_geocodes
+from .census_geocoder import CensusBatchGeocoder, build_address_key, load_geocode_cache, merge_service_with_geocodes
 from .google_geocoder import GoogleGeocoder
+from .here_geocoder import HereGeocoder
+from .us_geocode_cleaner import build_us_geocode_query_variants
 from . import production_atlanta as prod
 from .area_map import get_latest_geocoded_service_file
+from .service_preprocess import normalize_service_df
 
 
 DEFAULT_PROFILE_FILE = Path("260310/Top 10_DMS_DMS2_Profile_20260317.xlsx")
@@ -41,89 +44,29 @@ def _load_config(config_file: Path = DEFAULT_CONFIG_FILE) -> dict:
 
 
 def _normalize_service_columns(raw_df: pd.DataFrame) -> pd.DataFrame:
-    df = raw_df.copy()
-    df = df.loc[:, ~df.columns.astype(str).str.startswith("Unnamed:")].copy()
-    rename_map = {
-        "SERVICE_CENTER_TYPE": "SVC_CENTER_TYPE",
-        "DETAIL_SYMPTOM_CODE": "RECEIPT_DETAIL_SYMPTOM_CODE",
-        "SERVICE_PRODUCT_NAME": "SVC_PRODUCT_NAME",
-        "SERVICE_PRODUCT_GROUP_NAME": "SVC_PRODUCT_GROUP_NAME",
-    }
-    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
-    for col in [
-        "STRATEGIC_CITY_NAME",
-        "POSTAL_CODE",
-        "GSFS_RECEIPT_NO",
-        "SVC_ENGINEER_CODE",
-        "SVC_ENGINEER_NAME",
-        "SVC_CENTER_TYPE",
-        "SERVICE_PRODUCT_GROUP_CODE",
-        "SERVICE_PRODUCT_CODE",
-        "RECEIPT_DETAIL_SYMPTOM_CODE",
-        "STATE_NAME",
-        "CITY_NAME",
-        "COUNTRY_NAME",
-        "ADDRESS_LINE1_INFO",
-    ]:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.strip()
-            df[col] = df[col].replace(
-                {
-                    "nan": "",
-                    "None": "",
-                    "none": "",
-                    "NaN": "",
-                    "NAN": "",
-                    "NaT": "",
-                    "nat": "",
-                }
-            )
-    if "COUNTRY_NAME" in df.columns:
-        df["COUNTRY_NAME"] = df["COUNTRY_NAME"].replace(
-            {
-                "US": "USA",
-                "usa": "USA",
-                "United States": "USA",
-                "UNITED STATES": "USA",
-            }
-        )
-    if "SVC_ENGINEER_NAME" not in df.columns and "SVC_ENGINEER_CODE" in df.columns:
-        df["SVC_ENGINEER_NAME"] = df["SVC_ENGINEER_CODE"].astype(str).str.strip()
-    elif "SVC_ENGINEER_NAME" in df.columns and "SVC_ENGINEER_CODE" in df.columns:
-        missing_name_mask = df["SVC_ENGINEER_NAME"].astype(str).str.strip().eq("")
-        df.loc[missing_name_mask, "SVC_ENGINEER_NAME"] = df.loc[missing_name_mask, "SVC_ENGINEER_CODE"].astype(str).str.strip()
-    if "POSTAL_CODE" in df.columns:
-        df["POSTAL_CODE"] = df["POSTAL_CODE"].astype("object")
-        postal_numeric = pd.to_numeric(df["POSTAL_CODE"], errors="coerce")
-        has_postal_numeric = postal_numeric.notna()
-        df["POSTAL_CODE"] = df["POSTAL_CODE"].astype(str).str.replace(r"\.0+$", "", regex=True).str.strip()
-        df["POSTAL_CODE"] = df["POSTAL_CODE"].replace({"nan": "", "None": "", "none": "", "NaN": "", "NAN": ""})
-        df.loc[has_postal_numeric, "POSTAL_CODE"] = postal_numeric.loc[has_postal_numeric].astype("Int64").astype(str)
-        df["POSTAL_CODE"] = df["POSTAL_CODE"].astype(str).str.strip()
-        nonempty_postal = df["POSTAL_CODE"].ne("")
-        df.loc[nonempty_postal, "POSTAL_CODE"] = df.loc[nonempty_postal, "POSTAL_CODE"].str.zfill(5)
-    if "PROMISE_DATE" in df.columns:
-        df["PROMISE_DATE"] = df["PROMISE_DATE"].astype("object")
-        promise_numeric = pd.to_numeric(df["PROMISE_DATE"], errors="coerce")
-        has_numeric = promise_numeric.notna()
-        df.loc[has_numeric, "PROMISE_DATE"] = promise_numeric.loc[has_numeric].astype("Int64").astype(str)
-        df["PROMISE_DATE"] = df["PROMISE_DATE"].astype(str).str.replace(r"\.0+$", "", regex=True).str.strip()
-    if "GSFS_RECEIPT_NO" in df.columns:
-        sort_cols = [col for col in ["PROMISE_DATE", "PROMISE_TIMESTAMP", "REPAIR_END_DATE_YYYYMMDD", "GSFS_RECEIPT_NO"] if col in df.columns]
-        if sort_cols:
-            df = df.sort_values(sort_cols).reset_index(drop=True)
-        df = df.drop_duplicates(subset=["GSFS_RECEIPT_NO"], keep="first").reset_index(drop=True)
-    required_any = [col for col in ["GSFS_RECEIPT_NO", "ADDRESS_LINE1_INFO", "CITY_NAME", "STATE_NAME", "POSTAL_CODE"] if col in df.columns]
-    if required_any:
-        nonblank_mask = pd.Series(False, index=df.index)
-        for col in required_any:
-            nonblank_mask = nonblank_mask | df[col].astype(str).str.strip().ne("")
-        df = df[nonblank_mask].reset_index(drop=True)
+    df, _summary = normalize_service_df(raw_df)
     return df
 
 
+def _combined_geocode_cache(*cache_paths: Path) -> pd.DataFrame:
+    frames = []
+    for order, cache_path in enumerate(cache_paths):
+        frame = load_geocode_cache(cache_path)
+        if frame.empty:
+            continue
+        frame = frame.copy()
+        frame["_cache_order"] = order
+        frame["_is_failed"] = frame["source"].astype(str).eq("failed") | frame["latitude"].isna() | frame["longitude"].isna()
+        frames.append(frame)
+    if not frames:
+        return load_geocode_cache(Path("__missing_geocode_cache__.csv"))
+    combined = pd.concat(frames, ignore_index=True)
+    combined = combined.sort_values(["address_key", "_is_failed", "_cache_order"]).drop_duplicates(subset=["address_key"], keep="first")
+    return combined.drop(columns=["_cache_order", "_is_failed"], errors="ignore").reset_index(drop=True)
+
+
 def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
-    merged_input_df = raw_df.copy()
+    merged_input_df = raw_df.copy().reset_index(drop=True)
     latest_geocoded_service = get_latest_geocoded_service_file()
     if latest_geocoded_service and latest_geocoded_service.exists() and "GSFS_RECEIPT_NO" in merged_input_df.columns:
         try:
@@ -159,13 +102,12 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
 
     geocoding_cfg = config.get("geocoding", {})
     census_cache_path = Path(str(geocoding_cfg.get("census_cache_file", "data/geocode_cache_us_census.csv")))
+    here_cache_path = Path(str(geocoding_cfg.get("here_cache_file", "data/geocode_cache_here.csv")))
+    here_attempt_log_path = Path(str(geocoding_cfg.get("here_attempt_log_file", "data/geocode_attempted_here.csv")))
     google_cache_path = Path(str(geocoding_cfg.get("google_cache_file", "data/geocode_cache_google.csv")))
     google_attempt_log_path = Path(str(geocoding_cfg.get("google_attempt_log_file", "data/geocode_attempted_google.csv")))
 
-    cache_df = pd.concat(
-        [load_geocode_cache(census_cache_path), load_geocode_cache(google_cache_path)],
-        ignore_index=True,
-    ).drop_duplicates(subset=["address_key"], keep="first")
+    cache_df = _combined_geocode_cache(census_cache_path, here_cache_path, google_cache_path)
     merged_df = merge_service_with_geocodes(merged_input_df, cache_df)
 
     if "receipt_latitude" in merged_df.columns and "receipt_longitude" in merged_df.columns:
@@ -204,16 +146,16 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
                 timeout=int(geocoding_cfg.get("timeout", 120)),
                 batch_size=int(geocoding_cfg.get("batch_size", 1000)),
             )
-            census.run_for_service_file(
-                service_path=raw_path,
-                merged_output_path=geocoded_path,
-                report_path=report_path,
-            )
+            try:
+                census.run_for_service_file(
+                    service_path=raw_path,
+                    merged_output_path=geocoded_path,
+                    report_path=report_path,
+                )
+            except Exception:
+                pass
 
-        cache_df = pd.concat(
-            [load_geocode_cache(census_cache_path), load_geocode_cache(google_cache_path)],
-            ignore_index=True,
-        ).drop_duplicates(subset=["address_key"], keep="first")
+        cache_df = _combined_geocode_cache(census_cache_path, here_cache_path, google_cache_path)
         merged_df = merge_service_with_geocodes(merged_input_df, cache_df)
         if "receipt_latitude" in merged_df.columns and "receipt_longitude" in merged_df.columns:
             receipt_mask = merged_df["receipt_latitude"].notna() & merged_df["receipt_longitude"].notna()
@@ -222,12 +164,124 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
             merged_df.loc[receipt_mask, "source"] = merged_df.get("receipt_source", pd.Series(index=merged_df.index)).fillna("receipt_lookup")
         failed_mask = merged_df["source"].astype(str).eq("failed")
 
+    here_api_key = str(geocoding_cfg.get("here_api_key", "")).strip()
+    if failed_mask.any() and here_api_key:
+        with tempfile.TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+            unmatched_path = tmp_dir / "service_runtime_unmatched_here.csv"
+            unmatched_df = merged_input_df.iloc[failed_mask.to_numpy()].copy()
+            unmatched_df.to_csv(unmatched_path, index=False, encoding="utf-8-sig")
+            here = HereGeocoder(
+                api_key=here_api_key,
+                cache_path=here_cache_path,
+                attempt_log_path=here_attempt_log_path,
+                monthly_limit=int(geocoding_cfg.get("here_monthly_limit", 10000)),
+                sleep_sec=float(geocoding_cfg.get("here_sleep_sec", 0.05)),
+                min_query_score=float(geocoding_cfg.get("here_min_query_score", 0.7)),
+                min_field_score=float(geocoding_cfg.get("here_min_field_score", 0.7)),
+            )
+            here.run_for_unmatched(
+                service_path=unmatched_path,
+                census_cache_path=census_cache_path,
+                run_date=None,
+                ignore_attempt_log_once=True,
+            )
+
+        cache_df = _combined_geocode_cache(census_cache_path, here_cache_path, google_cache_path)
+        merged_df = merge_service_with_geocodes(merged_input_df, cache_df)
+        if "receipt_latitude" in merged_df.columns and "receipt_longitude" in merged_df.columns:
+            receipt_mask = merged_df["receipt_latitude"].notna() & merged_df["receipt_longitude"].notna()
+            merged_df.loc[receipt_mask, "latitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_latitude"], errors="coerce")
+            merged_df.loc[receipt_mask, "longitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_longitude"], errors="coerce")
+            merged_df.loc[receipt_mask, "source"] = merged_df.get("receipt_source", pd.Series(index=merged_df.index)).fillna("receipt_lookup")
+        failed_mask = merged_df["source"].astype(str).eq("failed")
+
+    use_pattern_retry = bool(geocoding_cfg.get("us_pattern_retry_before_google", True))
+    if failed_mask.any() and here_api_key and use_pattern_retry:
+        unmatched_df = merged_input_df.iloc[failed_mask.to_numpy()].copy()
+        if "address_key" in merged_df.columns:
+            unmatched_df["address_key"] = merged_df.loc[failed_mask, "address_key"].to_numpy()
+        elif "address_key" not in unmatched_df.columns:
+            unmatched_df["address_key"] = unmatched_df.apply(
+                lambda row: build_address_key(
+                    row.get("ADDRESS_LINE1_INFO", ""),
+                    row.get("CITY_NAME", ""),
+                    row.get("STATE_NAME", ""),
+                    row.get("POSTAL_CODE", ""),
+                    row.get("COUNTRY_NAME", ""),
+                ),
+                axis=1,
+            )
+        unmatched_df = unmatched_df.drop_duplicates(subset=["address_key"], keep="first") if "address_key" in unmatched_df.columns else unmatched_df
+        here = HereGeocoder(
+            api_key=here_api_key,
+            cache_path=here_cache_path,
+            attempt_log_path=here_attempt_log_path,
+            monthly_limit=int(geocoding_cfg.get("here_monthly_limit", 10000)),
+            sleep_sec=float(geocoding_cfg.get("here_sleep_sec", 0.05)),
+            min_query_score=float(geocoding_cfg.get("here_min_query_score", 0.7)),
+            min_field_score=float(geocoding_cfg.get("here_min_field_score", 0.7)),
+        )
+        here_cache_df = load_geocode_cache(here_cache_path)
+        here_attempt_df = pd.read_csv(here_attempt_log_path, encoding="utf-8-sig", low_memory=False) if here_attempt_log_path.exists() else pd.DataFrame()
+        run_month = pd.Timestamp.today().strftime("%Y-%m")
+        if not here_attempt_df.empty and "attempted_date" in here_attempt_df.columns:
+            monthly_used = int(here_attempt_df["attempted_date"].astype(str).str.startswith(run_month).sum())
+        else:
+            monthly_used = 0
+        monthly_limit = int(geocoding_cfg.get("here_monthly_limit", 10000))
+        monthly_remaining = max(monthly_limit - monthly_used, 0)
+        new_here_rows: list[dict[str, object]] = []
+        new_attempt_rows: list[dict[str, object]] = []
+        attempted_count = 0
+        cached_keys = set(here_cache_df["address_key"].astype(str)) if "address_key" in here_cache_df.columns else set()
+        for _, row in unmatched_df.iterrows():
+            if attempted_count >= monthly_remaining:
+                break
+            address_key = str(row.get("address_key", "")).strip()
+            if not address_key or address_key in cached_keys:
+                continue
+            variants = build_us_geocode_query_variants(row)
+            if not variants:
+                continue
+            result, attempts = here.geocode_query_variants(address_key, variants)
+            attempted_count += len(attempts)
+            new_attempt_rows.extend(attempts)
+            if result is not None:
+                new_here_rows.append(result)
+                cached_keys.add(address_key)
+
+        if new_here_rows:
+            merged_here_cache = pd.concat([here_cache_df, pd.DataFrame(new_here_rows)], ignore_index=True)
+            merged_here_cache = merged_here_cache.drop_duplicates(subset=["address_key"], keep="last").reset_index(drop=True)
+            here_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            merged_here_cache.to_csv(here_cache_path, index=False, encoding="utf-8-sig")
+        if new_attempt_rows:
+            merged_attempt_df = pd.concat([here_attempt_df, pd.DataFrame(new_attempt_rows)], ignore_index=True)
+            if "address_key" in merged_attempt_df.columns and "variant" in merged_attempt_df.columns:
+                merged_attempt_df = merged_attempt_df.drop_duplicates(subset=["address_key", "variant"], keep="last").reset_index(drop=True)
+            elif "address_key" in merged_attempt_df.columns:
+                merged_attempt_df = merged_attempt_df.drop_duplicates(subset=["address_key"], keep="last").reset_index(drop=True)
+            here_attempt_log_path.parent.mkdir(parents=True, exist_ok=True)
+            merged_attempt_df.to_csv(here_attempt_log_path, index=False, encoding="utf-8-sig")
+
+        if new_here_rows:
+            cache_df = _combined_geocode_cache(census_cache_path, here_cache_path, google_cache_path)
+            merged_df = merge_service_with_geocodes(merged_input_df, cache_df)
+            if "receipt_latitude" in merged_df.columns and "receipt_longitude" in merged_df.columns:
+                receipt_mask = merged_df["receipt_latitude"].notna() & merged_df["receipt_longitude"].notna()
+                merged_df.loc[receipt_mask, "latitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_latitude"], errors="coerce")
+                merged_df.loc[receipt_mask, "longitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_longitude"], errors="coerce")
+                merged_df.loc[receipt_mask, "source"] = merged_df.get("receipt_source", pd.Series(index=merged_df.index)).fillna("receipt_lookup")
+            failed_mask = merged_df["source"].astype(str).eq("failed")
+
     google_api_key = str(geocoding_cfg.get("google_api_key", "")).strip()
     if failed_mask.any() and google_api_key:
         with tempfile.TemporaryDirectory() as tmp_dir_str:
             tmp_dir = Path(tmp_dir_str)
             unmatched_path = tmp_dir / "service_runtime_unmatched.csv"
-            merged_input_df.loc[failed_mask].to_csv(unmatched_path, index=False, encoding="utf-8-sig")
+            unmatched_df = merged_input_df.iloc[failed_mask.to_numpy()].copy()
+            unmatched_df.to_csv(unmatched_path, index=False, encoding="utf-8-sig")
             google = GoogleGeocoder(
                 api_key=google_api_key,
                 cache_path=google_cache_path,
@@ -242,10 +296,7 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
                 ignore_attempt_log_once=True,
             )
 
-        cache_df = pd.concat(
-            [load_geocode_cache(census_cache_path), load_geocode_cache(google_cache_path)],
-            ignore_index=True,
-        ).drop_duplicates(subset=["address_key"], keep="first")
+        cache_df = _combined_geocode_cache(census_cache_path, here_cache_path, google_cache_path)
         merged_df = merge_service_with_geocodes(merged_input_df, cache_df)
         if "receipt_latitude" in merged_df.columns and "receipt_longitude" in merged_df.columns:
             receipt_mask = merged_df["receipt_latitude"].notna() & merged_df["receipt_longitude"].notna()

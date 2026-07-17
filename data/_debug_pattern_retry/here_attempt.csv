@@ -1,0 +1,3 @@
+﻿address_key,attempted_date,status,source,variant,query_score,field_score,result_type
+"1881 2ND AVENUE DECATUR ,GA ,30032|ATLANTA|GA|30339|USA",2026-06-17,LOW_QUALITY,here_geocoding_api,,,,
+"1881 2ND AVENUE DECATUR ,GA ,30032 ATLANTA ,GA ,30339|ATLANTA|GA|30339|USA",2026-06-17,OK,here_geocoding_api,embedded_city_state_zip,1.0,"{""country"": 1.0, ""state"": 1.0, ""city"": 1.0, ""streets"": [1.0], ""houseNumber"": 1.0, ""postalCode"": 1.0}",houseNumber

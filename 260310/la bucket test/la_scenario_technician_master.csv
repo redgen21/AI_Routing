@@ -1,0 +1,121 @@
+﻿employee_code,employee_name,center_type,home_address,home_city,home_state,home_country,home_postal_code,home_latitude,home_longitude,preferred_region_name,source_job_count,subsidiary_name,strategic_city_name,active_flag,priority_group,max_home_to_job_min,max_minutes
+AI104034,Shawn Weber,DMS,"135 W 53rd St long beach, CA 90805",Los Angeles,"Los Angeles, CA",USA,90805,33.92334500164709,-117.6574108842325,C,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103188,Kwang Kim,DMS,"8201 Orangethorpe Ave Suite H Buena Park, CA 90621",Los Angeles,"Los Angeles, CA",USA,90621,33.92334500164709,-117.6574108842325,F,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI104062,Luigi Gonzalez,DMS,16203 Schoenborn Str North Hills CA 91343,,"Los Angeles, CA",USA,91343,34.222561434776,-118.485315698143,A,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103301,Seyed Hosseini,DMS,"24231 Vanowen St., West Hills, CA 91307",,"Los Angeles, CA",USA,91307,34.19439604259,-118.652331022242,A,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103428,Casey Cleveland,DMS,"32959 Earlsburn Cir. Menifee, CA, 92584",,"Los Angeles, CA",USA,92584,33.64226,-117.14638,B,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI101186,Gabriel Zamora,DMS,"27693 Bluff Vista Way, Menifee, CA 92584",,"Los Angeles, CA",USA,92584,33.696414829092,-117.176066541156,B,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI102798,Amandeep Jassar,DMS,"35532 Sainte Foy St., Murrieta, CA, 92563",,"Los Angeles, CA",USA,92563,33.604634220132,-117.12760819635,B,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI105087,Freddy Bustos,DMS,"1141 W 84th Pl Los Angeles, CA 90044",,"Los Angeles, CA",USA,90044,33.961894452563,-118.294773928335,C,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI102692,Justin Mingura,DMS,"614 S Oakford Dr., East Los Angeles, CA 90022",,"Los Angeles, CA",USA,90022,34.023872743976,-118.152956897013,C,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI105047,Austin Lara,DMS,"9349 Balfour Str Pico Rivera, CA 90660",,"Los Angeles, CA",USA,90660,33.986563871839,-118.086294231861,C,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI102841,Ferdinand Dela Cruz,DMS,"1312 W Cameron St, Long Beach, CA 90810",,"Los Angeles, CA",USA,90810,33.822183992023,-118.209602458154,C,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103452,Jose Argomaniz,DMS,"1403 S Kenmore Ave, Los Angeles, CA 90006",,"Los Angeles, CA",USA,90006,34.04629870209,-118.297055953921,C,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103363,Gerald Knutson,DMS,"995 E. Lynwood Drive, San Bernardino, CA 92404",,"Los Angeles, CA",USA,92404,34.146693782369,-117.26660951387,D,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103568,Dan Hindman,DMS,"1005 N Center Ave #8204  Ontario, Ca 91764",,"Los Angeles, CA",USA,91764,34.074877265404,-117.579984078945,D,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103364,David Lamas,DMS,"17071 Pinedale Ct., Fontana, CA 92335",,"Los Angeles, CA",USA,92335,34.086195798611,-117.4319695466,D,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103104,Javier Nunez,DMS,"3106 E Hillcrest Ave, Orange, CA 92867",,"Los Angeles, CA",USA,92867,33.818119742956,-117.820626384056,E,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103803,Paul Kim,DMS,"14331 Raintree Rd, Tustin, CA, 92780",,"Los Angeles, CA",USA,92780,33.7215975388,-117.808941653231,E,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103377,Michael Tsosie,DMS,"39600 Sunrose Dr, Murrieta, CA 92562",,"Los Angeles, CA",USA,92562,33.578077388508,-117.186224268758,E,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI105051,Otoniel Vargas,DMS,"15208 Midcrest Dr Whittier, CA 90604",,"Los Angeles, CA",USA,90604,33.93188431805,-118.005989029595,F,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103410,Brian Le,DMS,"3050 W. Ball Rd. Spc 22, Anaheim, CA 92804",,"Los Angeles, CA",USA,92804,33.817338860534,-117.995465836743,F,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI105122,Sarkis Mossessian,DMS,"613 N La Reina Str  Anaheim, CA 92801",,"Los Angeles, CA",USA,92801,33.840083908832,-117.980062340191,F,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103583,Caleb Perng,DMS,"5002 Stone Ridge Dr., Chino Hills, CA 91709",,"Los Angeles, CA",USA,91709,33.967122209788,-117.695026451213,G,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI102299,Carlos A Chavez,DMS,"14425 Oakley Dr, Riverside, CA 92503",,"Los Angeles, CA",USA,92503,33.88406,-117.41086,G,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103741,Jungsu Park,DMS,"1349 Lindengrove Ave., Rowland Heights, CA 91748",,"Los Angeles, CA",USA,91748,33.991535474586,-117.876987281746,H,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103266,Kieu Chung,DMS,"1826 S. Vega St., Alhambra, CA 91801",,"Los Angeles, CA",USA,91801,34.073733770495,-118.111167699075,H,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103559,Ernesto Cover,DMS,"1015 S Novarro St West Covina, CA 91791",,"Los Angeles, CA",USA,91791,34.057199017876,-117.89622186165,H,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI102123,Simon Youde,DMS,"430 Acaso Drive, Walnut, CA 91789",,"Los Angeles, CA",USA,91789,34.016586395182,-117.878735521167,H,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103347,Juan Duran,DMS,"5553 Norwalk Blvd APT L, Whittier, CA 90601",,"Los Angeles, CA",USA,90601,33.996253996412,-118.057877587289,H,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+AI103642,Juan Alatorre,DMS,"1139 W Duarte Rd Unit A, Arcadia, CA 91007",,"Los Angeles, CA",USA,91007,34.124607870271,-118.06533411524,H,,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,,300
+43032200,MGR Appliance Inc,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,90703,34.03157608209067,-117.98770648956464,,256.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+AATOYAN,ARMAN ATOYAN,DMS2,DMS2 service centroid,ANAHEIM,CA,USA,92804,33.89322043267849,-117.96549121938965,,111.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+AKAVANOSIAN,ARUTIUN KAVANOSIAN,DMS2,DMS2 service centroid,HEMET,CA,USA,91364,33.9428898613185,-117.7752194268785,,2.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+AMURADYAN,ALBERT MURADYAN,DMS2,DMS2 service centroid,COLTON,CA,USA,92324,34.05780659393309,-117.2906437862219,,23.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+ANOVRUZYAN,ARSEN NOVRUZYAN,DMS2,DMS2 service centroid,SAN BERNARDINO,CA,USA,92407,34.12854382516983,-117.57038872224012,,18.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+ARAKA07013967,Vaghinak Arakelyan,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,93060,34.1911307256825,-118.47371411101823,,14.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+BARSEN,Barseghyan Arsen,DMS2,DMS2 service centroid,LONG BEACH,CA,USA,90713,33.88643880554604,-118.16827066748814,,94.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+DBAGHDASARYAN,DMITRI BAGHDASARYAN,DMS2,DMS2 service centroid,INGLEWOOD,CA,USA,90250,33.9101667399802,-118.33026280745857,,55.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+DDAVID,Danielyan David,DMS2,DMS2 service centroid,COVINA,CA,USA,91722,34.16053058140164,-117.65126658961003,,64.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+EMANUKYAN,EDGAR MANUKYAN,DMS2,DMS2 service centroid,BURBANK,CA,USA,91506,34.186933559187,-118.335824617468,,1.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+GASPARYANA,GASPARYAN ARA,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,90640,34.103973111662064,-118.1443793601534,,49.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+HGALSTYAN,Hrant Galstyan,DMS2,DMS2 service centroid,SAN PEDRO,CA,USA,90731,33.712783353491,-118.297573051587,,1.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+KBAGRAT,Kostanyan Bagrat,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,91326,34.22871439674495,-118.53127798155768,,59.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+KTIGRAN,Khachatryan Tigran,DMS2,DMS2 service centroid,BURBANK,CA,USA,91311,33.96468663667555,-118.12378591043121,,20.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+KVOSKANYAN,KAREN VOSKANYAN,DMS2,DMS2 service centroid,SIMI VALLEY,CA,USA,93065,34.234028664353126,-118.68579927542369,,16.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+LMANUKYAN,LEVON MANUKYAN,DMS2,DMS2 service centroid,RIVERSIDE,CA,USA,92882,33.93503613347133,-117.51511511942991,,55.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+MAGHAMALYAN,MIKAYEL AGHAMALYAN,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,90020,34.05939909792458,-118.31426743026198,,31.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+MGALSTYAN,MELIK GALSTYAN,DMS2,DMS2 service centroid,HEMET,CA,USA,92544,33.99722942554062,-117.40815348020966,,21.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+MGEVORG,Marutyan Gevorg,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,90247,33.936376623452,-118.28674405660513,,31.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+MYERITSYAN,MARTIN YERITSYAN,DMS2,DMS2 service centroid,MURRIETA,CA,USA,92563,33.65453842418112,-117.20579911402993,,26.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+NKOSTANYAN,NAREK KOSTANYAN,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,91342,34.26756370072021,-118.42490760754542,,24.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+NRIKADZE,NIKOLOZ RIKADZE,DMS2,DMS2 service centroid,IRVINE,CA,USA,92618,33.689455281955645,-117.81059259041476,,57.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+ROLANDTER,ROLAND TER-GHUKASYAN,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,91342,34.20272627197692,-118.2983618052117,,13.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+RZURNADZHIAN,RAZMIK ZURNADZHIAN,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,90049,34.04880912511478,-118.39330678702284,,46.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+SAFAA08153624,Artur Safarya,DMS2,DMS2 service centroid,ARTESIA,CA,USA,90047,33.98316475264686,-118.01430595998443,,7.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+SKOSTANYAN,SEVAK KOSTANYAN,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,91335,34.224378144927634,-118.52943742547633,,66.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+SVAHANYAN,SEDRAK VAHANYAN,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,90025,34.05988629936834,-118.30252953145232,,3.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+VAARO,VARDUMYAN ARO,DMS2,DMS2 service centroid,CERRITOS,CA,USA,90703,33.80770070283516,-117.92686951133187,,30.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+VACHIKY,Vachik Yedigaryan,DMS2,DMS2 service centroid,RANCHO CUCAMONGA,CA,USA,92336,34.1162616541046,-117.53413652611987,,60.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+VGHARIBYAN,VACHIK GHARIBYAN,DMS2,DMS2 service centroid,Gardena,CA,USA,90247,33.881397110205,-118.296275525557,,1.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+YGEVORG,Yeritsyan Gevorg,DMS2,DMS2 service centroid,GARDEN GROVE,CA,USA,92705,33.755464756983784,-117.93787324439757,,14.0,LGEAI,"Los Angeles, CA - Area Type Clusters",True,B,-1.0,1440
+AI104034,Shawn Weber,DMS,"135 W 53rd St long beach, CA 90805",Los Angeles,"Los Angeles, CA",USA,90805,33.92334500164709,-117.6574108842325,C,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103188,Kwang Kim,DMS,"8201 Orangethorpe Ave Suite H Buena Park, CA 90621",Los Angeles,"Los Angeles, CA",USA,90621,33.92334500164709,-117.6574108842325,F,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI104062,Luigi Gonzalez,DMS,16203 Schoenborn Str North Hills CA 91343,,"Los Angeles, CA",USA,91343,34.222561434776,-118.485315698143,A,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103301,Seyed Hosseini,DMS,"24231 Vanowen St., West Hills, CA 91307",,"Los Angeles, CA",USA,91307,34.19439604259,-118.652331022242,A,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103428,Casey Cleveland,DMS,"32959 Earlsburn Cir. Menifee, CA, 92584",,"Los Angeles, CA",USA,92584,33.64226,-117.14638,B,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI101186,Gabriel Zamora,DMS,"27693 Bluff Vista Way, Menifee, CA 92584",,"Los Angeles, CA",USA,92584,33.696414829092,-117.176066541156,B,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI102798,Amandeep Jassar,DMS,"35532 Sainte Foy St., Murrieta, CA, 92563",,"Los Angeles, CA",USA,92563,33.604634220132,-117.12760819635,B,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI105087,Freddy Bustos,DMS,"1141 W 84th Pl Los Angeles, CA 90044",,"Los Angeles, CA",USA,90044,33.961894452563,-118.294773928335,C,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI102692,Justin Mingura,DMS,"614 S Oakford Dr., East Los Angeles, CA 90022",,"Los Angeles, CA",USA,90022,34.023872743976,-118.152956897013,C,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI105047,Austin Lara,DMS,"9349 Balfour Str Pico Rivera, CA 90660",,"Los Angeles, CA",USA,90660,33.986563871839,-118.086294231861,C,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI102841,Ferdinand Dela Cruz,DMS,"1312 W Cameron St, Long Beach, CA 90810",,"Los Angeles, CA",USA,90810,33.822183992023,-118.209602458154,C,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103452,Jose Argomaniz,DMS,"1403 S Kenmore Ave, Los Angeles, CA 90006",,"Los Angeles, CA",USA,90006,34.04629870209,-118.297055953921,C,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103363,Gerald Knutson,DMS,"995 E. Lynwood Drive, San Bernardino, CA 92404",,"Los Angeles, CA",USA,92404,34.146693782369,-117.26660951387,D,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103568,Dan Hindman,DMS,"1005 N Center Ave #8204  Ontario, Ca 91764",,"Los Angeles, CA",USA,91764,34.074877265404,-117.579984078945,D,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103364,David Lamas,DMS,"17071 Pinedale Ct., Fontana, CA 92335",,"Los Angeles, CA",USA,92335,34.086195798611,-117.4319695466,D,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103104,Javier Nunez,DMS,"3106 E Hillcrest Ave, Orange, CA 92867",,"Los Angeles, CA",USA,92867,33.818119742956,-117.820626384056,E,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103803,Paul Kim,DMS,"14331 Raintree Rd, Tustin, CA, 92780",,"Los Angeles, CA",USA,92780,33.7215975388,-117.808941653231,E,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103377,Michael Tsosie,DMS,"39600 Sunrose Dr, Murrieta, CA 92562",,"Los Angeles, CA",USA,92562,33.578077388508,-117.186224268758,E,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI105051,Otoniel Vargas,DMS,"15208 Midcrest Dr Whittier, CA 90604",,"Los Angeles, CA",USA,90604,33.93188431805,-118.005989029595,F,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103410,Brian Le,DMS,"3050 W. Ball Rd. Spc 22, Anaheim, CA 92804",,"Los Angeles, CA",USA,92804,33.817338860534,-117.995465836743,F,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI105122,Sarkis Mossessian,DMS,"613 N La Reina Str  Anaheim, CA 92801",,"Los Angeles, CA",USA,92801,33.840083908832,-117.980062340191,F,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103583,Caleb Perng,DMS,"5002 Stone Ridge Dr., Chino Hills, CA 91709",,"Los Angeles, CA",USA,91709,33.967122209788,-117.695026451213,G,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI102299,Carlos A Chavez,DMS,"14425 Oakley Dr, Riverside, CA 92503",,"Los Angeles, CA",USA,92503,33.88406,-117.41086,G,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103741,Jungsu Park,DMS,"1349 Lindengrove Ave., Rowland Heights, CA 91748",,"Los Angeles, CA",USA,91748,33.991535474586,-117.876987281746,H,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103266,Kieu Chung,DMS,"1826 S. Vega St., Alhambra, CA 91801",,"Los Angeles, CA",USA,91801,34.073733770495,-118.111167699075,H,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103559,Ernesto Cover,DMS,"1015 S Novarro St West Covina, CA 91791",,"Los Angeles, CA",USA,91791,34.057199017876,-117.89622186165,H,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI102123,Simon Youde,DMS,"430 Acaso Drive, Walnut, CA 91789",,"Los Angeles, CA",USA,91789,34.016586395182,-117.878735521167,H,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103347,Juan Duran,DMS,"5553 Norwalk Blvd APT L, Whittier, CA 90601",,"Los Angeles, CA",USA,90601,33.996253996412,-118.057877587289,H,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+AI103642,Juan Alatorre,DMS,"1139 W Duarte Rd Unit A, Arcadia, CA 91007",,"Los Angeles, CA",USA,91007,34.124607870271,-118.06533411524,H,,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,,300
+43032200,MGR Appliance Inc,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,90703,34.03157608209067,-117.98770648956464,,256.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+AATOYAN,ARMAN ATOYAN,DMS2,DMS2 service centroid,ANAHEIM,CA,USA,92804,33.89322043267849,-117.96549121938965,,111.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+AKAVANOSIAN,ARUTIUN KAVANOSIAN,DMS2,DMS2 service centroid,HEMET,CA,USA,91364,33.9428898613185,-117.7752194268785,,2.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+AMURADYAN,ALBERT MURADYAN,DMS2,DMS2 service centroid,COLTON,CA,USA,92324,34.05780659393309,-117.2906437862219,,23.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+ANOVRUZYAN,ARSEN NOVRUZYAN,DMS2,DMS2 service centroid,SAN BERNARDINO,CA,USA,92407,34.12854382516983,-117.57038872224012,,18.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+ARAKA07013967,Vaghinak Arakelyan,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,93060,34.1911307256825,-118.47371411101823,,14.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+BARSEN,Barseghyan Arsen,DMS2,DMS2 service centroid,LONG BEACH,CA,USA,90713,33.88643880554604,-118.16827066748814,,94.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+DBAGHDASARYAN,DMITRI BAGHDASARYAN,DMS2,DMS2 service centroid,INGLEWOOD,CA,USA,90250,33.9101667399802,-118.33026280745857,,55.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+DDAVID,Danielyan David,DMS2,DMS2 service centroid,COVINA,CA,USA,91722,34.16053058140164,-117.65126658961003,,64.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+EMANUKYAN,EDGAR MANUKYAN,DMS2,DMS2 service centroid,BURBANK,CA,USA,91506,34.186933559187,-118.335824617468,,1.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+GASPARYANA,GASPARYAN ARA,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,90640,34.103973111662064,-118.1443793601534,,49.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+HGALSTYAN,Hrant Galstyan,DMS2,DMS2 service centroid,SAN PEDRO,CA,USA,90731,33.712783353491,-118.297573051587,,1.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+KBAGRAT,Kostanyan Bagrat,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,91326,34.22871439674495,-118.53127798155768,,59.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+KTIGRAN,Khachatryan Tigran,DMS2,DMS2 service centroid,BURBANK,CA,USA,91311,33.96468663667555,-118.12378591043121,,20.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+KVOSKANYAN,KAREN VOSKANYAN,DMS2,DMS2 service centroid,SIMI VALLEY,CA,USA,93065,34.234028664353126,-118.68579927542369,,16.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+LMANUKYAN,LEVON MANUKYAN,DMS2,DMS2 service centroid,RIVERSIDE,CA,USA,92882,33.93503613347133,-117.51511511942991,,55.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+MAGHAMALYAN,MIKAYEL AGHAMALYAN,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,90020,34.05939909792458,-118.31426743026198,,31.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+MGALSTYAN,MELIK GALSTYAN,DMS2,DMS2 service centroid,HEMET,CA,USA,92544,33.99722942554062,-117.40815348020966,,21.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+MGEVORG,Marutyan Gevorg,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,90247,33.936376623452,-118.28674405660513,,31.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+MYERITSYAN,MARTIN YERITSYAN,DMS2,DMS2 service centroid,MURRIETA,CA,USA,92563,33.65453842418112,-117.20579911402993,,26.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+NKOSTANYAN,NAREK KOSTANYAN,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,91342,34.26756370072021,-118.42490760754542,,24.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+NRIKADZE,NIKOLOZ RIKADZE,DMS2,DMS2 service centroid,IRVINE,CA,USA,92618,33.689455281955645,-117.81059259041476,,57.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+ROLANDTER,ROLAND TER-GHUKASYAN,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,91342,34.20272627197692,-118.2983618052117,,13.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+RZURNADZHIAN,RAZMIK ZURNADZHIAN,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,90049,34.04880912511478,-118.39330678702284,,46.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+SAFAA08153624,Artur Safarya,DMS2,DMS2 service centroid,ARTESIA,CA,USA,90047,33.98316475264686,-118.01430595998443,,7.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+SKOSTANYAN,SEVAK KOSTANYAN,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,91335,34.224378144927634,-118.52943742547633,,66.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+SVAHANYAN,SEDRAK VAHANYAN,DMS2,DMS2 service centroid,LOS ANGELES,CA,USA,90025,34.05988629936834,-118.30252953145232,,3.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+VAARO,VARDUMYAN ARO,DMS2,DMS2 service centroid,CERRITOS,CA,USA,90703,33.80770070283516,-117.92686951133187,,30.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+VACHIKY,Vachik Yedigaryan,DMS2,DMS2 service centroid,RANCHO CUCAMONGA,CA,USA,92336,34.1162616541046,-117.53413652611987,,60.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+VGHARIBYAN,VACHIK GHARIBYAN,DMS2,DMS2 service centroid,Gardena,CA,USA,90247,33.881397110205,-118.296275525557,,1.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440
+YGEVORG,Yeritsyan Gevorg,DMS2,DMS2 service centroid,GARDEN GROVE,CA,USA,92705,33.755464756983784,-117.93787324439757,,14.0,LGEAI,"Los Angeles, CA - Bucket Sim Draft",True,B,-1.0,1440

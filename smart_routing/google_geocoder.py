@@ -200,6 +200,17 @@ class GoogleGeocoder:
         )
 
     def _load_cache(self, path: Path) -> pd.DataFrame:
+        try:
+            from .common_vrp_db import load_geocode_cache_df
+
+            db_df = load_geocode_cache_df(path)
+            if not db_df.empty:
+                for col in self._empty_cache_frame().columns:
+                    if col not in db_df.columns:
+                        db_df[col] = ""
+                return db_df[self._empty_cache_frame().columns.tolist()].copy()
+        except Exception:
+            pass
         if not path.exists():
             return self._empty_cache_frame()
         df = pd.read_csv(path, encoding="utf-8-sig", low_memory=False)
@@ -230,10 +241,29 @@ class GoogleGeocoder:
         return df[self._empty_cache_frame().columns.tolist()].copy()
 
     def _save_cache(self, df: pd.DataFrame) -> None:
+        try:
+            from .common_vrp_db import cleanup_geocode_cache, upsert_geocode_cache_df
+
+            upsert_geocode_cache_df(self.cache_path, df)
+            cleanup_geocode_cache(retention_days=7)
+            return
+        except Exception:
+            pass
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(self.cache_path, index=False, encoding="utf-8-sig")
 
     def _load_attempt_log(self, path: Path) -> pd.DataFrame:
+        try:
+            from .common_vrp_db import load_geocode_attempt_log_df
+
+            db_df = load_geocode_attempt_log_df(path)
+            if not db_df.empty:
+                for col in self._empty_attempt_log_frame().columns:
+                    if col not in db_df.columns:
+                        db_df[col] = ""
+                return db_df[self._empty_attempt_log_frame().columns.tolist()].copy()
+        except Exception:
+            pass
         if not path.exists():
             return self._empty_attempt_log_frame()
         df = pd.read_csv(path, encoding="utf-8-sig", low_memory=False)
@@ -243,6 +273,14 @@ class GoogleGeocoder:
         return df[self._empty_attempt_log_frame().columns.tolist()].copy()
 
     def _save_attempt_log(self, df: pd.DataFrame) -> None:
+        try:
+            from .common_vrp_db import cleanup_geocode_cache, upsert_geocode_attempt_log_df
+
+            upsert_geocode_attempt_log_df(self.attempt_log_path, df)
+            cleanup_geocode_cache(retention_days=7)
+            return
+        except Exception:
+            pass
         self.attempt_log_path.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(self.attempt_log_path, index=False, encoding="utf-8-sig")
 

@@ -26,7 +26,7 @@ LUNCH_WINDOW_START_MIN = 30
 LUNCH_WINDOW_END_HOUR = 13
 LUNCH_WINDOW_END_MIN = 30
 LUNCH_DURATION_MIN = 60
-MAX_WORK_MIN = 480
+MAX_WORK_MIN = 540
 TV_PRODUCT_GROUP = "TV"
 REF_PRODUCT_GROUP = "REF"
 DMS_CENTER_TYPE = "DMS"
@@ -147,6 +147,10 @@ def _region_centers(service_df: pd.DataFrame) -> dict[int, tuple[float, float]]:
 def _build_engineer_master(engineer_region_df: pd.DataFrame, home_df: pd.DataFrame) -> pd.DataFrame:
     home_lookup = home_df[["SVC_ENGINEER_CODE", "latitude", "longitude"]].drop_duplicates(subset=["SVC_ENGINEER_CODE"])
     master_df = engineer_region_df.merge(home_lookup, on="SVC_ENGINEER_CODE", how="left")
+    if "latitude" not in master_df.columns and {"latitude_x", "latitude_y"}.issubset(master_df.columns):
+        master_df["latitude"] = master_df["latitude_y"].combine_first(master_df["latitude_x"])
+    if "longitude" not in master_df.columns and {"longitude_x", "longitude_y"}.issubset(master_df.columns):
+        master_df["longitude"] = master_df["longitude_y"].combine_first(master_df["longitude_x"])
     master_df["assigned_region_seq"] = pd.to_numeric(master_df["assigned_region_seq"], errors="coerce")
     if "anchor_region_seq" in master_df.columns:
         master_df["anchor_region_seq"] = pd.to_numeric(master_df["anchor_region_seq"], errors="coerce")
@@ -577,6 +581,16 @@ def _candidate_engineers(job_row: pd.Series, engineer_master_df: pd.DataFrame) -
     floating_dms2 = engineer_master_df[engineer_master_df["SVC_CENTER_TYPE"] == DMS2_CENTER_TYPE].copy()
     candidates = pd.concat([region_dms, floating_dms2], ignore_index=True)
 
+    eligible_codes_raw = job_row.get("eligible_employee_codes")
+    if isinstance(eligible_codes_raw, (list, tuple, set)):
+        eligible_codes = {
+            str(code).strip()
+            for code in eligible_codes_raw
+            if str(code).strip()
+        }
+        candidates = candidates[candidates["SVC_ENGINEER_CODE"].astype(str).isin(eligible_codes)].copy()
+        return candidates.drop_duplicates(subset=["SVC_ENGINEER_CODE"]).reset_index(drop=True)
+
     if is_heavy and product_group == REF_PRODUCT_GROUP:
         candidates = candidates[candidates["REF_HEAVY_REPAIR_FLAG"] == "Y"].copy()
     return candidates.drop_duplicates(subset=["SVC_ENGINEER_CODE"]).reset_index(drop=True)
@@ -651,7 +665,14 @@ def _estimate_group_metrics_osrm(
         return 0.0, 0.0
     coord_chain = [start_coord] + stop_coords if start_coord is not None else stop_coords
     payload = route_client.build_ordered_route(coord_chain, preserve_first=start_coord is not None)
-    return round(float(payload.get("distance_km", 0.0)), 2), round(float(payload.get("duration_min", 0.0)), 2)
+    distance_km = float(payload.get("distance_km", 0.0))
+    duration_min = float(payload.get("duration_min", 0.0))
+    ordered_coords = payload.get("ordered_coords", [])
+    if start_coord is not None and len(ordered_coords) > 1:
+        distance_mat, duration_mat = route_client.get_distance_duration_matrix(ordered_coords[:2])
+        distance_km = max(distance_km - float(distance_mat[0][1]), 0.0)
+        duration_min = max(duration_min - float(duration_mat[0][1]), 0.0)
+    return round(distance_km, 2), round(duration_min, 2)
 
 
 def _build_summary_from_assignment(
@@ -670,6 +691,7 @@ def _build_summary_from_assignment(
                 "assigned_center_type",
                 "assigned_region_seq",
                 "job_count",
+                "slot_count",
                 "service_time_min",
                 "travel_time_min",
                 "travel_distance_km",
@@ -687,6 +709,7 @@ def _build_summary_from_assignment(
         else:
             travel_distance_km, travel_time_min = _estimate_group_metrics_osrm(group_df, start_coord, route_client)
         service_time_min = float(pd.to_numeric(group_df.get("service_time_min"), errors="coerce").fillna(0).sum()) if not group_df.empty else 0.0
+        slot_count = float(pd.to_numeric(group_df.get("job_slot_count"), errors="coerce").fillna(1).sum()) if not group_df.empty else 0.0
         total_work = service_time_min + travel_time_min
         summary_rows.append(
             {
@@ -696,6 +719,7 @@ def _build_summary_from_assignment(
                 "assigned_center_type": str(engineer.get("SVC_CENTER_TYPE", "")),
                 "assigned_region_seq": engineer.get("assigned_region_seq"),
                 "job_count": int(group_df["GSFS_RECEIPT_NO"].dropna().astype(str).nunique()) if not group_df.empty else 0,
+                "slot_count": round(slot_count, 2),
                 "service_time_min": round(service_time_min, 2),
                 "travel_time_min": round(travel_time_min, 2),
                 "travel_distance_km": round(travel_distance_km, 2),
@@ -1493,7 +1517,7 @@ def _build_schedule_for_group(group_df: pd.DataFrame, route_client: OSRMTripClie
             ordered_rows.append(row_list.pop(0))
 
     coord_chain = [start_coord] + [(float(row["longitude"]), float(row["latitude"])) for row in ordered_rows] if start_coord is not None else [(float(row["longitude"]), float(row["latitude"])) for row in ordered_rows]
-    _, duration_mat = route_client.get_distance_duration_matrix(coord_chain)
+    distance_mat, duration_mat = route_client.get_distance_duration_matrix(coord_chain)
 
     base_date = pd.to_datetime(str(group_df["service_date_key"].iloc[0]), errors="coerce")
     if pd.isna(base_date):
@@ -1508,6 +1532,8 @@ def _build_schedule_for_group(group_df: pd.DataFrame, route_client: OSRMTripClie
         matrix_from = idx - 1 if start_coord is not None else max(idx - 1, 0)
         matrix_to = idx if start_coord is not None else idx - 1
         travel_min = 0.0 if idx == 1 and start_coord is None else float(duration_mat[matrix_from][matrix_to])
+        if idx == 1 and start_coord is not None:
+            travel_min = 0.0
         arrival = current_time + pd.Timedelta(minutes=travel_min)
         lunch_flag = False
         if not lunch_taken and lunch_start_window <= arrival <= lunch_end_window:
@@ -1532,6 +1558,17 @@ def _build_schedule_for_group(group_df: pd.DataFrame, route_client: OSRMTripClie
         schedule_rows.append(schedule_row)
 
     schedule_df = pd.DataFrame(schedule_rows)
+    metric_distance_km = 0.0
+    metric_duration_min = 0.0
+    first_leg_idx = 1 if start_coord is not None else 0
+    for i in range(first_leg_idx, max(len(coord_chain) - 1, 0)):
+        metric_distance_km += float(distance_mat[i][i + 1])
+        metric_duration_min += float(duration_mat[i][i + 1])
+    route_payload = {
+        **route_payload,
+        "distance_km": round(metric_distance_km, 2),
+        "duration_min": round(metric_duration_min, 2),
+    }
     return schedule_df, route_payload
 
 

@@ -20,6 +20,7 @@ from .routing_compare import (
 
 OUTPUT_DIR = Path("260310/output")
 DEFAULT_SERVICE_FILE = Path("260310/input/Service_202603181109_geocoded.csv")
+FIXED_REGION_DIR = Path("260310/input/fixed_region_maps")
 
 
 @dataclass
@@ -66,11 +67,19 @@ def _build_clients(routing_cfg: dict) -> tuple[dict[str, OSRMTripClient], OSRMTr
 
 
 def _assign_city_regions(service_city_df: pd.DataFrame, city_name: str, region_count: int) -> pd.DataFrame:
+    fixed_region_df = _load_fixed_region_map(city_name, region_count)
+    if not fixed_region_df.empty:
+        return service_city_df.merge(
+            fixed_region_df[["STRATEGIC_CITY_NAME", "POSTAL_CODE", "region_id", "region_seq"]],
+            on=["STRATEGIC_CITY_NAME", "POSTAL_CODE"],
+            how="left",
+        )
+
     postal_df = _build_postal_stats(service_city_df)
     postal_city_df = postal_df[postal_df["STRATEGIC_CITY_NAME"] == city_name].copy()
     coords = postal_city_df[["latitude", "longitude"]].to_numpy(dtype=float)
     weights = postal_city_df["service_count"].to_numpy(dtype=float)
-    labels = _weighted_kmeans(coords, weights, region_count)
+    labels = _weighted_kmeans(coords, weights, int(region_count))
     postal_city_df["region_seq"] = labels + 1
     slug = "".join(ch.lower() if ch.isalnum() else "_" for ch in city_name).strip("_")
     while "__" in slug:
@@ -83,6 +92,32 @@ def _assign_city_regions(service_city_df: pd.DataFrame, city_name: str, region_c
         how="left",
     )
     return merged
+
+
+def _slugify_city_name(city_name: str) -> str:
+    safe = "".join(ch.lower() if ch.isalnum() else "_" for ch in str(city_name))
+    while "__" in safe:
+        safe = safe.replace("__", "_")
+    return safe.strip("_")
+
+
+def fixed_region_map_path(city_name: str, region_count: int, fixed_region_dir: Path = FIXED_REGION_DIR) -> Path:
+    return fixed_region_dir / f"fixed_region_postal_{_slugify_city_name(city_name)}_{int(region_count)}.csv"
+
+
+def _load_fixed_region_map(city_name: str, region_count: int) -> pd.DataFrame:
+    path = fixed_region_map_path(city_name, region_count)
+    if not path.exists():
+        return pd.DataFrame()
+    df = pd.read_csv(path, encoding="utf-8-sig", low_memory=False)
+    required = {"STRATEGIC_CITY_NAME", "POSTAL_CODE", "region_id", "region_seq"}
+    if not required.issubset(df.columns):
+        return pd.DataFrame()
+    df = df[df["STRATEGIC_CITY_NAME"].astype(str).str.strip().eq(str(city_name).strip())].copy()
+    df["POSTAL_CODE"] = df["POSTAL_CODE"].astype(str).str.strip().str.zfill(5)
+    df["region_seq"] = pd.to_numeric(df["region_seq"], errors="coerce")
+    df = df[df["region_seq"].notna()].copy()
+    return df.drop_duplicates(subset=["STRATEGIC_CITY_NAME", "POSTAL_CODE"], keep="first").reset_index(drop=True)
 
 
 def _extract_candidate_summary(city_summary_df: pd.DataFrame) -> dict[str, float]:

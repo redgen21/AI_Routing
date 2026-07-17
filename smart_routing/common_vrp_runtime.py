@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import threading
 import uuid
+import copy
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -12,18 +14,518 @@ from .common_vrp_db import (
     COMMON_CONFIG_PATH,
     DEFAULT_HEAVY_REPAIR_LOOKUP_PATH,
     DEFAULT_SYMPTOM_FILE,
+    delete_routing_result,
+    delete_routing_requests_for_date,
     get_latest_routing_request,
+    load_common_config,
     get_routing_config,
     get_routing_request,
     get_routing_result,
+    list_avoid_areas,
     list_engineers,
+    list_jobs,
+    list_regions,
     list_heavy_repair_rules,
     upsert_routing_request,
     upsert_routing_result,
 )
 from .live_atlanta_runtime import _load_config as _load_runtime_config
 from .live_atlanta_runtime import _merge_service_geocodes
-from .vrp_api_service import create_job_id, load_result, load_status, process_job, save_new_job
+from .vrp_api_service import create_job_id, run_routing_request
+
+
+COMMON_JOB_ARCHIVE_ROOT = Path("260310/common_vrp_api_jobs")
+AREA_TYPE_DMS = {"DMS", "DMS_CORE", "DMS_ONLY"}
+AREA_TYPE_OVERLAP = {"OVERLAP", "OVERLAB"}
+AREA_TYPE_DMS2 = {"DMS2", "DMS2_EXCLUSIVE", "DMS2_ONLY"}
+AREA_TYPE_ROUTING_CITY_NAMES = set()
+AREA_TYPE_ROUTING_CITY_SUFFIXES = (" - AREA TYPE CLUSTERS", " - BUCKET SIM DRAFT")
+
+
+def _normalize_area_type(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
+
+
+def _area_type_eligible_codes(
+    area_type: object,
+    dms_codes: set[str],
+    dms2_codes: set[str],
+) -> list[str]:
+    normalized = _normalize_area_type(area_type)
+    if normalized in AREA_TYPE_DMS:
+        # DMS areas are attempted by DMS first in the solver cost model.
+        # DMS2 stays eligible as a fallback so remaining DMS-area jobs are
+        # assigned instead of left unassigned when DMS capacity is exhausted.
+        return sorted(dms_codes | dms2_codes)
+    if normalized in AREA_TYPE_OVERLAP:
+        return sorted(dms_codes | dms2_codes)
+    if normalized in AREA_TYPE_DMS2:
+        return sorted(dms2_codes)
+    return []
+
+
+def _uses_area_type_routing(strategic_city_name: object) -> bool:
+    city = str(strategic_city_name or "").strip().upper()
+    return city in AREA_TYPE_ROUTING_CITY_NAMES or any(city.endswith(suffix) for suffix in AREA_TYPE_ROUTING_CITY_SUFFIXES)
+
+
+def _apply_job_area_type_rules(
+    jobs: list[dict[str, Any]],
+    technicians: list[dict[str, Any]],
+    subsidiary_name: str,
+    strategic_city_name: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> list[dict[str, Any]]:
+    if not jobs:
+        return []
+    if not _uses_area_type_routing(strategic_city_name):
+        stripped_jobs: list[dict[str, Any]] = []
+        for job in jobs:
+            stripped_job = dict(job)
+            stripped_job.pop("area_type", None)
+            stripped_job.pop("eligible_employee_codes", None)
+            stripped_jobs.append(stripped_job)
+        return stripped_jobs
+
+    active_codes = {
+        str(tech.get("employee_code", "")).strip()
+        for tech in technicians
+        if str(tech.get("employee_code", "")).strip()
+    }
+    dms_codes = {
+        str(tech.get("employee_code", "")).strip()
+        for tech in technicians
+        if str(tech.get("employee_code", "")).strip()
+        and str(tech.get("center_type", "")).strip().upper() == "DMS"
+    }
+    dms2_codes = {
+        str(tech.get("employee_code", "")).strip()
+        for tech in technicians
+        if str(tech.get("employee_code", "")).strip()
+        and str(tech.get("center_type", "")).strip().upper() == "DMS2"
+    }
+    if not dms_codes and not dms2_codes:
+        engineer_df = list_engineers(subsidiary_name, strategic_city_name, config_path=config_path)
+        for _, row in engineer_df.iterrows():
+            code = str(row.get("employee_code", "")).strip()
+            if not code or (active_codes and code not in active_codes):
+                continue
+            center_type = str(row.get("center_type", "")).strip().upper()
+            if center_type == "DMS":
+                dms_codes.add(code)
+            elif center_type == "DMS2":
+                dms2_codes.add(code)
+
+    region_area_lookup: dict[str, str] = {}
+    region_df = list_regions(subsidiary_name, strategic_city_name, config_path=config_path)
+    if not region_df.empty and {"postal_code", "area_type"}.issubset(region_df.columns):
+        for _, row in region_df.iterrows():
+            postal_code = str(row.get("postal_code", "")).strip().replace(".0", "")
+            postal_code = postal_code.zfill(5) if postal_code else ""
+            if postal_code:
+                region_area_lookup[postal_code] = _normalize_area_type(row.get("area_type"))
+
+    enriched_jobs: list[dict[str, Any]] = []
+    for job in jobs:
+        enriched_job = dict(job)
+        postal_code = str(job.get("postal_code", "") or job.get("zip_code", "")).strip().replace(".0", "")
+        postal_code = postal_code.zfill(5) if postal_code else ""
+        area_type = _normalize_area_type(job.get("area_type")) or region_area_lookup.get(postal_code, "")
+        if area_type:
+            area_eligible = set(_area_type_eligible_codes(area_type, dms_codes, dms2_codes))
+            existing_eligible = job.get("eligible_employee_codes")
+            if isinstance(existing_eligible, (list, tuple, set)) and existing_eligible:
+                existing_codes = {str(code).strip() for code in existing_eligible if str(code).strip()}
+                area_eligible &= existing_codes
+            if area_eligible:
+                enriched_job["area_type"] = area_type
+                enriched_job["eligible_employee_codes"] = sorted(area_eligible)
+        enriched_jobs.append(enriched_job)
+    return enriched_jobs
+
+
+def _coerce_bool_value(value: object, default: bool = False) -> bool:
+    if pd.isna(value):
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "1", "y", "yes", "t"}:
+        return True
+    if text in {"false", "0", "n", "no", "f", ""}:
+        return False
+    return default
+
+
+def _priority_load_config(value: object) -> tuple[int, int]:
+    numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.notna(numeric):
+        priority_group = int(numeric)
+    else:
+        text = str(value or "").strip().upper()
+        if text in {"A", "HIGH", "P3", "PRIORITY 3"}:
+            priority_group = 3
+        elif text in {"C", "LOW", "P1", "PRIORITY 1"}:
+            priority_group = 1
+        else:
+            priority_group = 2
+    priority_group = min(max(priority_group, 1), 3)
+    return priority_group, 8
+
+
+def _priority_group_label(value: object) -> str:
+    priority_group, _ = _priority_load_config(value)
+    return {3: "A", 2: "B", 1: "C"}.get(priority_group, "B")
+
+
+def _shift_minutes(start_value: object, end_value: object, default_minutes: int = 540) -> int:
+    start = pd.to_datetime(str(start_value or ""), format="%H:%M", errors="coerce")
+    end = pd.to_datetime(str(end_value or ""), format="%H:%M", errors="coerce")
+    if pd.isna(start) or pd.isna(end):
+        return int(default_minutes)
+    minutes = int((end - start).total_seconds() / 60)
+    if minutes <= 0:
+        minutes += 24 * 60
+    return max(1, minutes)
+
+
+def _slot_based_max_minutes(slot_count: int, shift_minutes: int) -> int:
+    slot_minutes = (max(0, int(slot_count)) + 1) * 60
+    return max(1, min(int(shift_minutes), int(slot_minutes)))
+
+
+def _positive_float_or_none(value: object) -> float | None:
+    numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.isna(numeric) or float(numeric) <= 0:
+        return None
+    return float(numeric)
+
+
+def _default_time_limit_seconds(job_count: int, technician_count: int) -> int:
+    if job_count <= 30:
+        return 15
+    if job_count <= 60:
+        return 30
+    if job_count <= 100:
+        return 60
+    if job_count <= 150:
+        return 90
+    return 120
+
+
+def _routing_config_with_fallback(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> dict[str, Any]:
+    config_row = get_routing_config(subsidiary_name, strategic_city_name, config_path=config_path) or {}
+    seed = load_common_config(config_path).get("routing_seed", {}) or {}
+    city_osrm_urls = seed.get("city_osrm_urls", {}) or {}
+    city_overrides = seed.get("city_overrides", {}) or {}
+    fallback = dict(seed)
+    fallback.pop("city_osrm_urls", None)
+    fallback.pop("city_overrides", None)
+    fallback["osrm_url"] = city_osrm_urls.get(str(strategic_city_name), seed.get("osrm_url"))
+    override = city_overrides.get(str(strategic_city_name), {})
+    if isinstance(override, dict):
+        fallback.update(override)
+    nullable_constraint_keys = {
+        "max_travel_min_per_sm_day",
+        "max_travel_km_per_sm_day",
+        "max_single_leg_min",
+        "max_home_to_job_min",
+        "long_leg_penalty_start_min",
+        "long_leg_penalty_multiplier",
+    }
+    for key, value in config_row.items():
+        if value is not None or key in nullable_constraint_keys:
+            fallback[key] = value
+    return fallback
+
+
+def _build_server_routing_options(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> dict[str, Any]:
+    routing_config = _routing_config_with_fallback(subsidiary_name, strategic_city_name, config_path=config_path)
+    avoid_polygons: list[dict[str, Any]] = []
+    avoid_area_df = list_avoid_areas(subsidiary_name, strategic_city_name, active_only=True, config_path=config_path)
+    if not avoid_area_df.empty:
+        for _, area_row in avoid_area_df.iterrows():
+            try:
+                geometry = json.loads(str(area_row.get("geometry_json", "")).strip())
+            except Exception:
+                continue
+            avoid_polygons.append(
+                {
+                    "id": str(area_row.get("avoid_area_id", "")).strip(),
+                    "name": str(area_row.get("area_name", "")).strip(),
+                    "geometry": geometry,
+                }
+            )
+    return {
+        "timezone_offset": str(routing_config.get("timezone_offset", "-04:00")).strip() or "-04:00",
+        "avoid_polygons": avoid_polygons,
+        "avoid_penalty_multiplier": 4.0,
+        "max_work_min_per_sm_day": _positive_float_or_none(routing_config.get("max_work_min_per_sm_day")),
+        "max_travel_min_per_sm_day": _positive_float_or_none(routing_config.get("max_travel_min_per_sm_day")),
+        "max_travel_km_per_sm_day": _positive_float_or_none(routing_config.get("max_travel_km_per_sm_day")),
+        "max_single_leg_min": _positive_float_or_none(routing_config.get("max_single_leg_min")),
+        "max_home_to_job_min": _positive_float_or_none(routing_config.get("max_home_to_job_min")),
+        "long_leg_penalty_start_min": _positive_float_or_none(routing_config.get("long_leg_penalty_start_min")),
+        "long_leg_penalty_multiplier": _positive_float_or_none(routing_config.get("long_leg_penalty_multiplier")),
+    }
+
+
+def _with_server_routing_options(
+    payload: dict[str, Any],
+    subsidiary_name: str,
+    strategic_city_name: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> dict[str, Any]:
+    execution_payload = copy.deepcopy(payload)
+    options = dict(execution_payload.get("options") or {})
+    options.update(_build_server_routing_options(subsidiary_name, strategic_city_name, config_path=config_path))
+    execution_payload["options"] = options
+
+    active_employee_codes = {
+        str(tech.get("employee_code", "")).strip()
+        for tech in list(execution_payload.get("technicians", []))
+        if str(tech.get("employee_code", "")).strip()
+    }
+    capabilities = _normalize_capabilities(
+        list(execution_payload.get("capabilities", [])),
+        allowed_employee_codes=active_employee_codes or None,
+    )
+    execution_payload["capabilities"] = capabilities
+    heavy_jobs = _enrich_jobs_heavy_repair(list(execution_payload.get("jobs", [])), config_path=config_path)
+    area_jobs = _apply_job_area_type_rules(
+        heavy_jobs,
+        list(execution_payload.get("technicians", [])),
+        subsidiary_name,
+        strategic_city_name,
+        config_path=config_path,
+    )
+    execution_payload["jobs"] = _apply_job_capabilities(
+        area_jobs,
+        capabilities,
+    )
+
+    engineer_master_df = list_engineers(subsidiary_name, strategic_city_name, config_path=config_path)
+    home_to_job_lookup: dict[str, int] = {}
+    if not engineer_master_df.empty and "max_home_to_job_min" in engineer_master_df.columns:
+        for _, row in engineer_master_df.iterrows():
+            employee_code = str(row.get("employee_code", "")).strip()
+            home_to_job_min = pd.to_numeric(pd.Series([row.get("max_home_to_job_min")]), errors="coerce").iloc[0]
+            if employee_code and pd.notna(home_to_job_min):
+                home_to_job_lookup[employee_code] = int(home_to_job_min)
+
+    technicians: list[dict[str, Any]] = []
+    for tech in list(execution_payload.get("technicians", [])):
+        enriched_tech = dict(tech)
+        employee_code = str(enriched_tech.get("employee_code", "")).strip()
+        if employee_code in home_to_job_lookup:
+            enriched_tech["max_home_to_job_min"] = home_to_job_lookup[employee_code]
+        technicians.append(enriched_tech)
+    execution_payload["technicians"] = technicians
+    return execution_payload
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _stable_request_id(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    promise_date: str,
+    mode: str,
+) -> str:
+    raw = f"{subsidiary_name}_{strategic_city_name}_{promise_date}_{mode}".strip()
+    return "common_" + "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in raw)
+
+
+def _parse_iso_datetime(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    normalized = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _load_storage_config(config_path: Path = COMMON_CONFIG_PATH) -> dict[str, Any]:
+    storage_cfg = load_common_config(config_path).get("storage", {}) or {}
+    retention_days = int(storage_cfg.get("job_file_retention_days", 5) or 5)
+    return {
+        "save_job_files": bool(storage_cfg.get("save_job_files", False)),
+        "job_file_retention_days": max(retention_days, 1),
+    }
+
+
+def _cleanup_common_job_archives(retention_days: int) -> None:
+    if not COMMON_JOB_ARCHIVE_ROOT.exists():
+        return
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(int(retention_days), 1))
+    for job_dir in COMMON_JOB_ARCHIVE_ROOT.iterdir():
+        if not job_dir.is_dir():
+            continue
+        status_path = job_dir / "status.json"
+        created_at: datetime | None = None
+        if status_path.exists():
+            try:
+                status_payload = json.loads(status_path.read_text(encoding="utf-8"))
+            except Exception:
+                status_payload = {}
+            created_at = _parse_iso_datetime(status_payload.get("created_at"))
+        if created_at is None:
+            created_at = datetime.fromtimestamp(job_dir.stat().st_mtime, tz=timezone.utc)
+        if created_at >= cutoff:
+            continue
+        for path in sorted(job_dir.glob("**/*"), reverse=True):
+            if path.is_file():
+                path.unlink(missing_ok=True)
+        for path in sorted(job_dir.glob("**/*"), reverse=True):
+            if path.is_dir():
+                path.rmdir()
+        job_dir.rmdir()
+
+
+def _write_common_job_archive(
+    routing_job_id: str,
+    *,
+    request_payload: dict[str, Any] | None = None,
+    status_payload: dict[str, Any] | None = None,
+    result_payload: dict[str, Any] | None = None,
+    error_message: str | None = None,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> None:
+    storage_cfg = _load_storage_config(config_path)
+    if not storage_cfg["save_job_files"]:
+        return
+    COMMON_JOB_ARCHIVE_ROOT.mkdir(parents=True, exist_ok=True)
+    _cleanup_common_job_archives(storage_cfg["job_file_retention_days"])
+    job_dir = COMMON_JOB_ARCHIVE_ROOT / str(routing_job_id).strip()
+    job_dir.mkdir(parents=True, exist_ok=True)
+    if request_payload is not None:
+        (job_dir / "request.json").write_text(
+            json.dumps(request_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    if status_payload is not None:
+        (job_dir / "status.json").write_text(
+            json.dumps(status_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    if result_payload is not None:
+        (job_dir / "result.json").write_text(
+            json.dumps(result_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    error_path = job_dir / "error.txt"
+    if error_message:
+        error_path.write_text(str(error_message), encoding="utf-8")
+    elif error_path.exists():
+        error_path.unlink()
+
+
+def _update_routing_request_status(
+    request_row: dict[str, Any],
+    status_payload: dict[str, Any],
+    *,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> None:
+    updated_row = dict(request_row)
+    updated_row["routing_status"] = str(status_payload.get("status", "")).strip()
+    updated_row["status_json"] = json.dumps(status_payload, ensure_ascii=False)
+    upsert_routing_request(updated_row, config_path=config_path)
+
+
+def _process_common_routing_job(
+    request_id: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> None:
+    request_row = get_routing_request(request_id, config_path=config_path)
+    if not request_row:
+        return
+    routing_job_id = str(request_row.get("routing_job_id", "")).strip()
+    payload_text = str(request_row.get("payload_json", "") or "{}")
+    request_payload = json.loads(payload_text)
+    subsidiary_name = str(request_row.get("subsidiary_name", "")).strip()
+    strategic_city_name = str(request_row.get("strategic_city_name", "")).strip()
+    queued_status = {
+        "job_id": routing_job_id,
+        "status": "queued",
+        "request_id": request_id,
+        "mode": str(request_payload.get("mode", "")).strip(),
+        "city": str(request_payload.get("city", "")).strip(),
+        "created_at": _utc_now_iso(),
+        "updated_at": _utc_now_iso(),
+    }
+    running_status = dict(queued_status)
+    running_status["status"] = "running"
+    running_status["started_at"] = _utc_now_iso()
+    running_status["updated_at"] = _utc_now_iso()
+    _update_routing_request_status(request_row, running_status, config_path=config_path)
+    _write_common_job_archive(
+        routing_job_id,
+        request_payload=request_payload,
+        status_payload=running_status,
+        config_path=config_path,
+    )
+    try:
+        execution_payload = _with_server_routing_options(
+            request_payload,
+            subsidiary_name,
+            strategic_city_name,
+            config_path=config_path,
+        )
+        result_payload = run_routing_request(execution_payload)
+        completed_status = dict(running_status)
+        completed_status["status"] = "completed"
+        completed_status["completed_at"] = _utc_now_iso()
+        completed_status["updated_at"] = _utc_now_iso()
+        completed_status["summary"] = result_payload.get("summary", {})
+        _update_routing_request_status(request_row, completed_status, config_path=config_path)
+        upsert_routing_result(
+            {
+                "request_id": request_id,
+                "routing_job_id": routing_job_id,
+                "result_json": json.dumps(result_payload, ensure_ascii=False),
+            },
+            config_path=config_path,
+        )
+        _write_common_job_archive(
+            routing_job_id,
+            request_payload=request_payload,
+            status_payload=completed_status,
+            result_payload=result_payload,
+            config_path=config_path,
+        )
+    except Exception as exc:
+        failed_status = dict(running_status)
+        failed_status["status"] = "failed"
+        failed_status["completed_at"] = _utc_now_iso()
+        failed_status["updated_at"] = _utc_now_iso()
+        failed_status["error_message"] = str(exc)
+        _update_routing_request_status(request_row, failed_status, config_path=config_path)
+        _write_common_job_archive(
+            routing_job_id,
+            request_payload=request_payload,
+            status_payload=failed_status,
+            error_message=str(exc),
+            config_path=config_path,
+        )
 
 
 def _normalize_heavy_repair_rules(rule_df: pd.DataFrame) -> pd.DataFrame:
@@ -59,9 +561,106 @@ def _load_fallback_heavy_repair_rules() -> pd.DataFrame:
     return _normalize_heavy_repair_rules(lookup_df)
 
 
+def _normalize_capabilities(capability_rows: list[dict[str, Any]], allowed_employee_codes: set[str] | None = None) -> list[dict[str, Any]]:
+    if not capability_rows:
+        return []
+
+    def _coerce_bool(value: object, default: bool = False) -> bool:
+        if pd.isna(value):
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        text = str(value).strip().lower()
+        if text in {"true", "1", "y", "yes", "t"}:
+            return True
+        if text in {"false", "0", "n", "no", "f", ""}:
+            return False
+        return bool(text)
+
+    normalized_rows: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str, str]] = set()
+    for row in capability_rows:
+        employee_code = str(row.get("employee_code", "")).strip()
+        product_group_code = str(row.get("product_group_code", "")).strip().upper()
+        product_code = str(row.get("product_code", "")).strip().upper()
+        if not employee_code or not product_group_code:
+            continue
+        if allowed_employee_codes is not None and employee_code not in allowed_employee_codes:
+            continue
+        repair_allowed = _coerce_bool(row.get("repair_allowed", True), default=True)
+        if not repair_allowed:
+            continue
+        capability_key = (employee_code, product_group_code, product_code)
+        if capability_key in seen_keys:
+            continue
+        seen_keys.add(capability_key)
+        normalized_rows.append(
+            {
+                "employee_code": employee_code,
+                "product_group_code": product_group_code,
+                "product_code": product_code,
+                "heavy_repair_allowed": _coerce_bool(row.get("heavy_repair_allowed", True), default=True),
+            }
+        )
+    return normalized_rows
+
+
+def _apply_job_capabilities(jobs: list[dict[str, Any]], capabilities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not jobs:
+        return []
+    if not capabilities:
+        return [dict(job) for job in jobs]
+
+    capability_lookup: dict[tuple[str, str], dict[str, set[str]]] = {}
+    group_capability_lookup: dict[str, dict[str, set[str]]] = {}
+    for capability in capabilities:
+        employee_code = str(capability.get("employee_code", "")).strip()
+        product_group_code = str(capability.get("product_group_code", "")).strip().upper()
+        product_code = str(capability.get("product_code", "")).strip().upper()
+        if not employee_code or not product_group_code:
+            continue
+        bucket = (
+            capability_lookup.setdefault((product_group_code, product_code), {"all": set(), "heavy": set()})
+            if product_code
+            else group_capability_lookup.setdefault(product_group_code, {"all": set(), "heavy": set()})
+        )
+        bucket["all"].add(employee_code)
+        if bool(capability.get("heavy_repair_allowed", True)):
+            bucket["heavy"].add(employee_code)
+
+    enriched_jobs: list[dict[str, Any]] = []
+    for job in jobs:
+        enriched_job = dict(job)
+        lookup_key = (
+            str(job.get("product_group", "")).strip().upper(),
+            str(job.get("product", "")).strip().upper(),
+        )
+        matched = capability_lookup.get(lookup_key)
+        if matched is None:
+            matched = group_capability_lookup.get(lookup_key[0], {"all": set(), "heavy": set()})
+        if bool(job.get("is_heavy_repair", False)):
+            eligible_codes = sorted(matched["heavy"])
+        else:
+            eligible_codes = sorted(matched["all"])
+        existing_eligible = job.get("eligible_employee_codes")
+        if isinstance(existing_eligible, (list, tuple, set)) and existing_eligible:
+            existing_codes = {str(code).strip() for code in existing_eligible if str(code).strip()}
+            intersected_codes = sorted(set(eligible_codes) & existing_codes)
+            eligible_codes = intersected_codes or sorted(existing_codes)
+        if eligible_codes:
+            enriched_job["eligible_employee_codes"] = eligible_codes
+        else:
+            enriched_job.pop("eligible_employee_codes", None)
+        enriched_jobs.append(enriched_job)
+    return enriched_jobs
+
+
 def _build_payload_from_dataframes(
     jobs_df: pd.DataFrame,
     technicians_df: pd.DataFrame,
+    capability_rows: list[dict[str, Any]],
     subsidiary_name: str,
     strategic_city_name: str,
     promise_date: str,
@@ -73,22 +672,73 @@ def _build_payload_from_dataframes(
     if technicians_df.empty:
         raise ValueError("No technician list found for the selected PROMISE_DATE.")
 
+    engineer_master_df = list_engineers(subsidiary_name, strategic_city_name, config_path=config_path)
+    active_flag_lookup = {
+        str(row.get("employee_code", "")).strip(): _coerce_bool_value(row.get("active_flag", True), default=True)
+        for _, row in engineer_master_df.iterrows()
+        if str(row.get("employee_code", "")).strip()
+    }
+    technicians_df = technicians_df.copy()
+    technicians_df["available"] = technicians_df["available"].fillna(False).astype(bool)
+    technicians_df["available"] = technicians_df.apply(
+        lambda row: bool(row.get("available", False))
+        and active_flag_lookup.get(str(row.get("employee_code", "")).strip(), True),
+        axis=1,
+    )
     active_technicians = technicians_df[technicians_df["available"].fillna(False).astype(bool)].copy()
     if active_technicians.empty:
         raise ValueError("No available technicians selected.")
+    master_employee_codes = {
+        str(code).strip()
+        for code in engineer_master_df.get("employee_code", pd.Series(dtype=str)).astype(str).tolist()
+        if str(code).strip()
+    }
+    if master_employee_codes:
+        active_technicians = active_technicians[
+            active_technicians["employee_code"].astype(str).str.strip().isin(master_employee_codes)
+        ].copy()
+    if active_technicians.empty:
+        raise ValueError("No available technicians with technician master rows selected.")
+    active_employee_codes = {
+        str(code).strip()
+        for code in active_technicians.get("employee_code", pd.Series(dtype=str)).astype(str).tolist()
+        if str(code).strip()
+    }
 
-    engineer_master_df = list_engineers(subsidiary_name, strategic_city_name, config_path=config_path)
-    routing_config = get_routing_config(subsidiary_name, strategic_city_name, config_path=config_path) or {}
+    jobs_df = jobs_df.copy()
+    if "reschedule" not in jobs_df.columns:
+        jobs_df["reschedule"] = False
+    jobs_df["reschedule"] = jobs_df["reschedule"].map(lambda value: _coerce_bool_value(value, default=False))
+    if "fixed" not in jobs_df.columns:
+        jobs_df["fixed"] = False
+    jobs_df["fixed"] = jobs_df["fixed"].map(lambda value: _coerce_bool_value(value, default=False))
+    if {"gsfs_receipt_no", "promise_date"}.issubset(jobs_df.columns):
+        all_jobs_df = list_jobs(subsidiary_name, strategic_city_name, config_path=config_path)
+        if not all_jobs_df.empty and {"gsfs_receipt_no", "promise_date"}.issubset(all_jobs_df.columns):
+            historical_pairs = {
+                (str(row.get("gsfs_receipt_no", "")).strip(), str(row.get("promise_date", "")).strip())
+                for _, row in all_jobs_df.iterrows()
+                if str(row.get("gsfs_receipt_no", "")).strip() and str(row.get("promise_date", "")).strip()
+            }
+            current_receipts = jobs_df["gsfs_receipt_no"].astype(str).str.strip()
+            current_dates = jobs_df["promise_date"].astype(str).str.strip()
+            historical_mask = [
+                any(receipt == historical_receipt and date != historical_date for historical_receipt, historical_date in historical_pairs)
+                for receipt, date in zip(current_receipts, current_dates)
+            ]
+            jobs_df["reschedule"] = jobs_df["reschedule"].astype(bool) | pd.Series(historical_mask, index=jobs_df.index)
+    jobs_df["reschedule"] = (jobs_df["reschedule"].astype(bool) & ~jobs_df["fixed"].astype(bool)).astype(bool)
 
     state_value = str(jobs_df["state_name"].dropna().astype(str).iloc[0]).strip() if "state_name" in jobs_df.columns else ""
     custom_geo_rows: list[dict[str, Any]] = []
+    missing_home_geo_rows: list[dict[str, Any]] = []
     tech_location_lookup: dict[str, tuple[float, float]] = {}
 
     for _, tech in active_technicians.iterrows():
         employee_code = str(tech["employee_code"]).strip()
         master_row = engineer_master_df[engineer_master_df["employee_code"].astype(str) == employee_code].head(1)
         if master_row.empty:
-            raise ValueError(f"Missing technician master row for {employee_code}")
+            continue
         master_row = master_row.iloc[0]
 
         start_type = str(tech.get("start_location_type", "Home")).strip() or "Home"
@@ -111,17 +761,34 @@ def _build_payload_from_dataframes(
         home_lat = pd.to_numeric(master_row.get("home_latitude"), errors="coerce")
         home_lng = pd.to_numeric(master_row.get("home_longitude"), errors="coerce")
         if pd.isna(home_lat) or pd.isna(home_lng):
-            raise ValueError(f"Missing home coordinates for technician {employee_code}")
+            home_address = str(master_row.get("home_address", "")).strip()
+            home_city = str(master_row.get("home_city", "")).strip()
+            home_state = str(master_row.get("home_state", state_value)).strip() or state_value
+            home_postal_code = str(master_row.get("home_postal_code", "")).strip().replace(".0", "")
+            if not any([home_address, home_city, home_state, home_postal_code]):
+                raise ValueError(f"Missing home coordinates for technician {employee_code}")
+            missing_home_geo_rows.append(
+                {
+                    "GSFS_RECEIPT_NO": employee_code,
+                    "ADDRESS_LINE1_INFO": home_address,
+                    "CITY_NAME": home_city,
+                    "STATE_NAME": home_state,
+                    "COUNTRY_NAME": str(master_row.get("home_country", "USA")).strip() or "USA",
+                    "POSTAL_CODE": home_postal_code,
+                }
+            )
+            continue
         tech_location_lookup[employee_code] = (float(home_lat), float(home_lng))
 
-    if custom_geo_rows:
-        geocoded_custom_df = _merge_service_geocodes(pd.DataFrame(custom_geo_rows), _load_runtime_config())
+    geo_rows = custom_geo_rows + missing_home_geo_rows
+    if geo_rows:
+        geocoded_custom_df = _merge_service_geocodes(pd.DataFrame(geo_rows), _load_runtime_config())
         geocoded_custom_df["latitude"] = pd.to_numeric(geocoded_custom_df.get("latitude"), errors="coerce")
         geocoded_custom_df["longitude"] = pd.to_numeric(geocoded_custom_df.get("longitude"), errors="coerce")
         failed_df = geocoded_custom_df[geocoded_custom_df["latitude"].isna() | geocoded_custom_df["longitude"].isna()].copy()
         if not failed_df.empty:
             failed_codes = ", ".join(failed_df["GSFS_RECEIPT_NO"].astype(str).tolist())
-            raise ValueError(f"Failed to geocode technician start locations: {failed_codes}")
+            raise ValueError(f"Failed to geocode technician home/start locations: {failed_codes}")
         tech_location_lookup.update(
             {
                 str(row["GSFS_RECEIPT_NO"]).strip(): (float(row["latitude"]), float(row["longitude"]))
@@ -156,6 +823,20 @@ def _build_payload_from_dataframes(
         if code not in tech_location_lookup:
             raise ValueError(f"Missing start location for technician {code}")
         lat, lng = tech_location_lookup[code]
+        priority_score, _priority_default_max_jobs = _priority_load_config(tech.get("priority_group", "B"))
+        priority_group = _priority_group_label(priority_score)
+        shift_start = str(tech.get("shift_start", "08:00")).strip() or "08:00"
+        shift_end = str(tech.get("shift_end", "18:00")).strip() or "18:00"
+        slot_capacity = pd.to_numeric(pd.Series([tech.get("slot_count", 8)]), errors="coerce").iloc[0]
+        max_slots = int(slot_capacity) if pd.notna(slot_capacity) else 8
+        max_slots = max(0, max_slots)
+        shift_minutes = _shift_minutes(shift_start, shift_end, default_minutes=540)
+        configured_max_minutes = pd.to_numeric(pd.Series([tech.get("max_minutes")]), errors="coerce").iloc[0]
+        max_minutes = (
+            max(1, int(configured_max_minutes))
+            if pd.notna(configured_max_minutes) and float(configured_max_minutes) > 0
+            else _slot_based_max_minutes(max_slots, shift_minutes)
+        )
         technicians_payload.append(
             {
                 "employee_code": code,
@@ -163,10 +844,14 @@ def _build_payload_from_dataframes(
                 "center_type": str(tech.get("center_type", "DMS")).strip().upper() or "DMS",
                 "start_location": {"lat": float(lat), "lng": float(lng)},
                 "end_location": {"lat": float(lat), "lng": float(lng)},
-                "shift_start": str(tech.get("shift_start", "08:00")).strip() or "08:00",
-                "shift_end": str(tech.get("shift_end", "18:00")).strip() or "18:00",
-                "slot_count": int(pd.to_numeric(tech.get("slot_count", 8), errors="coerce")) if pd.notna(pd.to_numeric(tech.get("slot_count", 8), errors="coerce")) else 8,
-                "max_jobs": int(pd.to_numeric(tech.get("max_jobs", 8), errors="coerce")) if pd.notna(pd.to_numeric(tech.get("max_jobs", 8), errors="coerce")) else 8,
+                "shift_start": shift_start,
+                "shift_end": shift_end,
+                "max_minutes": max_minutes,
+                "slot_count": max_slots,
+                "priority_group": priority_group,
+                "preferred_region_name": str(tech.get("preferred_region_name", tech.get("preferred_area_name", ""))).strip(),
+                "max_jobs": max_slots,
+                "max_slots": max_slots,
             }
         )
 
@@ -175,48 +860,80 @@ def _build_payload_from_dataframes(
         for _, r in engineer_master_df.iterrows()
         if str(r.get("employee_code", "")).strip()
     }
-
-    def _coerce_bool_value(value: object) -> bool:
-        if pd.isna(value):
-            return False
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return bool(value)
-        text = str(value).strip().lower()
-        if text in {"true", "1", "y", "yes", "t"}:
-            return True
-        if text in {"false", "0", "n", "no", "f", ""}:
-            return False
-        return bool(text)
+    active_center_lookup = {
+        str(tech.get("employee_code", "")).strip(): str(tech.get("center_type", "")).strip().upper()
+        for _, tech in active_technicians.iterrows()
+        if str(tech.get("employee_code", "")).strip()
+    }
+    for code, center_type in engineer_center_type_lookup.items():
+        if code in active_employee_codes and not active_center_lookup.get(code):
+            active_center_lookup[code] = center_type
+    dms_codes = {
+        code
+        for code, center_type in active_center_lookup.items()
+        if code in active_employee_codes and center_type == "DMS"
+    }
+    dms2_codes = {
+        code
+        for code, center_type in active_center_lookup.items()
+        if code in active_employee_codes and center_type == "DMS2"
+    }
+    region_area_lookup: dict[str, dict[str, Any]] = {}
+    region_df = list_regions(subsidiary_name, strategic_city_name, config_path=config_path)
+    if not region_df.empty and "postal_code" in region_df.columns:
+        for _, region_row in region_df.iterrows():
+            postal_code = str(region_row.get("postal_code", "")).strip().replace(".0", "")
+            postal_code = postal_code.zfill(5) if postal_code else ""
+            if not postal_code:
+                continue
+            region_area_lookup[postal_code] = {
+                "area_type": _normalize_area_type(region_row.get("area_type")),
+                "region_seq": region_row.get("region_seq"),
+                "region_name": region_row.get("region_name"),
+            }
 
     jobs_payload: list[dict[str, Any]] = []
-    timezone_offset = str(routing_config.get("timezone_offset", "-04:00")).strip() or "-04:00"
     for _, row in jobs_df.iterrows():
         product_group = str(row.get("service_product_group_code", "")).strip().upper()
         product_code = str(row.get("service_product_code", "")).strip().upper()
         symptom = str(row.get("receipt_detail_symptom_code", "")).strip().upper()
         current_employee_code = str(row.get("svc_engineer_code", "")).strip()
-        jobs_payload.append(
-            {
-                "salesforce_id": str(row.get("gsfs_receipt_no", "")).strip(),
-                "receipt_no": str(row.get("gsfs_receipt_no", "")).strip(),
-                "product_group": product_group,
-                "product": product_code,
-                "symptom": symptom,
-                "address": str(row.get("address_line1_info", "")).strip(),
-                "city_name": str(row.get("city_name", "")).strip(),
-                "state_name": str(row.get("state_name", "")).strip(),
-                "country_name": str(row.get("country_name", "USA")).strip() or "USA",
-                "postal_code": str(row.get("postal_code", "")).strip(),
-                "location": {"lat": float(row["latitude"]), "lng": float(row["longitude"])},
-                "time_window": [],
-                "priority": 0,
-                "fixed": _coerce_bool_value(row.get("fixed", False)),
-                "current_employee_code": current_employee_code,
-                "current_center_type": engineer_center_type_lookup.get(current_employee_code, "DMS"),
-            }
+        postal_code = str(row.get("postal_code", "")).strip().replace(".0", "")
+        postal_code = postal_code.zfill(5) if postal_code else ""
+        region_info = region_area_lookup.get(postal_code, {})
+        area_type = (
+            _normalize_area_type(row.get("area_type")) or _normalize_area_type(region_info.get("area_type"))
+            if _uses_area_type_routing(strategic_city_name)
+            else ""
         )
+        eligible_employee_codes = _area_type_eligible_codes(area_type, dms_codes, dms2_codes)
+        job_payload = {
+            "salesforce_id": str(row.get("gsfs_receipt_no", "")).strip(),
+            "receipt_no": str(row.get("gsfs_receipt_no", "")).strip(),
+            "product_group": product_group,
+            "product": product_code,
+            "symptom": symptom,
+            "address": str(row.get("address_line1_info", "")).strip(),
+            "city_name": str(row.get("city_name", "")).strip(),
+            "state_name": str(row.get("state_name", "")).strip(),
+            "country_name": str(row.get("country_name", "USA")).strip() or "USA",
+            "postal_code": postal_code,
+            "location": {"lat": float(row["latitude"]), "lng": float(row["longitude"])},
+            "time_window": [],
+            "priority": 0,
+            "fixed": _coerce_bool_value(row.get("fixed", False)),
+            "reschedule": _coerce_bool_value(row.get("reschedule", False)),
+            "job_slot_count": max(1, int(pd.to_numeric(pd.Series([row.get("job_slot_count", 2 if _coerce_bool_value(row.get("two_slot_job", False)) else 1)]), errors="coerce").fillna(1).iloc[0])),
+            "current_employee_code": current_employee_code,
+            "current_center_type": engineer_center_type_lookup.get(current_employee_code, "DMS"),
+            "region_seq": region_info.get("region_seq"),
+            "region_name": region_info.get("region_name"),
+        }
+        if area_type:
+            job_payload["area_type"] = area_type
+            if eligible_employee_codes:
+                job_payload["eligible_employee_codes"] = eligible_employee_codes
+        jobs_payload.append(job_payload)
 
     return {
         "request_id": uuid.uuid4().hex,
@@ -226,11 +943,11 @@ def _build_payload_from_dataframes(
         "options": {
             "respect_fixed_jobs": True,
             "objective": "min_total_travel_time",
-            "time_limit_seconds": 30,
-            "timezone_offset": timezone_offset,
+            "time_limit_seconds": _default_time_limit_seconds(len(jobs_payload), len(technicians_payload)),
         },
         "technicians": technicians_payload,
         "jobs": jobs_payload,
+        "capabilities": _normalize_capabilities(capability_rows, allowed_employee_codes=active_employee_codes),
     }
 
 
@@ -240,12 +957,22 @@ def build_payload_from_inputs(
     promise_date: str,
     job_rows: list[dict[str, Any]],
     technician_rows: list[dict[str, Any]],
+    capability_rows: list[dict[str, Any]] | None = None,
     config_path: Path = COMMON_CONFIG_PATH,
     mode: str = "na_general",
 ) -> dict[str, Any]:
     jobs_df = pd.DataFrame(job_rows)
     technicians_df = pd.DataFrame(technician_rows)
-    return _build_payload_from_dataframes(jobs_df, technicians_df, subsidiary_name, strategic_city_name, promise_date, config_path=config_path, mode=mode)
+    return _build_payload_from_dataframes(
+        jobs_df,
+        technicians_df,
+        capability_rows or [],
+        subsidiary_name,
+        strategic_city_name,
+        promise_date,
+        config_path=config_path,
+        mode=mode,
+    )
 
 
 def _enrich_jobs_heavy_repair(jobs: list[dict[str, Any]], config_path: Path = COMMON_CONFIG_PATH) -> list[dict[str, Any]]:
@@ -287,8 +1014,14 @@ def _enrich_jobs_heavy_repair(jobs: list[dict[str, Any]], config_path: Path = CO
             if candidate
         )
         enriched_job = dict(job)
+        numeric_slot = pd.to_numeric(pd.Series([job.get("job_slot_count")]), errors="coerce").iloc[0]
+        job_slot_count = max(1, int(numeric_slot)) if pd.notna(numeric_slot) else (2 if _coerce_bool_value(job.get("two_slot_job", job.get("2slot_job", False)), default=False) else 1)
+        if is_heavy_repair and job_slot_count < 2:
+            job_slot_count = 2
+        slot_minutes = 45 * job_slot_count
         enriched_job["is_heavy_repair"] = is_heavy_repair
-        enriched_job["service_minutes"] = 100 if is_heavy_repair else 45
+        enriched_job["job_slot_count"] = job_slot_count
+        enriched_job["service_minutes"] = max(slot_minutes, 100 if is_heavy_repair else 45)
         enriched.append(enriched_job)
     return enriched
 
@@ -301,26 +1034,94 @@ def submit_routing_from_payload(
     config_path: Path = COMMON_CONFIG_PATH,
 ) -> dict[str, Any]:
     enriched_payload = dict(payload)
-    enriched_payload["jobs"] = _enrich_jobs_heavy_repair(list(payload.get("jobs", [])), config_path=config_path)
-    routing_job_id = create_job_id(enriched_payload.get("request_id"))
-    save_new_job(routing_job_id, enriched_payload)
-    threading.Thread(target=process_job, args=(routing_job_id,), daemon=True).start()
+    mode = str(enriched_payload.get("mode", "na_general")).strip() or "na_general"
+    promise_text = str(promise_date).strip()
+    planning_date = promise_text
+    if len(promise_text) == 8 and promise_text.isdigit():
+        planning_date = f"{promise_text[:4]}-{promise_text[4:6]}-{promise_text[6:8]}"
+    request_id = _stable_request_id(subsidiary_name, strategic_city_name, str(promise_date), mode)
+    enriched_payload["request_id"] = request_id
+    enriched_payload["mode"] = mode
+    enriched_payload["city"] = str(enriched_payload.get("city", "") or strategic_city_name).strip()
+    enriched_payload["planning_date"] = str(enriched_payload.get("planning_date", "") or planning_date).strip()
+    enriched_payload["capabilities"] = _normalize_capabilities(list(payload.get("capabilities", [])))
+    routing_job_id = create_job_id(request_id)
+    enriched_payload["routing_job_id"] = routing_job_id
+    initial_status = {
+        "job_id": routing_job_id,
+        "status": "queued",
+        "request_id": request_id,
+        "mode": str(enriched_payload.get("mode", "")).strip(),
+        "city": str(enriched_payload.get("city", "")).strip(),
+        "created_at": _utc_now_iso(),
+        "updated_at": _utc_now_iso(),
+    }
+    delete_routing_requests_for_date(
+        subsidiary_name,
+        strategic_city_name,
+        str(promise_date),
+        keep_request_id=request_id,
+        config_path=config_path,
+    )
+    delete_routing_result(request_id, config_path=config_path)
     request_row = {
-        "request_id": enriched_payload["request_id"],
+        "request_id": request_id,
         "subsidiary_name": subsidiary_name,
         "strategic_city_name": strategic_city_name,
         "promise_date": str(promise_date),
         "routing_job_id": routing_job_id,
         "routing_status": "queued",
         "payload_json": json.dumps(enriched_payload, ensure_ascii=False),
-        "status_json": "{}",
+        "status_json": json.dumps(initial_status, ensure_ascii=False),
     }
     upsert_routing_request(request_row, config_path=config_path)
+    _write_common_job_archive(
+        routing_job_id,
+        request_payload=enriched_payload,
+        status_payload=initial_status,
+        config_path=config_path,
+    )
+    threading.Thread(
+        target=_process_common_routing_job,
+        args=(request_id, config_path),
+        daemon=True,
+    ).start()
     return {
-        "request_id": enriched_payload["request_id"],
+        "request_id": request_id,
         "routing_job_id": routing_job_id,
         "status": "queued",
     }
+
+
+def submit_routing_from_inputs(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    promise_date: str,
+    job_rows: list[dict[str, Any]],
+    technician_rows: list[dict[str, Any]],
+    capability_rows: list[dict[str, Any]] | None = None,
+    config_path: Path = COMMON_CONFIG_PATH,
+    mode: str = "na_general",
+) -> dict[str, Any]:
+    payload = build_payload_from_inputs(
+        subsidiary_name,
+        strategic_city_name,
+        promise_date,
+        job_rows,
+        technician_rows,
+        capability_rows=capability_rows,
+        config_path=config_path,
+        mode=mode,
+    )
+    response = submit_routing_from_payload(
+        payload,
+        subsidiary_name,
+        strategic_city_name,
+        promise_date,
+        config_path=config_path,
+    )
+    response["payload"] = payload
+    return response
 
 
 def refresh_routing_result(
@@ -334,26 +1135,18 @@ def refresh_routing_result(
     if not routing_job_id:
         raise ValueError("Missing routing_job_id for request.")
 
-    status_payload = load_status(routing_job_id)
-    request_row["routing_status"] = str(status_payload.get("status", "")).strip()
-    request_row["status_json"] = json.dumps(status_payload, ensure_ascii=False)
-    upsert_routing_request(request_row, config_path=config_path)
+    status_payload = json.loads(str(request_row.get("status_json", "") or "{}"))
+    if not status_payload:
+        status_payload = {
+            "job_id": routing_job_id,
+            "status": str(request_row.get("routing_status", "")).strip() or "queued",
+            "request_id": request_id,
+        }
 
     result_payload: dict[str, Any] | None = None
-    if str(status_payload.get("status", "")).strip().lower() == "completed":
-        result_payload = load_result(routing_job_id)
-        upsert_routing_result(
-            {
-                "request_id": request_id,
-                "routing_job_id": routing_job_id,
-                "result_json": json.dumps(result_payload, ensure_ascii=False),
-            },
-            config_path=config_path,
-        )
-    else:
-        saved_result = get_routing_result(request_id, config_path=config_path)
-        if saved_result and saved_result.get("result_json"):
-            result_payload = json.loads(str(saved_result["result_json"]))
+    saved_result = get_routing_result(request_id, config_path=config_path)
+    if saved_result and saved_result.get("result_json"):
+        result_payload = json.loads(str(saved_result["result_json"]))
 
     return {
         "request_id": request_id,

@@ -19,7 +19,7 @@ def _coerce_bool_value(value: object) -> bool:
         return True
     if text in {"false", "0", "n", "no", "f", ""}:
         return False
-    return bool(text)
+    return False
 
 
 def _http_json(method: str, url: str, payload: dict | None = None, timeout_sec: int = 60) -> dict:
@@ -148,6 +148,7 @@ def build_payload_from_service_frame(
                 "time_window": [],
                 "priority": int(pd.to_numeric(pd.Series([row.get("priority", 0)]), errors="coerce").fillna(0).iloc[0]),
                 "fixed": _coerce_bool_value(row.get("fixed", False)),
+                "reschedule": _coerce_bool_value(row.get("reschedule", False)),
                 "current_employee_code": str(row.get("SVC_ENGINEER_CODE", "")).strip(),
                 "current_center_type": str(row.get("SVC_CENTER_TYPE", "")).strip().upper(),
                 "is_heavy_repair": bool(row.get("is_heavy_repair", False)),

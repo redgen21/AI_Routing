@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import csv
-import hashlib
 import json
-import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import requests
+from shapely.geometry import LineString, shape
 
 
 Coord = tuple[float, float]  # (lon, lat)
@@ -22,105 +20,14 @@ class OSRMConfig:
     cache_file: Path = Path("data/cache/osrm_trip_cache.csv")
     route_cache_file: Path | None = None
     fallback_osrm_url: str | None = None
+    avoid_polygons: list[dict[str, Any]] | None = None
+    avoid_penalty_multiplier: float = 4.0
 
 
 class OSRMTripClient:
-    MAX_ROUTE_CACHE_PRELOAD_BYTES = 100 * 1024 * 1024
-
     def __init__(self, cfg: OSRMConfig):
         self.cfg = cfg
         self.session = requests.Session()
-        self.cache: dict[str, tuple[float, float]] = {}
-        self.route_cache: dict[str, dict[str, object]] = {}
-        self._lock = threading.Lock()
-        self._load_cache()
-        self._load_route_cache()
-
-    def _load_cache(self) -> None:
-        if not self.cfg.cache_file.exists():
-            return
-        with self.cfg.cache_file.open("r", encoding="utf-8-sig", newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                try:
-                    cache_key = row.get("cache_key")
-                    distance_km = row.get("distance_km")
-                    duration_min = row.get("duration_min")
-                    if not cache_key or distance_km in (None, "") or duration_min in (None, ""):
-                        continue
-                    self.cache[cache_key] = (float(distance_km), float(duration_min))
-                except Exception:
-                    continue
-
-    def _append_cache(self, cache_key: str, distance_km: float, duration_min: float, stop_count: int) -> None:
-        self.cfg.cache_file.parent.mkdir(parents=True, exist_ok=True)
-        file_exists = self.cfg.cache_file.exists()
-        with self.cfg.cache_file.open("a", encoding="utf-8-sig", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["cache_key", "distance_km", "duration_min", "stop_count"])
-            if not file_exists:
-                writer.writeheader()
-            writer.writerow(
-                {
-                    "cache_key": cache_key,
-                    "distance_km": round(distance_km, 6),
-                    "duration_min": round(duration_min, 6),
-                    "stop_count": int(stop_count),
-                }
-            )
-
-    def _resolved_route_cache_file(self) -> Path:
-        if self.cfg.route_cache_file is not None:
-            return self.cfg.route_cache_file
-        return self.cfg.cache_file.with_name(f"{self.cfg.cache_file.stem}_route.jsonl")
-
-    def _load_route_cache(self) -> None:
-        route_cache_file = self._resolved_route_cache_file()
-        if not route_cache_file.exists():
-            return
-        if route_cache_file.stat().st_size > self.MAX_ROUTE_CACHE_PRELOAD_BYTES:
-            return
-        with route_cache_file.open("r", encoding="utf-8-sig") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    row = json.loads(line)
-                    cache_key = row.get("cache_key")
-                    if not cache_key:
-                        continue
-                    self.route_cache[cache_key] = {
-                        "ordered_coords": row.get("ordered_coords", []),
-                        "distance_km": float(row.get("distance_km", 0.0)),
-                        "duration_min": float(row.get("duration_min", 0.0)),
-                        "geometry": row.get("geometry", []),
-                    }
-                except Exception:
-                    continue
-
-    def _append_route_cache(self, cache_key: str, payload: dict[str, object], stop_count: int) -> None:
-        route_cache_file = self._resolved_route_cache_file()
-        route_cache_file.parent.mkdir(parents=True, exist_ok=True)
-        with route_cache_file.open("a", encoding="utf-8-sig") as f:
-            f.write(
-                json.dumps(
-                    {
-                        "cache_key": cache_key,
-                        "distance_km": round(float(payload.get("distance_km", 0.0)), 6),
-                        "duration_min": round(float(payload.get("duration_min", 0.0)), 6),
-                        "stop_count": int(stop_count),
-                        "ordered_coords": payload.get("ordered_coords", []),
-                        "geometry": payload.get("geometry", []),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-
-    def _canonical_key(self, coords: Sequence[Coord]) -> str:
-        canonical = sorted(f"{lon:.6f},{lat:.6f}" for lon, lat in coords)
-        joined = "|".join(canonical)
-        return hashlib.sha1(joined.encode("utf-8")).hexdigest()
 
     def get_trip(self, coords: Sequence[Coord]) -> tuple[float, float]:
         unique_coords = [(float(lon), float(lat)) for lon, lat in coords]
@@ -128,11 +35,6 @@ class OSRMTripClient:
             return 0.0, 0.0
         if str(self.cfg.mode).strip().lower() != "osrm":
             return self._fallback_haversine_trip(unique_coords)
-
-        cache_key = self._canonical_key(unique_coords)
-        with self._lock:
-            if cache_key in self.cache:
-                return self.cache[cache_key]
 
         coord_str = ";".join(f"{lon},{lat}" for lon, lat in unique_coords)
         distance_km = 0.0
@@ -148,9 +50,6 @@ class OSRMTripClient:
             else:
                 distance_km, duration_min = self._request_route_nn_with_fallback(unique_coords)
 
-        with self._lock:
-            self.cache[cache_key] = (distance_km, duration_min)
-            self._append_cache(cache_key, distance_km, duration_min, len(unique_coords))
         return distance_km, duration_min
 
     def pair_distance(self, a: Coord, b: Coord) -> tuple[float, float]:
@@ -166,18 +65,12 @@ class OSRMTripClient:
             return self._fallback_matrix(normalized)
         try:
             distances_m, durations_s = self._request_table(self.cfg.osrm_url, normalized)
-            return (
-                [[float(v) / 1000.0 for v in row] for row in distances_m],
-                [[float(v) / 60.0 for v in row] for row in durations_s],
-            )
+            return self._apply_avoid_penalty_to_matrix(normalized, distances_m, durations_s)
         except Exception:
             if self.cfg.fallback_osrm_url:
                 try:
                     distances_m, durations_s = self._request_table(self.cfg.fallback_osrm_url, normalized)
-                    return (
-                        [[float(v) / 1000.0 for v in row] for row in distances_m],
-                        [[float(v) / 60.0 for v in row] for row in durations_s],
-                    )
+                    return self._apply_avoid_penalty_to_matrix(normalized, distances_m, durations_s)
                 except Exception:
                     pass
             return self._fallback_matrix(normalized)
@@ -187,22 +80,9 @@ class OSRMTripClient:
         if not normalized:
             return {"ordered_coords": [], "distance_km": 0.0, "duration_min": 0.0, "geometry": []}
         if len(normalized) == 1:
-            lon, lat = normalized[0]
-            return {
-                "ordered_coords": normalized,
-                "distance_km": 0.0,
-                "duration_min": 0.0,
-                "geometry": [[lat, lon]],
-            }
+            return self._single_coord_route(normalized[0])
         if str(self.cfg.mode).strip().lower() != "osrm":
             return self._fallback_ordered_route(normalized)
-
-        base_cache_key = self._canonical_key(normalized)
-        cache_key = f"{base_cache_key}|preserve_first_v2=1" if preserve_first else base_cache_key
-        with self._lock:
-            cached_payload = self.route_cache.get(cache_key)
-            if cached_payload is not None:
-                return cached_payload
 
         for base_url in [self.cfg.osrm_url, self.cfg.fallback_osrm_url]:
             if not base_url:
@@ -223,13 +103,43 @@ class OSRMTripClient:
                     "duration_min": duration_min,
                     "geometry": geometry,
                 }
-                with self._lock:
-                    self.route_cache[cache_key] = payload
-                    self._append_route_cache(cache_key, payload, len(normalized))
                 return payload
             except Exception:
                 continue
         return self._fallback_ordered_route(normalized)
+
+    def build_route_in_order(self, coords: Sequence[Coord]) -> dict[str, object]:
+        normalized = [(float(lon), float(lat)) for lon, lat in coords]
+        if not normalized:
+            return {"ordered_coords": [], "distance_km": 0.0, "duration_min": 0.0, "geometry": []}
+        if len(normalized) == 1:
+            return self._single_coord_route(normalized[0])
+        if str(self.cfg.mode).strip().lower() != "osrm":
+            return self._fallback_route_in_order(normalized)
+
+        for base_url in [self.cfg.osrm_url, self.cfg.fallback_osrm_url]:
+            if not base_url:
+                continue
+            try:
+                distance_km, duration_min, geometry = self._request_route_geometry(base_url, normalized)
+                return {
+                    "ordered_coords": normalized,
+                    "distance_km": distance_km,
+                    "duration_min": duration_min,
+                    "geometry": geometry,
+                }
+            except Exception:
+                continue
+        return self._fallback_route_in_order(normalized)
+
+    def _single_coord_route(self, coord: Coord) -> dict[str, object]:
+        lon, lat = coord
+        return {
+            "ordered_coords": [coord],
+            "distance_km": 0.0,
+            "duration_min": 0.0,
+            "geometry": [[lat, lon]],
+        }
 
     def _request_trip(self, base_url: str, coord_str: str) -> tuple[float, float]:
         url = (
@@ -316,7 +226,7 @@ class OSRMTripClient:
         coord_str = ";".join(f"{lon},{lat}" for lon, lat in coords)
         url = (
             f"{base_url}/route/v1/{self.cfg.osrm_profile}/{coord_str}"
-            "?overview=full&geometries=geojson&steps=false&alternatives=false"
+            "?overview=full&geometries=geojson&steps=false&alternatives=true"
         )
         response = self.session.get(url, timeout=20)
         response.raise_for_status()
@@ -324,10 +234,92 @@ class OSRMTripClient:
         routes = data.get("routes", [])
         if data.get("code") != "Ok" or not routes:
             raise ValueError(json.dumps(data)[:300])
-        route = routes[0]
+        route = self._choose_route_avoiding_polygons(routes)
         geometry_coords = route.get("geometry", {}).get("coordinates", [])
         geometry = [[float(lat), float(lon)] for lon, lat in geometry_coords]
-        return float(route.get("distance", 0.0)) / 1000.0, float(route.get("duration", 0.0)) / 60.0, geometry
+        distance_km = float(route.get("distance", 0.0)) / 1000.0
+        duration_min = float(route.get("duration", 0.0)) / 60.0
+        if self._route_hits_avoid_polygon(geometry):
+            multiplier = self._avoid_penalty_multiplier()
+            distance_km *= multiplier
+            duration_min *= multiplier
+        return distance_km, duration_min, geometry
+
+    def _avoid_penalty_multiplier(self) -> float:
+        try:
+            return max(1.0, float(self.cfg.avoid_penalty_multiplier or 1.0))
+        except Exception:
+            return 1.0
+
+    def _active_avoid_shapes(self):
+        shapes = []
+        for polygon in self.cfg.avoid_polygons or []:
+            geometry = polygon.get("geometry") if isinstance(polygon, dict) else None
+            if not geometry:
+                continue
+            try:
+                geom = shape(geometry)
+            except Exception:
+                continue
+            if not geom.is_empty:
+                shapes.append(geom)
+        return shapes
+
+    def _route_hits_avoid_polygon(self, geometry: Sequence[Sequence[float]]) -> bool:
+        shapes = self._active_avoid_shapes()
+        if not shapes or len(geometry) < 2:
+            return False
+        try:
+            line = LineString([(float(lon), float(lat)) for lat, lon in geometry])
+        except Exception:
+            return False
+        return any(line.intersects(geom) for geom in shapes)
+
+    def _segment_hits_avoid_polygon(self, source: Coord, target: Coord) -> bool:
+        shapes = self._active_avoid_shapes()
+        if not shapes:
+            return False
+        try:
+            line = LineString([(float(source[0]), float(source[1])), (float(target[0]), float(target[1]))])
+        except Exception:
+            return False
+        return any(line.intersects(geom) for geom in shapes)
+
+    def _choose_route_avoiding_polygons(self, routes: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        if not self.cfg.avoid_polygons:
+            return routes[0]
+        best_route = routes[0]
+        best_duration = float(best_route.get("duration", 0.0) or 0.0)
+        for route in routes:
+            geometry_coords = route.get("geometry", {}).get("coordinates", [])
+            geometry = [[float(lat), float(lon)] for lon, lat in geometry_coords]
+            if self._route_hits_avoid_polygon(geometry):
+                continue
+            duration = float(route.get("duration", 0.0) or 0.0)
+            if best_route is routes[0] or duration < best_duration:
+                best_route = route
+                best_duration = duration
+        return best_route
+
+    def _apply_avoid_penalty_to_matrix(
+        self,
+        coords: Sequence[Coord],
+        distances_m: Sequence[Sequence[float]],
+        durations_s: Sequence[Sequence[float]],
+    ) -> tuple[list[list[float]], list[list[float]]]:
+        multiplier = self._avoid_penalty_multiplier()
+        distance_rows: list[list[float]] = []
+        duration_rows: list[list[float]] = []
+        for src_idx, (distance_row, duration_row) in enumerate(zip(distances_m, durations_s)):
+            out_distance_row: list[float] = []
+            out_duration_row: list[float] = []
+            for dst_idx, (distance_value, duration_value) in enumerate(zip(distance_row, duration_row)):
+                penalty = multiplier if src_idx != dst_idx and self._segment_hits_avoid_polygon(coords[src_idx], coords[dst_idx]) else 1.0
+                out_distance_row.append((float(distance_value) / 1000.0) * penalty)
+                out_duration_row.append((float(duration_value) / 60.0) * penalty)
+            distance_rows.append(out_distance_row)
+            duration_rows.append(out_duration_row)
+        return distance_rows, duration_rows
 
     def _nearest_neighbor_order(self, distance_mat: Sequence[Sequence[float]], fixed_start_idx: int | None = None) -> list[int]:
         size = len(distance_mat)
@@ -379,8 +371,7 @@ class OSRMTripClient:
 
     def _fallback_ordered_route(self, coords: Sequence[Coord]) -> dict[str, object]:
         if len(coords) < 2:
-            lon, lat = coords[0]
-            return {"ordered_coords": coords, "distance_km": 0.0, "duration_min": 0.0, "geometry": [[lat, lon]]}
+            return self._single_coord_route(coords[0])
         remaining = list(coords[1:])
         ordered = [coords[0]]
         while remaining:
@@ -394,6 +385,20 @@ class OSRMTripClient:
         geometry = [[lat, lon] for lon, lat in ordered]
         return {
             "ordered_coords": ordered,
+            "distance_km": total_km,
+            "duration_min": (total_km / 50.0) * 60.0,
+            "geometry": geometry,
+        }
+
+    def _fallback_route_in_order(self, coords: Sequence[Coord]) -> dict[str, object]:
+        if len(coords) < 2:
+            return self._single_coord_route(coords[0])
+        total_km = 0.0
+        for idx in range(len(coords) - 1):
+            total_km += self._haversine_km(coords[idx], coords[idx + 1])
+        geometry = [[lat, lon] for lon, lat in coords]
+        return {
+            "ordered_coords": coords,
             "distance_km": total_km,
             "duration_min": (total_km / 50.0) * 60.0,
             "geometry": geometry,
