@@ -9,9 +9,11 @@ import pandas as pd
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
+from .data_catalog import na_data_path
+
 
 DEFAULT_SQL_PATH = Path("smart_routing/select_data.sql")
-DEFAULT_REGION_ZIP_PATH = Path("260310/production_input/atlanta_fixed_region_zip_3.csv")
+DEFAULT_REGION_ZIP_PATH = na_data_path("region_seed_dir") / "atlanta_fixed_region_zip_3.csv"
 FALLBACK_REGION_ZIP_PATH = Path("260310/production_input/atlanta_fixed_region_zip_3_manual320.csv")
 PROMISE_RANGE_PATTERN = re.compile(
     r"FORMAT_DATETIME\('%Y%m%d',\s*T1\.PROMISE_TIMESTAMP\)\s+BETWEEN\s+'(?P<start>\d{8})'\s+AND\s+'(?P<end>\d{8})'",

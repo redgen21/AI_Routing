@@ -5,9 +5,9 @@ After=network.target
 [Service]
 Type=oneshot
 User=csda
-WorkingDirectory=/home/csda/osrm
+WorkingDirectory=/home/osrm
 ExecStartPre=/bin/bash -lc 'for i in {1..20}; do docker ps >/dev/null 2>&1 && exit 0; sleep 3; done; exit 1'
-ExecStart=/home/csda/osrm/run_osrm_usa.sh
+ExecStart=/home/osrm/run_osrm_usa.sh
 RemainAfterExit=yes
 Restart=on-failure
 RestartSec=15

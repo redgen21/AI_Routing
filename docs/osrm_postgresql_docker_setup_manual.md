@@ -1,13 +1,18 @@
 # OSRM / PostgreSQL / Docker / systemd 통합 설치 운영 매뉴얼
 
+> 2026-07-18 경로 변경: 현재 기준 애플리케이션 루트는
+> `/home/csda/AI_Routing/production`과 `/home/csda/AI_Routing/development`, OSRM 루트는
+> `/home/osrm`이다. 실행 스크립트는 각 애플리케이션 루트에 둔다.
+> 최신 배포 범위와 명령은 `services/README.md`를 우선한다.
+
 이 문서는 `AI_Routing` 서버를 새로 구성하거나 재설치할 때 필요한 설치, 데이터 경로 이전, OSRM Docker 빌드/실행, 로그 제한, `systemd` 자동 시작, 재부팅 검증, 지도 데이터 갱신 절차를 하나로 정리한 통합 문서입니다.
 
 기존 `server_auto_start_manual_20260422.md`의 자동 시작 내용은 이 문서의 `systemd` 및 운영 섹션으로 통합했습니다.
 
 ## 기준 경로와 포트
 
-- AI Routing 프로젝트: `/home/csda/AI_Routing`
-- OSRM 데이터/스크립트: `/home/csda/osrm`
+- AI Routing 프로젝트: `/home/csda/AI_Routing/production`
+- OSRM 데이터/스크립트: `/home/osrm`
 - PostgreSQL 데이터 위치: `/data/postgresql/14/main`
 - PostgreSQL 데이터 디스크 마운트: `/data`
 - Common VRP API: `8065`
@@ -237,7 +242,7 @@ grant all privileges on database vrp_db to vrp_agent;
 \q
 ```
 
-프로젝트 설정 파일은 `/home/csda/AI_Routing/config_common_vrp.json`입니다.
+운영 환경의 프로젝트 설정 파일은 `/home/csda/AI_Routing/production/config_common_vrp.json`입니다.
 
 ```json
 {
@@ -373,40 +378,40 @@ sudo docker inspect osrm-korea --format '{{json .HostConfig.LogConfig}}'
 
 ## 4. OSRM 데이터 빌드
 
-OSRM 데이터와 스크립트는 `/home/csda/osrm`에 둡니다.
+OSRM 데이터와 스크립트는 `/home/osrm`에 둡니다.
 
 필수 파일 예:
 
-- `/home/csda/osrm/profiles/custom_car.lua`
-- `/home/csda/osrm/south-korea/south-korea-latest.osm.pbf`
-- `/home/csda/osrm/socal/socal-latest.osm.pbf`
-- `/home/csda/osrm/georgia/georgia-latest.osm.pbf`
+- `/home/osrm/profiles/custom_car.lua`
+- `/home/osrm/south-korea/south-korea-latest.osm.pbf`
+- `/home/osrm/socal/socal-latest.osm.pbf`
+- `/home/osrm/georgia/georgia-latest.osm.pbf`
 
 스크립트 실행 권한:
 
 ```bash
-chmod +x /home/csda/osrm/install_osrm_korea.sh
-chmod +x /home/csda/osrm/install_osrm_usa.sh
-chmod +x /home/csda/osrm/run_osrm_korea.sh
-chmod +x /home/csda/osrm/run_osrm_usa.sh
-chmod +x /home/csda/osrm/run_osrm_regions.sh
-chmod +x /home/csda/osrm/update_osrm_korea.sh
-chmod +x /home/csda/osrm/update_osrm_usa.sh
-chmod +x /home/csda/osrm/nightly_update_osrm_korea.sh
-chmod +x /home/csda/osrm/nightly_update_osrm_usa.sh
+chmod +x /home/osrm/install_osrm_korea.sh
+chmod +x /home/osrm/install_osrm_usa.sh
+chmod +x /home/osrm/run_osrm_korea.sh
+chmod +x /home/osrm/run_osrm_usa.sh
+chmod +x /home/osrm/run_osrm_regions.sh
+chmod +x /home/osrm/update_osrm_korea.sh
+chmod +x /home/osrm/update_osrm_usa.sh
+chmod +x /home/osrm/nightly_update_osrm_korea.sh
+chmod +x /home/osrm/nightly_update_osrm_usa.sh
 ```
 
 Korea 빌드:
 
 ```bash
-cd /home/csda/osrm
+cd /home/osrm
 ./install_osrm_korea.sh
 ```
 
 USA 빌드:
 
 ```bash
-cd /home/csda/osrm
+cd /home/osrm
 ./install_osrm_usa.sh
 ```
 
@@ -436,21 +441,21 @@ OSRM_DOCKER_LOG_MAX_SIZE=50m OSRM_DOCKER_LOG_MAX_FILE=5 ./run_osrm_korea.sh
 Korea:
 
 ```bash
-cd /home/csda/osrm
+cd /home/osrm
 ./run_osrm_korea.sh
 ```
 
 USA:
 
 ```bash
-cd /home/csda/osrm
+cd /home/osrm
 ./run_osrm_usa.sh
 ```
 
 `run_osrm_regions.sh`가 있는 환경에서는 지역별 실행 래퍼로 사용할 수 있습니다.
 
 ```bash
-cd /home/csda/osrm
+cd /home/osrm
 ./run_osrm_regions.sh
 ```
 
@@ -467,7 +472,7 @@ sudo docker run -d \
   --log-opt max-size=100m \
   --log-opt max-file=3 \
   -p 5000:5000 \
-  -v /home/csda/osrm:/data \
+  -v /home/osrm:/data \
   ghcr.io/project-osrm/osrm-backend \
   osrm-routed --algorithm mld /data/south-korea/south-korea-latest.osrm
 ```
@@ -487,7 +492,7 @@ curl "http://localhost:5002/route/v1/driving/-84.3880,33.7490;-84.3900,33.7500?o
 프로젝트 위치:
 
 ```bash
-cd /home/csda/AI_Routing
+cd /home/csda/AI_Routing/production
 ```
 
 venv 생성:
@@ -508,40 +513,45 @@ requirements 파일이 없으면 프로젝트에서 사용하는 패키지를 �
 
 주요 실행 파일:
 
-- `sr_common_vrp_api_server.py`
+- `python sr_common_vrp_api_server.py --config config_common_vrp.json --port 8065`
 - `sr_common_vrp_client_server.py`
 - `sr_vrp_api_server.py`
 
 사전 확인:
 
 ```bash
-ls -l /home/csda/AI_Routing/.venv/bin/python
-ls -l /home/csda/AI_Routing/sr_common_vrp_api_server.py
-ls -l /home/csda/AI_Routing/sr_common_vrp_client_server.py
-ls -l /home/csda/AI_Routing/sr_vrp_api_server.py
+ls -l /home/csda/AI_Routing/production/.venv/bin/python
+ls -l /home/csda/AI_Routing/production/sr_common_vrp_api_server.py
+ls -l /home/csda/AI_Routing/production/sr_common_vrp_client_server.py
+ls -l /home/csda/AI_Routing/production/sr_vrp_api_server.py
 ```
 
 ## 7. Common VRP DB 초기화
 
 Common VRP API는 시작 시 `init_schema()`를 호출하므로 테이블은 자동 생성됩니다.
 
-수동 seed가 필요하면 API 실행 후:
+개발 DB의 master/context seed가 필요하면 API HTTP endpoint가 아니라 검증된
+bootstrap CLI를 사용합니다. 이 명령은 `development`, `vrp_db_dev`, `8066`의
+일치 여부를 먼저 검사합니다.
 
 ```bash
-curl -X POST http://127.0.0.1:8065/api/v1/common/init
+cd /home/csda/AI_Routing/development
+./bootstrap_common_vrp_dev.sh
 ```
 
-또는 Python에서:
+동일한 명령을 직접 실행하려면:
 
 ```bash
-cd /home/csda/AI_Routing
-source .venv/bin/activate
-python - <<'PY'
-from smart_routing.common_vrp_db import seed_default_masters
-seed_default_masters()
-print("seed complete")
-PY
+cd /home/csda/AI_Routing/development
+.venv/bin/python sr_common_vrp_api_server.py \
+  --config config_common_vrp.dev.json --host 0.0.0.0 --port 8066 \
+  --expected-environment development --bootstrap-only
 ```
+
+Production seed는 일반 startup이나 HTTP 요청으로 수행하지 않습니다. 승인된
+변경 계획과 DB backup 후 production config 및 port를 명시하고
+`--confirm-production-bootstrap`까지 제공해야 합니다. 자세한 절차와 rollback은
+`services/README.md`를 따릅니다.
 
 ## 8. systemd 자동 시작 설정
 
@@ -573,10 +583,10 @@ crontab -e
 다음과 같은 줄을 삭제합니다.
 
 ```cron
-@reboot /usr/bin/nohup /home/csda/AI_Routing/watch_common_vrp_api.sh >/home/csda/AI_Routing/log/watch_common.out 2>&1 &
-@reboot /usr/bin/nohup /home/csda/AI_Routing/watch_smart_routing_api.sh >/home/csda/AI_Routing/log/watch_smart.out 2>&1 &
-@reboot /usr/bin/nohup /home/csda/osrm/watch_osrm_korea.sh >/home/csda/osrm/log/watch_osrm_korea.out 2>&1 &
-@reboot /usr/bin/nohup /home/csda/osrm/watch_osrm_usa.sh >/home/csda/osrm/log/watch_osrm_usa.out 2>&1 &
+@reboot /usr/bin/nohup /home/csda/AI_Routing/production/watch_common_vrp_api.sh >/home/csda/AI_Routing/production/log/watch_common.out 2>&1 &
+@reboot /usr/bin/nohup /home/csda/AI_Routing/production/watch_smart_routing_api.sh >/home/csda/AI_Routing/production/log/watch_smart.out 2>&1 &
+@reboot /usr/bin/nohup /home/osrm/watch_osrm_korea.sh >/home/osrm/log/watch_osrm_korea.out 2>&1 &
+@reboot /usr/bin/nohup /home/osrm/watch_osrm_usa.sh >/home/osrm/log/watch_osrm_usa.out 2>&1 &
 ```
 
 제거 확인:
@@ -596,15 +606,16 @@ pkill -f watch_osrm_usa.sh || true
 
 ### 서비스 파일 설치
 
-서비스 파일은 repository의 `/home/csda/AI_Routing/systemd` 아래에 있습니다.
+서비스 파일은 repository의 `/home/csda/AI_Routing/production/systemd` 아래에 있습니다.
 
 ```bash
-sudo cp /home/csda/AI_Routing/systemd/common-vrp.service /etc/systemd/system/
-sudo cp /home/csda/AI_Routing/systemd/common-vrp-client.service /etc/systemd/system/
-sudo cp /home/csda/AI_Routing/systemd/smart-routing.service /etc/systemd/system/
-sudo cp /home/csda/AI_Routing/systemd/osrm-korea.service /etc/systemd/system/
-sudo cp /home/csda/AI_Routing/systemd/osrm-usa.service /etc/systemd/system/
+sudo cp /home/csda/AI_Routing/production/systemd/common-vrp.service /etc/systemd/system/
+sudo cp /home/csda/AI_Routing/production/systemd/common-vrp-client.service /etc/systemd/system/
+sudo cp /home/csda/AI_Routing/production/systemd/smart-routing.service /etc/systemd/system/
 ```
+
+OSRM unit과 실행 스크립트는 애플리케이션 배포본에 포함되지 않는다. `/home/osrm`
+운영 패키지에서 별도로 설치한다.
 
 적용:
 
@@ -777,28 +788,36 @@ docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}" | grep -E "osrm-k
 
 ## 12. 수동 시작 / 재시작 / 업데이트
 
-API 수동 재시작 스크립트:
+systemd가 활성화된 정상 운영 환경에서는 다음 명령으로 재시작한다.
 
 ```bash
-/home/csda/AI_Routing/restart_common_vrp_api.sh
-/home/csda/AI_Routing/restart_common_vrp_client.sh
-/home/csda/AI_Routing/restart_common_vrp_client_server.sh
-/home/csda/AI_Routing/restart_smart_routing_api.sh
+sudo systemctl restart common-vrp common-vrp-client smart-routing
+sudo systemctl restart common-vrp-dev common-vrp-client-dev smart-routing-dev
+```
+
+아래 shell wrapper는 systemd를 사용하지 않는 수동 검증·긴급 복구용이다.
+동일 서비스를 systemd가 관리 중일 때 실행하면 자동 재시작과 포트 경쟁이
+발생할 수 있으므로 먼저 해당 unit을 중지한 경우에만 사용한다.
+
+```bash
+/home/csda/AI_Routing/production/restart_common_vrp_api.sh
+/home/csda/AI_Routing/production/restart_common_vrp_client_server.sh
+/home/csda/AI_Routing/production/restart_smart_routing_api.sh
 ```
 
 OSRM 수동 시작 스크립트:
 
 ```bash
-/home/csda/osrm/run_osrm_korea.sh
-/home/csda/osrm/run_osrm_usa.sh
-/home/csda/osrm/run_osrm_regions.sh
+/home/osrm/run_osrm_korea.sh
+/home/osrm/run_osrm_usa.sh
+/home/osrm/run_osrm_regions.sh
 ```
 
 OSRM 수동 업데이트 스크립트:
 
 ```bash
-/home/csda/osrm/update_osrm_korea.sh
-/home/csda/osrm/update_osrm_usa.sh
+/home/osrm/update_osrm_korea.sh
+/home/osrm/update_osrm_usa.sh
 ```
 
 의미:
@@ -817,8 +836,8 @@ sudo systemctl restart osrm-usa.service
 nightly update wrapper:
 
 ```bash
-/home/csda/osrm/nightly_update_osrm_korea.sh
-/home/csda/osrm/nightly_update_osrm_usa.sh
+/home/osrm/nightly_update_osrm_korea.sh
+/home/osrm/nightly_update_osrm_usa.sh
 ```
 
 의미:
@@ -843,10 +862,10 @@ USA OSRM은 `CITY_ENTRIES` 목록 기반입니다.
 
 관련 파일:
 
-- `/home/csda/osrm/install_osrm_usa.sh`
-- `/home/csda/osrm/run_osrm_usa.sh`
-- `/home/csda/osrm/watch_osrm_usa.sh`
-- `/home/csda/osrm/update_osrm_usa.sh`
+- `/home/osrm/install_osrm_usa.sh`
+- `/home/osrm/run_osrm_usa.sh`
+- `/home/osrm/watch_osrm_usa.sh`
+- `/home/osrm/update_osrm_usa.sh`
 
 install script 형식:
 
@@ -883,8 +902,8 @@ run/watch에는 포트와 health check 좌표를 포함합니다.
 
 그 다음 다음 경로와 PBF 파일을 준비합니다.
 
-- `/home/csda/osrm/dallas/`
-- `/home/csda/osrm/dallas/dallas-latest.osm.pbf`
+- `/home/osrm/dallas/`
+- `/home/osrm/dallas/dallas-latest.osm.pbf`
 
 ## 14. 매일 자정 지도 업데이트 스케줄링
 
@@ -893,9 +912,9 @@ run/watch에는 포트와 health check 좌표를 포함합니다.
 스크립트 준비:
 
 ```bash
-chmod +x /home/csda/osrm/nightly_update_osrm_korea.sh
-chmod +x /home/csda/osrm/nightly_update_osrm_usa.sh
-mkdir -p /home/csda/osrm/log
+chmod +x /home/osrm/nightly_update_osrm_korea.sh
+chmod +x /home/osrm/nightly_update_osrm_usa.sh
+mkdir -p /home/osrm/log
 ```
 
 cron 열기:
@@ -908,10 +927,10 @@ crontab -e
 
 ```cron
 CRON_TZ=Asia/Seoul
-0 0 * * * /usr/bin/nohup /home/csda/osrm/nightly_update_osrm_korea.sh >/home/csda/osrm/log/nightly_update_korea.out 2>&1
+0 0 * * * /usr/bin/nohup /home/osrm/nightly_update_osrm_korea.sh >/home/osrm/log/nightly_update_korea.out 2>&1
 
 CRON_TZ=America/New_York
-0 0 * * * /usr/bin/nohup /home/csda/osrm/nightly_update_osrm_usa.sh >/home/csda/osrm/log/nightly_update_usa.out 2>&1
+0 0 * * * /usr/bin/nohup /home/osrm/nightly_update_osrm_usa.sh >/home/osrm/log/nightly_update_usa.out 2>&1
 ```
 
 메모:
@@ -929,8 +948,8 @@ crontab -l
 첫 실행 후 확인:
 
 ```bash
-tail -n 100 /home/csda/osrm/log/nightly_update_korea.out
-tail -n 100 /home/csda/osrm/log/nightly_update_usa.out
+tail -n 100 /home/osrm/log/nightly_update_korea.out
+tail -n 100 /home/osrm/log/nightly_update_usa.out
 docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}" | grep -E "osrm-korea|osrm-socal|osrm-georgia"
 ```
 
@@ -993,7 +1012,7 @@ sudo docker restart osrm-georgia
 또는 run script로 재생성합니다.
 
 ```bash
-cd /home/csda/osrm
+cd /home/osrm
 ./run_osrm_korea.sh
 ./run_osrm_usa.sh
 ```

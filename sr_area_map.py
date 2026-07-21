@@ -27,15 +27,16 @@ from smart_routing.area_map import (
     load_service_points as _area_map_load_service_points,
 )
 from smart_routing.census_geocoder import load_geocode_cache, merge_service_with_geocodes
+from smart_routing.data_catalog import na_data_path
 from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
 
 
 st.set_page_config(page_title="Routing Map", layout="wide")
 
-CONFIG_FILE = Path("config.json")
+CONFIG_FILE = Path("config/config.json")
 AREA_MAP_CONFIG_SECTION = "area_map_usa"
-PROFILE_FILE = Path("260310/production_input/Top 10_DMS_DMS2_Profile_20260317_production.xlsx")
-PRODUCTION_INPUT_DIR = Path("260310/production_input")
+PROFILE_FILE = na_data_path("profile_production")
+PRODUCTION_INPUT_DIR = na_data_path("region_seed_dir")
 CURRENT_REGION_LABEL = "Current Coverage"
 AREA_TYPE_REGION_PREFIX = "Area Type Clusters"
 BUCKET_SIM_DRAFT_LABEL = "Bucket Sim Draft"

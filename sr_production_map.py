@@ -11,18 +11,19 @@ import streamlit as st
 from folium.plugins import MarkerCluster
 
 from smart_routing.area_map import load_city_map_data
+from smart_routing.data_catalog import na_data_path
 from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
 import smart_routing.production_assign_atlanta as production_assign_atlanta
 
 
 st.set_page_config(page_title="Atlanta Production Routing", layout="wide")
 
-CONFIG_FILE = Path("config.json")
-REGION_ZIP_PATH = Path("260310/production_input/atlanta_fixed_region_zip_3.csv")
-ENGINEER_REGION_PATH = Path("260310/production_input/atlanta_engineer_region_assignment.csv")
-HOME_GEOCODE_PATH = Path("260310/production_input/atlanta_engineer_home_geocoded.csv")
+CONFIG_FILE = Path("config/config.json")
+REGION_ZIP_PATH = na_data_path("region_seed_dir") / "atlanta_fixed_region_zip_3.csv"
+ENGINEER_REGION_PATH = na_data_path("atlanta_engineer_region")
+HOME_GEOCODE_PATH = na_data_path("atlanta_engineer_home")
 SERVICE_PATH = Path("260310/production_input/atlanta_service_enriched.csv")
-PROFILE_COPY_PATH = Path("260310/production_input/Top 10_DMS_DMS2_Profile_20260317_production.xlsx")
+PROFILE_COPY_PATH = na_data_path("profile_production")
 ASSIGNMENT_PATH = Path("260310/production_output/atlanta_assignment_result.csv")
 ENGINEER_DAY_SUMMARY_PATH = Path("260310/production_output/atlanta_engineer_day_summary.csv")
 SCHEDULE_PATH = Path("260310/production_output/atlanta_schedule.csv")

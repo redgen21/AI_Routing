@@ -1,0 +1,162 @@
+{
+    "package_name":  "ai-routing-admin-tools-count-debug",
+    "artifact_type":  "db-admin-tools",
+    "created_at":  "2026-07-21T10:04:24",
+    "source_revision":  "c52ce55b3517010382f396d4e9de9e2bcb9c17c3",
+    "source_dirty":  true,
+    "promotable":  false,
+    "target_root":  "/home/csda/AI_Routing/admin_tools/releases/count-debug",
+    "contains_secrets":  false,
+    "contains_data":  false,
+    "entrypoints":  [
+                        "admin_tools.db.runners.reset_common_vrp_data",
+                        "admin_tools.db.master_data_backend",
+                        "admin_tools.db.seeds.build_la_bucket_vrp_inputs",
+                        "admin_tools.db.seeds.import_asia_technician_centroids"
+                    ],
+    "files":  [
+                  {
+                      "path":  "requirements.txt",
+                      "sha256":  "217844ec6680db46d9ae87afc3ce371c40e6ac316e7acce16fc643b989899c16"
+                  },
+                  {
+                      "path":  "admin_tools/__init__.py",
+                      "sha256":  "defa106083c7172208fe7491326247d1fcfc100cbd5ec9873a6fa1503f9e8690"
+                  },
+                  {
+                      "path":  "admin_tools/db/common_vrp.py",
+                      "sha256":  "2d693d08c3445a21e277692ef8f2e525874aefcfc8f3be60e33348dfc938846c"
+                  },
+                  {
+                      "path":  "admin_tools/db/data_catalog.py",
+                      "sha256":  "933b32a9824064d85395102b25fec3257b644050293d31db8dab0232f33af047"
+                  },
+                  {
+                      "path":  "admin_tools/db/guard.py",
+                      "sha256":  "e901cb8c51beaa9a74b6bb4d134f35d210c3fbba3e3c5d8c6a597ca34e4bcd5f"
+                  },
+                  {
+                      "path":  "admin_tools/db/heavy_repair.py",
+                      "sha256":  "b2b951e7b28e511f718623385cc584a79bd4f4ab5ed5b4e56a15ad4ed5318582"
+                  },
+                  {
+                      "path":  "admin_tools/db/master_data_backend.py",
+                      "sha256":  "7605c193297e5f575ef69f9a5e7e1022a678479684cfa52cc71ccfad8c9c5cf4"
+                  },
+                  {
+                      "path":  "admin_tools/db/README.md",
+                      "sha256":  "3fa78806480e471baa5fe4faab98a63da23d368b555835e072314bd028282d27"
+                  },
+                  {
+                      "path":  "admin_tools/db/release_backend.py",
+                      "sha256":  "0d55d335c54f21e479c9b1659411c082b024e258af0e06063b8e4e4f98dfe587"
+                  },
+                  {
+                      "path":  "admin_tools/db/__init__.py",
+                      "sha256":  "046116c5b8b4ab691050734315c6fb24cb43cb26b78b89f2d5165c65e30eb1f8"
+                  },
+                  {
+                      "path":  "admin_tools/db/migrations/README.md",
+                      "sha256":  "60358b5ed88070ada11e850157ee777f88e66d8548a93cc116a64ef8b6773353"
+                  },
+                  {
+                      "path":  "admin_tools/db/migrations/__init__.py",
+                      "sha256":  "266b2d8990cd71d78e0abf46c18f4b491ac0a3d2f709cb925769b3beb2222cd6"
+                  },
+                  {
+                      "path":  "admin_tools/db/runners/reset_common_vrp_data.py",
+                      "sha256":  "1afb60da3d9605278e317c3317ab4550c49aafeae204e5138154fd542108fac2"
+                  },
+                  {
+                      "path":  "admin_tools/db/runners/__init__.py",
+                      "sha256":  "b06da9d25093adfca26e163beb74ea7cef50efa292746f860c133a386edb7206"
+                  },
+                  {
+                      "path":  "admin_tools/db/runners/__pycache__/reset_common_vrp_data.cpython-310.pyc",
+                      "sha256":  "47c7daf5631601339712d171d569ad3f78be69254016a412b3d4df22d34e4995"
+                  },
+                  {
+                      "path":  "admin_tools/db/runners/__pycache__/__init__.cpython-310.pyc",
+                      "sha256":  "f432f7fd88a73a98b8ac4bb04309a444e5a23afe70c6b6f5f07afb2287bdafa9"
+                  },
+                  {
+                      "path":  "admin_tools/db/seeds/build_la_bucket_vrp_inputs.py",
+                      "sha256":  "11916253462e2811a9bf65a6fe429a834049321cd3dbf69cdd6355b83089b2c7"
+                  },
+                  {
+                      "path":  "admin_tools/db/seeds/import_asia_technician_centroids.py",
+                      "sha256":  "7e19712d3c9151a9b9da9a6bee4c16dcfd20b1624a83ed761d7401106080daa6"
+                  },
+                  {
+                      "path":  "admin_tools/db/seeds/__init__.py",
+                      "sha256":  "e74b8c770234b7ee8942a6f0d2c24af343b1ffe1084c90a179b6d6e8efee5e6c"
+                  },
+                  {
+                      "path":  "admin_tools/db/seeds/__pycache__/build_la_bucket_vrp_inputs.cpython-310.pyc",
+                      "sha256":  "0cdcf3a82c04d805be267a164d0cb19427b9b1e7a1a599c6ac68945affcff4a5"
+                  },
+                  {
+                      "path":  "admin_tools/db/seeds/__pycache__/import_asia_technician_centroids.cpython-310.pyc",
+                      "sha256":  "c9c6e863d8ded1269bb88c5e2b29abc3316e25c596ffe5f14a820e9f091fb3d4"
+                  },
+                  {
+                      "path":  "admin_tools/db/seeds/__pycache__/__init__.cpython-310.pyc",
+                      "sha256":  "90aa51e03c0e8c91a0c40aa21cbd63ebd05af9e72332471848335a7a6519710b"
+                  },
+                  {
+                      "path":  "admin_tools/db/__pycache__/common_vrp.cpython-310.pyc",
+                      "sha256":  "244f70adebbd77f889a3ceb6a0b9554b4935a6bc7a6ec34fb877471edbc0d581"
+                  },
+                  {
+                      "path":  "admin_tools/db/__pycache__/data_catalog.cpython-310.pyc",
+                      "sha256":  "74967cb20899dbd6ad315af359acde0d91409cc4016133a381976a6a1486bb03"
+                  },
+                  {
+                      "path":  "admin_tools/db/__pycache__/guard.cpython-310.pyc",
+                      "sha256":  "ca298eaf4f5e41505203aae77123ad6a6e127d9872d1589e10c07cd5ae43813a"
+                  },
+                  {
+                      "path":  "admin_tools/db/__pycache__/heavy_repair.cpython-310.pyc",
+                      "sha256":  "428011d292a81ea81ea2e191b3fd05461ae43ccbfcd237fefac83da0126a1e20"
+                  },
+                  {
+                      "path":  "admin_tools/db/__pycache__/master_data_backend.cpython-310.pyc",
+                      "sha256":  "92de2966cc797aa65d08c491542b7812ce5f473a68e7758f028b45a66f1e2468"
+                  },
+                  {
+                      "path":  "admin_tools/db/__pycache__/__init__.cpython-310.pyc",
+                      "sha256":  "3cd0e29815b25062dfca863ede627da27191046bd02673a61d0153c64189bce8"
+                  },
+                  {
+                      "path":  "admin_tools/__pycache__/__init__.cpython-310.pyc",
+                      "sha256":  "638bbfe4ba8af0b4dd913c2fd248450f93a85138edaebc8c4377abe43ef014f9"
+                  },
+                  {
+                      "path":  "config/common_vrp.dev.template.json",
+                      "sha256":  "822e228254a624c1f9d480e1d680191a5a7bc708609e017b7fc15e2f6f9019c2"
+                  },
+                  {
+                      "path":  "config/common_vrp.prod.template.json",
+                      "sha256":  "c3a9699de8676ef77e5280b973c4366a17932ead7a6ff09b975b1510cf17a579"
+                  },
+                  {
+                      "path":  "config/config.template.json",
+                      "sha256":  "5e12496428485148ac58111085dad6b0ce8fa94d6bfbc1922ed99534611a3e81"
+                  },
+                  {
+                      "path":  "config/data_catalog.admin.template.json",
+                      "sha256":  "e2529cc672d780adf326c001abdde8326d81847eb39723eacc2f3821c6a0c057"
+                  },
+                  {
+                      "path":  "config/data_catalog.json",
+                      "sha256":  "e06eaf4d257fd8c7cb2acf0b89fe66c79719573c3df38278a43c36dfe7c9e0e0"
+                  }
+              ],
+    "notes":  [
+                  "No database command is executed by this build.",
+                  "Dirty-source artifacts are development verification only and are not promotable.",
+                  "Supply an explicit development or production config path when running a command.",
+                  "Production writes require a backup, approval, and --confirm-production.",
+                  "Install as a versioned read-only admin release; do not merge into the application runtime artifact."
+              ]
+}

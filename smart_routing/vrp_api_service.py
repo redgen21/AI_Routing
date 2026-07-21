@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import threading
 import uuid
 from dataclasses import dataclass
@@ -12,7 +13,7 @@ from typing import Any, Callable
 from .vrp_api_common import SUPPORTED_ROUTING_MODES, normalize_city, normalize_mode
 
 
-JOB_ROOT = Path("260310/vrp_api_jobs")
+JOB_ROOT = Path(os.environ.get("VRP_JOB_ROOT", "data/north_america/runtime/development/vrp_api_jobs"))
 _JOB_LOCK = threading.Lock()
 MODE_HANDLER_MODULES = {
     "na_general": "smart_routing.vrp_mode_na_general",

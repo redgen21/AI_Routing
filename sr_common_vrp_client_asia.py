@@ -20,6 +20,7 @@ except Exception:
     st_folium = None
 
 from smart_routing.area_map import load_city_map_data
+from smart_routing.data_catalog import na_data_path
 from smart_routing.live_atlanta_runtime import _load_config as _load_runtime_config
 from smart_routing.live_atlanta_runtime import _merge_service_geocodes
 from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
@@ -27,11 +28,11 @@ from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
 
 st.set_page_config(page_title="Smart Routing Client - Asia", layout="wide")
 
-CONFIG_COMMON_PATH = Path("config_common_vrp.json")
+CONFIG_COMMON_PATH = Path("config/common_vrp.prod.json")
 
 
 DEFAULT_COMMON_SERVER_URL = "http://20.51.244.68:8065"
-MASTER_PATH = Path("data/All_In_One_Master.xlsx")
+MASTER_PATH = na_data_path("client_master")
 PROFILE_SOURCE_PATH = Path("260310/production_input/Asia_DMS_Profile_20260627_production.xlsx")
 COMMON_JOB_STORE_PATH = Path("data/common_vrp_asia_job_input.parquet")
 COMMON_TECHNICIAN_STORE_PATH = Path("data/common_vrp_asia_technician_input.parquet")

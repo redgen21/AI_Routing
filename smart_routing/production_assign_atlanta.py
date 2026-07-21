@@ -66,8 +66,7 @@ def _output_paths(output_suffix: str = "") -> tuple[Path, Path, Path]:
         PRODUCTION_OUTPUT_DIR / f"atlanta_schedule_{suffix}.csv",
     )
 
-
-def _load_config(config_path: Path = Path("config.json")) -> dict[str, Any]:
+def _load_config(config_path: Path = Path("config/config.json")) -> dict[str, Any]:
     import json
 
     if not config_path.exists():

@@ -1629,6 +1629,7 @@ def build_atlanta_production_assignment_vrp_from_frames(
     max_home_to_job_min: float | None = None,
     long_leg_penalty_start_min: float | None = None,
     long_leg_penalty_multiplier: float | None = None,
+    route_client=None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     working_service_df = service_df.copy()
     if not working_service_df.empty:
@@ -1669,7 +1670,7 @@ def build_atlanta_production_assignment_vrp_from_frames(
         base.ENABLE_DMS2 = previous_enable_dms2
     region_centers = base._region_centers(working_service_df)
     attendance_master_df, attendance_by_date = base._build_actual_attendance_master(working_service_df, engineer_master_df)
-    route_client = base._build_route_client()
+    route_client = route_client or base._build_route_client()
     route_client.cfg.avoid_polygons = avoid_polygons or []
     route_client.cfg.avoid_penalty_multiplier = float(avoid_penalty_multiplier or 4.0)
 

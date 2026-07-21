@@ -20,7 +20,6 @@ from .common_vrp_db import (
     list_request_technicians,
     list_regions,
     replace_request_technicians,
-    seed_default_masters,
     upsert_jobs,
     upsert_avoid_area,
     upsert_routing_config,
@@ -202,10 +201,6 @@ class CommonVRPRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         try:
-            if parsed.path == "/api/v1/common/init":
-                seed_default_masters()
-                _json_response(self, HTTPStatus.OK, {"status": "ok"})
-                return
             if parsed.path == "/api/v1/common/jobs/bulk_upsert":
                 payload = _read_json_request(self)
                 saved = upsert_jobs(list(payload.get("rows", [])))

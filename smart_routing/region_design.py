@@ -7,10 +7,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-INPUT_DIR = Path("260310/input")
-OUTPUT_DIR = Path("260310/output")
-DEFAULT_SERVICE_FILE = INPUT_DIR / "Service_202603181109_geocoded.csv"
-DEFAULT_SLOT_FILE = INPUT_DIR / "Slot_updated_Service_202603181109.csv"
+from .data_catalog import na_data_path
+
+INPUT_DIR = na_data_path("region_candidates_dir")
+OUTPUT_DIR = na_data_path("reports_dir")
+DEFAULT_SERVICE_FILE = na_data_path("service_geocoded")
+DEFAULT_SLOT_FILE = Path("260310/input/Slot_updated_Service_202603181109.csv")
 DEFAULT_TARGET_SM_PER_REGION = 5
 DEFAULT_FALLBACK_SLOT = 7.0
 DEFAULT_EFFECTIVE_SERVICE_PER_SM = 4.0

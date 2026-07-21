@@ -1,0 +1,283 @@
+{
+  "schema": "north-america-routing-data-migration/v1",
+  "created_at": "2026-07-19T07:22:16.476472+00:00",
+  "mode": "copy-first-no-delete",
+  "catalog": "config\\data_catalog.json",
+  "files": [
+    {
+      "source": "260310\\_SELECT_T21_CORP_STD1_NAME_AS_SUBSIDIARY_NAME_T19_STRATEGIC_CITY_202607101026.csv",
+      "target": "data\\north_america\\raw\\service\\202607101026\\_SELECT_T21_CORP_STD1_NAME_AS_SUBSIDIARY_NAME_T19_STRATEGIC_CITY_202607101026.csv",
+      "size_bytes": 78231157,
+      "sha256": "fb532bcaba2ca80779c373d35ddbccc7aa9c2c2bca64fb462f2b1129507fad9a"
+    },
+    {
+      "source": "260310\\input\\Service_202603181109_geocoded.csv",
+      "target": "data\\north_america\\processed\\service\\202603181109\\Service_202603181109_geocoded.csv",
+      "size_bytes": 13494912,
+      "sha256": "e4409f8747c7f3d32b43e19b11c2c2cf13e09e2fed27e598908bf46e4c7d8fda"
+    },
+    {
+      "source": "260310\\Top 10_DMS_DMS2_Profile_20260317.xlsx",
+      "target": "data\\north_america\\raw\\profile\\20260317\\Top 10_DMS_DMS2_Profile_20260317.xlsx",
+      "size_bytes": 1511768,
+      "sha256": "5a1738b40dbbe534a1ffccf36020384c6745c03641089c73e14e448907557adf"
+    },
+    {
+      "source": "260310\\production_input\\Top 10_DMS_DMS2_Profile_20260317_production.xlsx",
+      "target": "data\\north_america\\processed\\profile\\20260317\\Top 10_DMS_DMS2_Profile_20260317_production.xlsx",
+      "size_bytes": 1370083,
+      "sha256": "83aa2a9376680cf671a0edf8d82d6f6a2b51a56df877f5e021295f14d80e71b6"
+    },
+    {
+      "source": "data\\All_In_One_Master.xlsx",
+      "target": "data\\north_america\\reference\\client\\All_In_One_Master.xlsx",
+      "size_bytes": 454143,
+      "sha256": "377869f68b4d04fa886c5044351b0f71f0aec9943af4fa2ea85d7ad6e3e96777"
+    },
+    {
+      "source": "data\\geo\\tl_2024_us_zcta520.zip",
+      "target": "data\\north_america\\reference\\geospatial\\tl_2024_us_zcta520.zip",
+      "size_bytes": 528806468,
+      "sha256": "d96229dd890f71ec0a534b4ead7fefa5e53916c0ae8779198f8f90787b400753"
+    },
+    {
+      "source": "data\\Notification_Symptom_mapping_20241120_3depth.xlsx",
+      "target": "data\\north_america\\reference\\lookups\\Notification_Symptom_mapping_20241120_3depth.xlsx",
+      "size_bytes": 21921,
+      "sha256": "58b150f2aba344fcf4377755131b1724a506f7ecabe5bcc3bd4814e2e8644fdf"
+    },
+    {
+      "source": "260310\\production_input\\atlanta_heavy_repair_lookup.csv",
+      "target": "data\\north_america\\db_input\\lookups\\atlanta_heavy_repair_lookup.csv",
+      "size_bytes": 9149,
+      "sha256": "278d7a9ff5ff0eaa8137af0d8411566015803a85b055007581a829112c541d1c"
+    },
+    {
+      "source": "260310\\Top10 City Tech List.xlsx",
+      "target": "data\\north_america\\raw\\technicians\\Top10 City Tech List.xlsx",
+      "size_bytes": 18437,
+      "sha256": "64209fadb49970428ec28c3f516a025efc7ae0532426aff8e99842d5408fdecf"
+    },
+    {
+      "source": "260310\\production_input\\atlanta_engineer_region_assignment.csv",
+      "target": "data\\north_america\\db_input\\technicians\\atlanta_engineer_region_assignment.csv",
+      "size_bytes": 1684,
+      "sha256": "6ab71dd76eea30b991e9a4ab70007565378c8d96ee518fd6e7fffae7a0c435d0"
+    },
+    {
+      "source": "260310\\production_input\\atlanta_engineer_home_geocoded.csv",
+      "target": "data\\north_america\\db_input\\technicians\\atlanta_engineer_home_geocoded.csv",
+      "size_bytes": 3194,
+      "sha256": "2bf435f20b8ef264e592fb6a859b707d20e7aa01b1a7748eb785ef996e6f3f96"
+    },
+    {
+      "source": "data\\north_america\\raw\\technicians\\Top10 City Tech List.xlsx",
+      "target": "data\\north_america\\processed\\technicians\\Top10_City_Tech_List_map.xlsx",
+      "transformation": "remove_home_address_and_home_zip_for_server_map",
+      "columns": [
+        "Tech Market",
+        "EMP_NUMBER",
+        "Tech Name",
+        "ASM",
+        "RSM"
+      ],
+      "row_count": 113,
+      "source_sha256": "64209fadb49970428ec28c3f516a025efc7ae0532426aff8e99842d5408fdecf",
+      "sha256": "e7b454e8ee6e142941984b97d572ffcd69e3e935e2d27432c279bad46afdfe5f"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_atlanta_ga_2.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_atlanta_ga_2.csv",
+      "size_bytes": 27275,
+      "sha256": "7a945ff2b6461b7a06faa22ab26f07f65d906ec6cb82dbd6cd46762658c672cb"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_atlanta_ga_4.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_atlanta_ga_4.csv",
+      "size_bytes": 27275,
+      "sha256": "2075897d5b54e39fc3c372d8b180058f8afe10848a023a8802ad172875b9711d"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_atlanta_ga_5.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_atlanta_ga_5.csv",
+      "size_bytes": 27275,
+      "sha256": "4d0e5720f9f454a219c29f5c43afc59d39c266f97a76a52ddaca04dbebbb3e33"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_los_angeles_ca_3.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_los_angeles_ca_3.csv",
+      "size_bytes": 65147,
+      "sha256": "d8a0d0f43c628e05461d17e5dd00e3e0cecb87ae4e7177ae02ff703993acf29e"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_los_angeles_ca_4.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_los_angeles_ca_4.csv",
+      "size_bytes": 65147,
+      "sha256": "e82d71fe80d7525904b6984fecf159d3a12950aed968d6c5b1ce9763dde3b8db"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_los_angeles_ca_5.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_los_angeles_ca_5.csv",
+      "size_bytes": 65147,
+      "sha256": "38aa7d268d8044f5393e2d0723c03a63d831aaddb2be7bcc5ffac8b4e2a9bd1b"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_los_angeles_ca_6.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_los_angeles_ca_6.csv",
+      "size_bytes": 65085,
+      "sha256": "16d623a29d4b7cae4aacf5dae4c5146b9159f8acf4697ffa7ca98f409073a34c"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_los_angeles_ca_6_area_type.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_los_angeles_ca_6_area_type.csv",
+      "size_bytes": 122319,
+      "sha256": "05dfda18e3118e9e3ce8627aa8c06fdeea6173000bc9393e7385303b59a11a89"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_los_angeles_ca_bucket_sim_draft.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_los_angeles_ca_bucket_sim_draft.csv",
+      "size_bytes": 41578,
+      "sha256": "3e69cd8fe962d6dc76517fc5f33f150742763ff06ce30c94e553a71d892c60b8"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_north_jersey_nj_4.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_north_jersey_nj_4.csv",
+      "size_bytes": 70436,
+      "sha256": "946dcd15275de4b8928b70e0423b36b29ae69c3150989741f4805551211b9698"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_north_jersey_nj_5.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_north_jersey_nj_5.csv",
+      "size_bytes": 70436,
+      "sha256": "cb0dad6b7fff56d3254314b308c8ce53267c716ccfd42cb77f61a3a5a518c66f"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_north_jersey_nj_5_area_type.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_north_jersey_nj_5_area_type.csv",
+      "size_bytes": 140590,
+      "sha256": "9c9502e25c5e38977c6bb9b1a9cf3efbad246d243ba84b022db3e6c2e1e61578"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_north_jersey_nj_6.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_north_jersey_nj_6.csv",
+      "size_bytes": 70436,
+      "sha256": "e9bbccdba912cd015e012d94ef6f7e25a82b6403940537eaf36a1780b9341793"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_philadelphia_pa_3.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_philadelphia_pa_3.csv",
+      "size_bytes": 23877,
+      "sha256": "6baf72ee14d9a50ad409a7eb3396233c856b11741e51ac555173992e4ebdaa60"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_philadelphia_pa_3_area_type.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_philadelphia_pa_3_area_type.csv",
+      "size_bytes": 47283,
+      "sha256": "1fa9358ef6abb686f49bc6b439da26f73c2692ad2576629496203c01f24ffb98"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_san_diego_ca_3.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_san_diego_ca_3.csv",
+      "size_bytes": 11602,
+      "sha256": "c179139bcf01ce76ca9721cebd7b8fe60662925169c9fc64cae531cc59e4d8f7"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_san_diego_ca_3_area_type.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_san_diego_ca_3_area_type.csv",
+      "size_bytes": 24133,
+      "sha256": "0aa08b14a1cba43ffa9dc84f3fd1a20de655bcba0a6added0a1b3994b02908df"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_washington_dc_3.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_washington_dc_3.csv",
+      "size_bytes": 19129,
+      "sha256": "b1db24ada38df6a56e9776148e9e516016ad0fd7ec84b9fc96d5728adf57500f"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_washington_dc_3_area_type.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_washington_dc_3_area_type.csv",
+      "size_bytes": 38588,
+      "sha256": "82a762f089cf2c8a29a89b073194307708b7a7f7df8ba33456b5555c7a2685ab"
+    },
+    {
+      "source": "260310\\input\\fixed_region_maps\\fixed_region_postal_atlanta_ga_3.csv",
+      "target": "data\\north_america\\reviewed\\regions\\fixed_region_postal_atlanta_ga_3.csv",
+      "transformation": "preserve_reviewed_and_extend_missing_service_postals_from_legacy_seed",
+      "row_count": 199,
+      "service_postal_count": 191,
+      "added_postal_count": 15,
+      "added_postals": [
+        "30021",
+        "30035",
+        "30055",
+        "30148",
+        "30205",
+        "30234",
+        "30303",
+        "30322",
+        "30354",
+        "30363",
+        "30501",
+        "30554",
+        "30560",
+        "30564",
+        "30666"
+      ],
+      "missing_service_postal_count": 0,
+      "source_sha256": "78bc5b9abfc1716b31cba105f06594f8f360662eddac8feb2c1b902a6cb618c9",
+      "service_sha256": "e4409f8747c7f3d32b43e19b11c2c2cf13e09e2fed27e598908bf46e4c7d8fda",
+      "fallback_seed_sha256": "4e9bc989c0f219de6bacb0804f6612b6c1a34972d98debcecdb82f3757250020",
+      "sha256": "2b2c669c35ba79482a77c43fc085b6cfc404a7aa94eccf464f881b632c5c3d92"
+    },
+    {
+      "source": "data\\north_america\\reviewed\\regions\\fixed_region_postal_atlanta_ga_3.csv",
+      "target": "data\\north_america\\db_input\\regions\\atlanta_fixed_region_zip_3.csv",
+      "transformation": "reviewed_region_to_db_seed",
+      "row_count": 199,
+      "source_sha256": "2b2c669c35ba79482a77c43fc085b6cfc404a7aa94eccf464f881b632c5c3d92",
+      "sha256": "d61a29bc768fa031e9d7dd4777f23ae0fce2095136f693b3ef8b8be65baaf128"
+    },
+    {
+      "source": "260310\\production_input\\los_angeles_fixed_region_zip_6_area_type.csv",
+      "target": "data\\north_america\\db_input\\regions\\los_angeles_fixed_region_zip_6_area_type.csv",
+      "size_bytes": 130497,
+      "sha256": "02fab5f6dca007e060d4b0e64733f51db43a373009bb281097a6039d62e7247a"
+    },
+    {
+      "source": "260310\\production_input\\los_angeles_area_type_clusters_region_seed.csv",
+      "target": "data\\north_america\\db_input\\regions\\los_angeles_area_type_clusters_region_seed.csv",
+      "size_bytes": 130497,
+      "sha256": "02fab5f6dca007e060d4b0e64733f51db43a373009bb281097a6039d62e7247a"
+    },
+    {
+      "source": "260310\\production_input\\los_angeles_bucket_sim_draft_region_seed.csv",
+      "target": "data\\north_america\\db_input\\regions\\los_angeles_bucket_sim_draft_region_seed.csv",
+      "size_bytes": 41578,
+      "sha256": "3e69cd8fe962d6dc76517fc5f33f150742763ff06ce30c94e553a71d892c60b8"
+    },
+    {
+      "source": "260310\\production_input\\north_jersey_nj_fixed_region_zip_5_area_type.csv",
+      "target": "data\\north_america\\db_input\\regions\\north_jersey_nj_fixed_region_zip_5_area_type.csv",
+      "size_bytes": 140590,
+      "sha256": "9c9502e25c5e38977c6bb9b1a9cf3efbad246d243ba84b022db3e6c2e1e61578"
+    },
+    {
+      "source": "260310\\production_input\\philadelphia_pa_fixed_region_zip_3_area_type.csv",
+      "target": "data\\north_america\\db_input\\regions\\philadelphia_pa_fixed_region_zip_3_area_type.csv",
+      "size_bytes": 47283,
+      "sha256": "1fa9358ef6abb686f49bc6b439da26f73c2692ad2576629496203c01f24ffb98"
+    },
+    {
+      "source": "260310\\production_input\\san_diego_ca_fixed_region_zip_3_area_type.csv",
+      "target": "data\\north_america\\db_input\\regions\\san_diego_ca_fixed_region_zip_3_area_type.csv",
+      "size_bytes": 24133,
+      "sha256": "0aa08b14a1cba43ffa9dc84f3fd1a20de655bcba0a6added0a1b3994b02908df"
+    },
+    {
+      "source": "260310\\production_input\\washington_dc_fixed_region_zip_3_area_type.csv",
+      "target": "data\\north_america\\db_input\\regions\\washington_dc_fixed_region_zip_3_area_type.csv",
+      "size_bytes": 38588,
+      "sha256": "82a762f089cf2c8a29a89b073194307708b7a7f7df8ba33456b5555c7a2685ab"
+    }
+  ]
+}

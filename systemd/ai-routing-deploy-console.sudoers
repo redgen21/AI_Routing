@@ -1,0 +1,6 @@
+# Install once as /etc/sudoers.d/ai-routing-deploy-console with mode 0440.
+# Validate with: sudo visudo -cf /etc/sudoers.d/ai-routing-deploy-console
+Cmnd_Alias AI_ROUTING_APP_START = /usr/bin/systemctl start common-vrp.service, /usr/bin/systemctl start smart-routing.service, /usr/bin/systemctl start common-vrp-client.service, /usr/bin/systemctl start common-vrp-dev.service, /usr/bin/systemctl start smart-routing-dev.service, /usr/bin/systemctl start common-vrp-client-dev.service
+Cmnd_Alias AI_ROUTING_APP_RESTART = /usr/bin/systemctl restart common-vrp.service, /usr/bin/systemctl restart smart-routing.service, /usr/bin/systemctl restart common-vrp-client.service, /usr/bin/systemctl restart common-vrp-dev.service, /usr/bin/systemctl restart smart-routing-dev.service, /usr/bin/systemctl restart common-vrp-client-dev.service
+
+csda ALL=(root) NOPASSWD: AI_ROUTING_APP_START, AI_ROUTING_APP_RESTART

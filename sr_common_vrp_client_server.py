@@ -4,6 +4,7 @@ import colorsys
 import copy
 import io
 import json
+import os
 import re
 import uuid
 from pathlib import Path
@@ -20,30 +21,34 @@ except Exception:
     st_folium = None
 
 from smart_routing.area_map import load_city_map_data, load_zcta_geometry
+from smart_routing.data_catalog import na_data_path
 from smart_routing.live_atlanta_runtime import _load_config as _load_runtime_config
 from smart_routing.live_atlanta_runtime import _merge_service_geocodes
 from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
+from services.api.common_vrp_config import (
+    configured_api_url,
+    load_and_validate_common_config,
+)
 
 
 st.set_page_config(page_title="Smart Routing Client", layout="wide")
 
-CONFIG_COMMON_PATH = Path("config_common_vrp.json")
+_config_path_value = os.environ.get("COMMON_VRP_CONFIG_PATH", "").strip()
+if not _config_path_value:
+    raise RuntimeError(
+        "COMMON_VRP_CONFIG_PATH is required; select an explicit development or production config."
+    )
+CONFIG_COMMON_PATH = Path(_config_path_value).expanduser().resolve()
 
 
 def _load_configured_common_server_url(config_path: Path = CONFIG_COMMON_PATH) -> str:
-    fallback_url = "http://127.0.0.1:8065"
-    if not config_path.exists():
-        return fallback_url
-    try:
-        cfg = json.loads(config_path.read_text(encoding="utf-8"))
-    except Exception:
-        return fallback_url
-    return str(cfg.get("routing_api_url", fallback_url)).strip().rstrip("/") or fallback_url
+    cfg = load_and_validate_common_config(config_path)
+    return configured_api_url(cfg)
 
 
 DEFAULT_COMMON_SERVER_URL = _load_configured_common_server_url()
-MASTER_PATH = Path("data/All_In_One_Master.xlsx")
-PROFILE_SOURCE_PATH = Path("260310/production_input/Top 10_DMS_DMS2_Profile_20260317_production.xlsx")
+MASTER_PATH = na_data_path("client_master")
+PROFILE_SOURCE_PATH = na_data_path("profile_production")
 DEFAULT_SUBSIDIARY_NAME = "LGEAI"
 DEFAULT_STRATEGIC_CITY_NAME = "Atlanta, GA"
 DEFAULT_STRATEGIC_CITY_OPTIONS = [DEFAULT_STRATEGIC_CITY_NAME, "Los Angeles, CA"]
@@ -250,13 +255,7 @@ def _normalize_start_location_type(value: object) -> str:
 
 @st.cache_data(show_spinner=False)
 def _load_common_client_config(config_path: str = str(CONFIG_COMMON_PATH)) -> dict:
-    path = Path(config_path)
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    return load_and_validate_common_config(Path(config_path))
 
 
 def _resolve_city_osrm_url(strategic_city_name: str) -> str:

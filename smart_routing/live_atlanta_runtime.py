@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from .census_geocoder import CensusBatchGeocoder, build_address_key, load_geocode_cache, merge_service_with_geocodes
+from .data_catalog import na_data_path
 from .google_geocoder import GoogleGeocoder
 from .here_geocoder import HereGeocoder
 from .us_geocode_cleaner import build_us_geocode_query_variants
@@ -16,14 +17,14 @@ from .area_map import get_latest_geocoded_service_file
 from .service_preprocess import normalize_service_df
 
 
-DEFAULT_PROFILE_FILE = Path("260310/Top 10_DMS_DMS2_Profile_20260317.xlsx")
-DEFAULT_SYMPTOM_FILE = Path("data/Notification_Symptom_mapping_20241120_3depth.xlsx")
-DEFAULT_CONFIG_FILE = Path("config.json")
-DEFAULT_REGION_ZIP_PATH = Path("260310/production_input/atlanta_fixed_region_zip_3.csv")
+DEFAULT_PROFILE_FILE = na_data_path("profile_runtime")
+DEFAULT_SYMPTOM_FILE = na_data_path("symptom_mapping")
+DEFAULT_CONFIG_FILE = Path("config/config.json")
+DEFAULT_REGION_ZIP_PATH = na_data_path("region_seed_dir") / "atlanta_fixed_region_zip_3.csv"
 FALLBACK_REGION_ZIP_PATH = Path("260310/production_input/atlanta_fixed_region_zip_3_manual320.csv")
-DEFAULT_ENGINEER_REGION_PATH = Path("260310/production_input/atlanta_engineer_region_assignment.csv")
-DEFAULT_HOME_GEOCODE_PATH = Path("260310/production_input/atlanta_engineer_home_geocoded.csv")
-DEFAULT_HEAVY_REPAIR_LOOKUP_PATH = Path("260310/production_input/atlanta_heavy_repair_lookup.csv")
+DEFAULT_ENGINEER_REGION_PATH = na_data_path("atlanta_engineer_region")
+DEFAULT_HOME_GEOCODE_PATH = na_data_path("atlanta_engineer_home")
+DEFAULT_HEAVY_REPAIR_LOOKUP_PATH = na_data_path("heavy_repair_lookup")
 
 
 @dataclass
@@ -308,7 +309,6 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
         columns=[col for col in merged_df.columns if col.startswith("receipt_")],
         errors="ignore",
     )
-
     return merged_df
 
 

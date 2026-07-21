@@ -11,6 +11,7 @@ import streamlit as st
 
 import smart_routing.live_atlanta_runtime as live_runtime
 from smart_routing.area_map import load_city_map_data
+from smart_routing.data_catalog import na_data_path
 from smart_routing.live_atlanta_runtime import _load_config as _load_runtime_config
 from smart_routing.live_atlanta_runtime import _merge_service_geocodes
 from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
@@ -27,10 +28,10 @@ st.set_page_config(page_title="Smart Routing API Client", layout="wide")
 ROUTING_MODE = "na_general"
 DEFAULT_SERVER_URL = "http://20.51.244.68:8055"
 NETWORK_URL = "http://10.233.84.33:8503"
-CONFIG_PATH = Path("config.json")
+CONFIG_PATH = Path("config/config.json")
 INPUT_STORE_PATH = Path("data/atlanta_input_store.parquet")
-MASTER_PATH = Path("data/All_In_One_Master.xlsx")
-PROFILE_PATH = Path("260310/Top 10_DMS_DMS2_Profile_20260317.xlsx")
+MASTER_PATH = na_data_path("client_master")
+PROFILE_PATH = na_data_path("profile_raw")
 DEFAULT_STRATEGIC_CITY = "Atlanta, GA"
 DEFAULT_STATE = "GA"
 DEFAULT_COUNTRY = "USA"

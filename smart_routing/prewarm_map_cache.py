@@ -71,7 +71,7 @@ def _prewarm_route_groups(service_df, client: OSRMTripClient) -> int:
     return warmed
 
 
-def prewarm_all_map_caches(config_file: Path = Path("config.json")) -> PrewarmResult:
+def prewarm_all_map_caches(config_file: Path = Path("config/config.json")) -> PrewarmResult:
     client_map, default_client = _build_clients(config_file)
     city_count = 0
     region_option_count = 0

@@ -7,19 +7,20 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 
+from .data_catalog import na_data_path
 from .osrm_routing import OSRMConfig, OSRMTripClient
 from .region_sweep import _assign_city_regions
 from .routing_compare import _batch_assign_region_day_jobs
 
-PROFILE_FILE = Path("260310/Top 10_DMS_DMS2_Profile_20260317.xlsx")
-TECH_LIST_FILE = Path("260310/Top10 City Tech List.xlsx")
-ZCTA_ZIP_FILE = Path("data/geo/tl_2024_us_zcta520.zip")
-INPUT_DIR = Path("260310/input")
-DEFAULT_CONFIG_FILE = Path("config.json")
-CACHE_OUTPUT_DIR = Path("260310/output")
+PROFILE_FILE = na_data_path("profile_production")
+TECH_LIST_FILE = na_data_path("technician_map")
+ZCTA_ZIP_FILE = na_data_path("zcta_geometry")
+INPUT_DIR = na_data_path("region_candidates_dir")
+DEFAULT_CONFIG_FILE = Path("config/config.json")
+CACHE_OUTPUT_DIR = na_data_path("reports_dir")
 CACHE_DIR = Path("data/cache/area_map")
 ROUTE_EXPLORER_CACHE_DIR = Path("data/cache/route_explorer")
-FIXED_REGION_MAP_DIR = Path("260310/input/fixed_region_maps")
+FIXED_REGION_MAP_DIR = na_data_path("reviewed_regions_dir")
 BUCKET_SIM_DRAFT_REGION_COUNT = -901
 AREA_TYPE_CLUSTER_REGION_COUNT = -902
 DEFAULT_CITY = "Atlanta, GA"
@@ -1278,7 +1279,7 @@ def load_route_explorer_data(
     city_name: str,
     region_count: int | None = None,
     profile_path: Path = PROFILE_FILE,
-    config_file: Path = Path("config.json"),
+    config_file: Path = Path("config/config.json"),
     config_section: str = "area_map",
 ) -> RouteExplorerData:
     profile_path = _configured_area_map_path("profile_file", profile_path, config_section=config_section)

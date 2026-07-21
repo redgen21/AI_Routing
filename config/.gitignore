@@ -1,0 +1,3 @@
+*.json
+!*.template.json
+!data_catalog.json

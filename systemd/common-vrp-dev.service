@@ -1,0 +1,25 @@
+[Unit]
+Description=Common VRP API (Development)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=csda
+WorkingDirectory=/home/csda/AI_Routing/development
+Environment=PYTHONUNBUFFERED=1
+Environment=COMMON_VRP_CONFIG_PATH=/home/csda/AI_Routing/development/config_common_vrp.dev.json
+Environment=NA_DATA_CATALOG_PATH=/home/csda/AI_Routing/shared/config/data_catalog.development.json
+ExecStartPre=/usr/bin/test -x /home/csda/AI_Routing/development/.venv/bin/python
+ExecStartPre=/usr/bin/test -r /home/csda/AI_Routing/development/config_common_vrp.dev.json
+ExecStartPre=/home/csda/AI_Routing/development/.venv/bin/python /home/csda/AI_Routing/development/verify_deployment.py --config /home/csda/AI_Routing/development/config_common_vrp.dev.json --expected-environment development
+ExecStartPre=/home/csda/AI_Routing/development/.venv/bin/python /home/csda/AI_Routing/development/sr_common_vrp_api_server.py --config /home/csda/AI_Routing/development/config_common_vrp.dev.json --host 0.0.0.0 --port 8066 --expected-environment development --check-config
+ExecStart=/home/csda/AI_Routing/development/.venv/bin/python /home/csda/AI_Routing/development/sr_common_vrp_api_server.py --config /home/csda/AI_Routing/development/config_common_vrp.dev.json --host 0.0.0.0 --port 8066 --expected-environment development
+ExecStartPost=/bin/bash -c 'for i in {1..30}; do /usr/bin/curl --silent --show-error --fail http://127.0.0.1:8066/api/v1/common/contexts >/dev/null && exit 0; sleep 1; done; exit 1'
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=45
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

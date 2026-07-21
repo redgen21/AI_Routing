@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from .data_catalog import na_data_path
 from .region_sweep import _assign_city_regions, _build_clients
 from .routing_compare import (
     DEFAULT_EFFECTIVE_SERVICE_PER_SM,
@@ -15,8 +16,8 @@ from .routing_compare import (
     _load_service_df,
 )
 
-OUTPUT_DIR = Path("260310/output")
-DEFAULT_SERVICE_FILE = Path("260310/input/Service_202603181109_geocoded.csv")
+OUTPUT_DIR = na_data_path("reports_dir")
+DEFAULT_SERVICE_FILE = na_data_path("service_geocoded")
 
 
 @dataclass
@@ -87,7 +88,7 @@ def _build_city_overall_row(
 
 def export_daily_stats_workbook(
     service_file: Path = DEFAULT_SERVICE_FILE,
-    config_file: Path = Path("config.json"),
+    config_file: Path = Path("config/config.json"),
     output_dir: Path = OUTPUT_DIR,
     city_candidates: dict[str, list[int]] | None = None,
 ) -> DailyStatsExportResult:

@@ -132,7 +132,6 @@ def _clean_text_series(series: pd.Series) -> pd.Series:
         )
     )
 
-
 def _normalize_postal_code(series: pd.Series) -> pd.Series:
     working = series.astype("object")
     postal_numeric = pd.to_numeric(working, errors="coerce")
@@ -315,7 +314,7 @@ def _merge_with_nominatim_geocodes(
     nominatim_cfg = config.get("nominatim", {})
     base_url = _clean_text(nominatim_cfg.get("url", ""))
     if not base_url:
-        raise ValueError("Missing nominatim.url in config.json.")
+        raise ValueError("Missing nominatim.url in config/config.json.")
 
     country_codes = {str(k).strip().upper(): str(v).strip().lower() for k, v in nominatim_cfg.get("country_codes", {}).items()}
     working = _add_address_query_formats(normalized_df, country_codes)
@@ -748,7 +747,7 @@ def preprocess_service_file(
     source_file: Path,
     output_file: Path,
     *,
-    config_file: Path = Path("config.json"),
+    config_file: Path = Path("config/config.json"),
     geocode: bool = True,
     geocode_backend: str = "auto",
     retry_failed: bool = False,

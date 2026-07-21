@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import json
 import mimetypes
 import re
 import tempfile
@@ -11,6 +10,8 @@ from pathlib import Path
 from urllib import error, request
 
 import pandas as pd
+
+from .geocode_storage import GeocodeBackend, GeocodeStore, resolve_geocode_store
 
 
 DEFAULT_BENCHMARK = "Public_AR_Current"
@@ -241,22 +242,17 @@ def empty_geocode_cache_frame() -> pd.DataFrame:
     )
 
 
-def load_geocode_cache(path: Path) -> pd.DataFrame:
-    try:
-        from .common_vrp_db import load_geocode_cache_df
-
-        db_df = load_geocode_cache_df(path)
-        if not db_df.empty:
-            base = empty_geocode_cache_frame()
-            for col in base.columns:
-                if col not in db_df.columns:
-                    db_df[col] = ""
-            return db_df[base.columns.tolist()].copy()
-    except Exception:
-        pass
-    if not path.exists():
+def load_geocode_cache(
+    path: Path,
+    *,
+    store: GeocodeStore | None = None,
+    cache_backend: GeocodeBackend | str | None = None,
+    database_config_path: Path | str | None = None,
+) -> pd.DataFrame:
+    selected_store = store or resolve_geocode_store(cache_backend, database_config_path)
+    df = selected_store.load_cache(path)
+    if df.empty:
         return empty_geocode_cache_frame()
-    df = pd.read_csv(path, encoding="utf-8-sig", low_memory=False)
     base = empty_geocode_cache_frame()
     for col in base.columns:
         if col not in df.columns:
@@ -396,6 +392,9 @@ class CensusBatchGeocoder:
         daily_limit: int = DEFAULT_DAILY_LIMIT,
         timeout: int = DEFAULT_TIMEOUT,
         batch_size: int = DEFAULT_BATCH_SIZE,
+        store: GeocodeStore | None = None,
+        cache_backend: GeocodeBackend | str | None = None,
+        database_config_path: Path | str | None = None,
     ) -> None:
         self.cache_path = cache_path
         self.log_path = log_path
@@ -404,6 +403,7 @@ class CensusBatchGeocoder:
         self.daily_limit = int(daily_limit)
         self.timeout = int(timeout)
         self.batch_size = int(batch_size)
+        self.store = store or resolve_geocode_store(cache_backend, database_config_path)
 
     def run_for_service_file(
         self,
@@ -429,8 +429,7 @@ class CensusBatchGeocoder:
             self._save_cache(cache_df)
             self._append_daily_log(run_date or date.today().isoformat(), len(geocoded_df))
         else:
-            self._ensure_parent(self.cache_path)
-            if not self.cache_path.exists():
+            if not self.store.artifact_exists(self.cache_path):
                 self._save_cache(cache_df)
 
         merged_df = merge_service_with_geocodes(service_df, cache_df)
@@ -595,19 +594,10 @@ class CensusBatchGeocoder:
             return Path(tmp.name)
 
     def _load_cache(self) -> pd.DataFrame:
-        return load_geocode_cache(self.cache_path)
+        return load_geocode_cache(self.cache_path, store=self.store)
 
     def _save_cache(self, df: pd.DataFrame) -> None:
-        try:
-            from .common_vrp_db import cleanup_geocode_cache, upsert_geocode_cache_df
-
-            upsert_geocode_cache_df(self.cache_path, df)
-            cleanup_geocode_cache(retention_days=7)
-            return
-        except Exception:
-            pass
-        self._ensure_parent(self.cache_path)
-        df.to_csv(self.cache_path, index=False, encoding="utf-8-sig")
+        self.store.save_cache(self.cache_path, df)
 
     def _upsert_cache(self, cache_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame:
         merged = pd.concat([cache_df, new_df], ignore_index=True)
@@ -615,33 +605,12 @@ class CensusBatchGeocoder:
         return merged
 
     def _load_daily_log(self) -> dict[str, int]:
-        try:
-            from .common_vrp_db import load_geocode_daily_log
-
-            return load_geocode_daily_log("census")
-        except Exception:
-            pass
-        if not self.log_path.exists():
-            return {}
-        with self.log_path.open("r", encoding="utf-8") as handle:
-            raw = json.load(handle)
-        return {str(key): int(value) for key, value in raw.items()}
+        return self.store.load_daily_log("census", self.log_path)
 
     def _append_daily_log(self, run_date: str, added_count: int) -> None:
         if added_count <= 0:
             return
-        try:
-            from .common_vrp_db import increment_geocode_daily_log
-
-            increment_geocode_daily_log(run_date, added_count, "census")
-            return
-        except Exception:
-            pass
-        daily_log = self._load_daily_log()
-        daily_log[run_date] = int(daily_log.get(run_date, 0)) + int(added_count)
-        self._ensure_parent(self.log_path)
-        with self.log_path.open("w", encoding="utf-8") as handle:
-            json.dump(daily_log, handle, indent=2, ensure_ascii=False)
+        self.store.increment_daily_log(run_date, added_count, "census", self.log_path)
 
     def _write_report(self, result: GeocodeRunResult, report_path: Path) -> None:
         self._ensure_parent(report_path)

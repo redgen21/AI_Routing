@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from .osrm_routing import OSRMConfig, OSRMTripClient
 from .vrp_api_common import (
     DEFAULT_TIMEZONE_OFFSET,
     build_empty_result,
@@ -13,9 +16,73 @@ from .vrp_api_common import (
 )
 
 
-def _load_reference_inputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+HOME_DISTANCE_ONLY = "home_distance_only"
+PREFERRED_REGION_SOFT = "preferred_region_soft"
+CITY_ROUTING_POLICY = {
+    "Atlanta, GA": HOME_DISTANCE_ONLY,
+    "Los Angeles, CA": PREFERRED_REGION_SOFT,
+    "Los Angeles, CA - Area Type Clusters": PREFERRED_REGION_SOFT,
+    "Los Angeles, CA - Bucket Sim Draft": PREFERRED_REGION_SOFT,
+}
+
+
+def resolve_city_routing_policy(request_payload: dict[str, Any]) -> str:
+    configured = str((request_payload.get("options") or {}).get("region_policy", "")).strip()
+    if configured in {HOME_DISTANCE_ONLY, PREFERRED_REGION_SOFT}:
+        return configured
+    city_name = str(request_payload.get("city", "")).strip()
+    return CITY_ROUTING_POLICY.get(city_name, HOME_DISTANCE_ONLY)
+
+
+def _build_city_route_client(request_payload: dict[str, Any]) -> OSRMTripClient:
+    options = request_payload.get("options") or {}
+    osrm_url = str(options.get("osrm_url", "")).strip().rstrip("/")
+    if not osrm_url:
+        import smart_routing.production_assign_atlanta as base
+
+        routing_cfg = base._load_config().get("routing", {})
+        city_urls = routing_cfg.get("city_osrm_urls", {}) or {}
+        osrm_url = str(
+            city_urls.get(str(request_payload.get("city", "")).strip(), routing_cfg.get("osrm_url", ""))
+        ).strip().rstrip("/")
+    if not osrm_url:
+        raise ValueError(f"Missing OSRM URL for city {request_payload.get('city', '')!r}")
+    backend = str(options.get("distance_backend", "city_osrm_else_haversine")).strip().lower()
+    mode = "haversine" if backend == "haversine" else "osrm"
+    city_slug = re.sub(r"[^a-z0-9]+", "_", str(request_payload.get("city", "city")).lower()).strip("_")
+    return OSRMTripClient(
+        OSRMConfig(
+            osrm_url=osrm_url,
+            mode=mode,
+            osrm_profile=str(options.get("osrm_profile", "driving")).strip() or "driving",
+            cache_file=Path(f"data/cache/osrm_trip_cache_common_{city_slug}.csv"),
+        )
+    )
+
+
+def _load_reference_inputs(
+    request_payload: dict[str, Any] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Return optional legacy Atlanta references.
+
+    Common routing is payload/DB-driven and must not require workstation files.
+    The legacy fallback remains opt-in for historical comparison requests only.
+    """
+
+    use_legacy = bool(((request_payload or {}).get("options") or {}).get("use_legacy_reference_inputs", False))
+    if not use_legacy:
+        return (
+            pd.DataFrame(columns=["POSTAL_CODE", "region_seq", "new_region_name"]),
+            pd.DataFrame(columns=["SVC_ENGINEER_CODE"]),
+            pd.DataFrame(columns=["SVC_ENGINEER_CODE"]),
+        )
+
     import smart_routing.production_assign_atlanta as base
 
+    required_paths = (base.REGION_ZIP_PATH, base.ENGINEER_REGION_PATH, base.HOME_GEOCODE_PATH)
+    missing = [str(path) for path in required_paths if not Path(path).is_file()]
+    if missing:
+        raise FileNotFoundError(f"Legacy reference inputs were explicitly requested but are missing: {missing}")
     region_zip_df = pd.read_csv(base.REGION_ZIP_PATH, encoding="utf-8-sig")
     engineer_region_df = pd.read_csv(base.ENGINEER_REGION_PATH, encoding="utf-8-sig")
     home_df = pd.read_csv(base.HOME_GEOCODE_PATH, encoding="utf-8-sig")
@@ -24,6 +91,8 @@ def _load_reference_inputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
 
 def _build_region_lookup(region_zip_df: pd.DataFrame) -> dict[str, tuple[int, str]]:
+    if region_zip_df.empty or not {"POSTAL_CODE", "region_seq", "new_region_name"} <= set(region_zip_df.columns):
+        return {}
     lookup_df = region_zip_df[["POSTAL_CODE", "region_seq", "new_region_name"]].dropna(subset=["POSTAL_CODE"]).drop_duplicates()
     lookup_df["POSTAL_CODE"] = lookup_df["POSTAL_CODE"].astype(str).str.zfill(5)
     return {
@@ -92,6 +161,7 @@ def _build_engineer_frames_from_payload(
     reference_home_df: pd.DataFrame,
     region_centers: dict[int, tuple[float, float]],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    region_policy = resolve_city_routing_policy(request_payload)
     ref_engineer = reference_engineer_region_df.copy()
     ref_engineer["SVC_ENGINEER_CODE"] = ref_engineer["SVC_ENGINEER_CODE"].astype(str)
     ref_home = reference_home_df.copy()
@@ -189,9 +259,11 @@ def _build_engineer_frames_from_payload(
         slot_based_max_minutes = (max_slot_capacity + 1) * 60
         max_minutes = min(int(max_minutes), int(slot_based_max_minutes))
         region_row["priority_group"] = min(max(int(priority_group), 1), 3)
-        region_row["preferred_region_name"] = str(
-            tech.get("preferred_region_name", tech.get("preferred_area_name", ""))
-        ).strip()
+        region_row["preferred_region_name"] = (
+            str(tech.get("preferred_region_name", tech.get("preferred_area_name", ""))).strip()
+            if region_policy == PREFERRED_REGION_SOFT
+            else ""
+        )
         region_row["max_jobs"] = max_slot_capacity
         region_row["max_slots"] = max_slot_capacity
         region_row["max_minutes"] = max(1, int(max_minutes))
@@ -643,9 +715,12 @@ def _build_routing_diagnostics(
 
 
 def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
-    from smart_routing.production_assign_atlanta_vrp import build_atlanta_production_assignment_vrp_from_frames
+    from smart_routing.production_assign_atlanta_vrp import (
+        VRP_PREFERRED_REGION_MISMATCH_PENALTY_COST,
+        build_atlanta_production_assignment_vrp_from_frames,
+    )
 
-    region_zip_df, reference_engineer_region_df, reference_home_df = _load_reference_inputs()
+    region_zip_df, reference_engineer_region_df, reference_home_df = _load_reference_inputs(request_payload)
     region_lookup = _build_region_lookup(region_zip_df)
     service_df = _build_service_frame_from_payload(request_payload, region_lookup)
     region_centers = _build_region_centers_from_service_df(service_df)
@@ -657,6 +732,13 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
     )
     diagnostics = _build_routing_diagnostics(request_payload, service_df, engineer_region_df, home_df)
     diagnostics["routing_engine"] = "na_general"
+    city_policy = resolve_city_routing_policy(request_payload)
+    diagnostics["city_policy"] = city_policy
+    diagnostics["distance_backend"] = str((request_payload.get("options") or {}).get("distance_backend", ""))
+    diagnostics["preferred_region_mismatch_penalty_cost"] = (
+        int(VRP_PREFERRED_REGION_MISMATCH_PENALTY_COST) if city_policy == PREFERRED_REGION_SOFT else 0
+    )
+    diagnostics["solver_seed"] = "ortools_default"
     if service_df.empty:
         return _build_response_payload(request_payload, pd.DataFrame(), pd.DataFrame(), diagnostics=diagnostics)
     if engineer_region_df.empty or home_df.empty:
@@ -702,6 +784,10 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
         pd.Series([request_payload.get("options", {}).get("long_leg_penalty_multiplier")]),
         errors="coerce",
     ).iloc[0]
+    route_client = _build_city_route_client(request_payload)
+    diagnostics["osrm_url"] = route_client.cfg.osrm_url
+    diagnostics["osrm_profile"] = route_client.cfg.osrm_profile
+    diagnostics["matrix_fallback"] = "haversine_on_osrm_error" if route_client.cfg.mode == "osrm" else "haversine"
     assignment_df, summary_df, schedule_df = build_atlanta_production_assignment_vrp_from_frames(
         engineer_region_df=engineer_region_df,
         home_df=home_df,
@@ -718,6 +804,7 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
         max_home_to_job_min=float(max_home_to_job_min) if pd.notna(max_home_to_job_min) and float(max_home_to_job_min) > 0 else None,
         long_leg_penalty_start_min=float(long_leg_penalty_start_min) if pd.notna(long_leg_penalty_start_min) and float(long_leg_penalty_start_min) > 0 else None,
         long_leg_penalty_multiplier=float(long_leg_penalty_multiplier) if pd.notna(long_leg_penalty_multiplier) and float(long_leg_penalty_multiplier) > 0 else None,
+        route_client=route_client,
     )
     diagnostics["assignment_frame_count"] = int(len(assignment_df)) if assignment_df is not None else 0
     diagnostics["summary_frame_count"] = int(len(summary_df)) if summary_df is not None else 0

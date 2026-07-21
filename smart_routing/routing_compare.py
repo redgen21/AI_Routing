@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import pandas as pd
 
+from .data_catalog import na_data_path
 from .osrm_routing import OSRMConfig, OSRMTripClient
 from .region_design import (
     DEFAULT_BALANCE_WEIGHT,
@@ -18,9 +19,9 @@ from .region_design import (
     _rebalance_weighted_regions,
 )
 
-INPUT_DIR = Path("260310/input")
-OUTPUT_DIR = Path("260310/output")
-DEFAULT_SERVICE_FILE = INPUT_DIR / "Service_202603181109_geocoded.csv"
+INPUT_DIR = na_data_path("region_candidates_dir")
+OUTPUT_DIR = na_data_path("reports_dir")
+DEFAULT_SERVICE_FILE = na_data_path("service_geocoded")
 ROUTE_CITY_ALIASES = {
     "North Jersey, NJ": "Northeast",
     "Philadelphia, PA": "Northeast",
@@ -72,10 +73,59 @@ class RoutingCompareResult:
     overall_summary_df: pd.DataFrame
 
 
+@dataclass
+class RegionPlanEvaluationContext:
+    """Reusable routing baseline and policy for scoring region candidates."""
+
+    service_df: pd.DataFrame
+    current_route_df: pd.DataFrame
+    routing_config: dict
+    client_map: dict[str, OSRMTripClient]
+    default_client: OSRMTripClient
+
+
+@dataclass
+class RegionPlanEvaluationResult:
+    """Quantitative routing outputs for one versioned region-plan candidate."""
+
+    route_detail_df: pd.DataFrame
+    daily_summary_df: pd.DataFrame
+    city_summary_df: pd.DataFrame
+
+
 def _load_config(config_file: Path) -> dict:
     if not config_file.exists():
         return {}
     return json.loads(config_file.read_text(encoding="utf-8"))
+
+
+def _build_routing_clients(routing_cfg: dict) -> tuple[dict[str, OSRMTripClient], OSRMTripClient]:
+    distance_backend = str(routing_cfg.get("distance_backend", "osrm")).strip().lower()
+    default_client = OSRMTripClient(
+        OSRMConfig(
+            osrm_url=str(routing_cfg.get("osrm_url", "https://router.project-osrm.org")).rstrip("/"),
+            mode="haversine" if distance_backend == "city_osrm_else_haversine" else distance_backend,
+            osrm_profile=str(routing_cfg.get("osrm_profile", "driving")),
+            cache_file=Path(str(routing_cfg.get("osrm_cache_file", "data/cache/osrm_trip_cache.csv"))),
+        )
+    )
+    client_map: dict[str, OSRMTripClient] = {}
+    for city_name, city_url in routing_cfg.get("city_osrm_urls", {}).items():
+        cache_name = city_name.lower().replace(",", "").replace(" ", "_")
+        client_map[str(city_name)] = OSRMTripClient(
+            OSRMConfig(
+                osrm_url=str(city_url).rstrip("/"),
+                mode="osrm" if distance_backend == "city_osrm_else_haversine" else distance_backend,
+                osrm_profile=str(routing_cfg.get("osrm_profile", "driving")),
+                cache_file=Path(f"data/cache/osrm_trip_cache_{cache_name}.csv"),
+                fallback_osrm_url=(
+                    None
+                    if distance_backend == "city_osrm_else_haversine"
+                    else str(routing_cfg.get("osrm_url", "https://router.project-osrm.org")).rstrip("/")
+                ),
+            )
+        )
+    return client_map, default_client
 
 
 def _infer_region_service_file(service_file: Path, explicit_file: Path | None) -> Path:
@@ -476,16 +526,216 @@ def _build_overall_summary(city_df: pd.DataFrame) -> pd.DataFrame:
     return merged
 
 
+def prepare_region_plan_evaluation(
+    service_file: Path,
+    routing_config: dict,
+    cities: list[str] | None = None,
+) -> RegionPlanEvaluationContext:
+    """Load one routing baseline that can be reused across region candidates.
+
+    ``routing_config`` is the contents of the configuration's ``routing``
+    section. The returned context is opaque to region planners and keeps the
+    current-assignment route calculation out of each candidate evaluation.
+    """
+
+    service_df = _load_service_df(service_file)
+    if cities:
+        allowed = {str(city).strip() for city in cities}
+        service_df = service_df[service_df["STRATEGIC_CITY_NAME"].isin(allowed)].copy()
+    client_map, default_client = _build_routing_clients(routing_config)
+    current_route_df = _build_current_routes(service_df, client_map, default_client)
+    return RegionPlanEvaluationContext(
+        service_df=service_df,
+        current_route_df=current_route_df,
+        routing_config=dict(routing_config),
+        client_map=client_map,
+        default_client=default_client,
+    )
+
+
+def _validated_receipt_ids(service_df: pd.DataFrame, *, dataset_name: str, city_name: str) -> set[str]:
+    raw_ids = service_df["GSFS_RECEIPT_NO"]
+    normalized_ids = raw_ids.astype("string").str.strip()
+    null_mask = normalized_ids.isna() | normalized_ids.eq("") | normalized_ids.str.lower().isin(
+        {"nan", "none", "nat", "<na>", "null"}
+    )
+    if null_mask.any():
+        raise ValueError(
+            f"{dataset_name} for {city_name} contains {int(null_mask.sum())} null GSFS_RECEIPT_NO values"
+        )
+
+    duplicate_mask = normalized_ids.duplicated(keep=False)
+    if duplicate_mask.any():
+        duplicate_ids = sorted(normalized_ids[duplicate_mask].unique().tolist())
+        duplicate_preview = ", ".join(duplicate_ids[:5])
+        raise ValueError(
+            f"{dataset_name} for {city_name} contains duplicate GSFS_RECEIPT_NO values: {duplicate_preview}"
+        )
+    return set(normalized_ids.tolist())
+
+
+def evaluate_region_plan(
+    context: RegionPlanEvaluationContext,
+    region_service_df: pd.DataFrame,
+) -> RegionPlanEvaluationResult:
+    """Score one postal-to-region candidate with the routing pipeline.
+
+    The candidate must contain a non-null ``region_id`` for every service row.
+    Within each city, ``GSFS_RECEIPT_NO`` is the unique job identifier and the
+    candidate must contain exactly the same identifier set as the baseline.
+    Results preserve the existing route-detail, daily-summary, and city-summary
+    schemas used by routing comparison and region-count sweep reports.
+    """
+
+    required_columns = {"GSFS_RECEIPT_NO", "STRATEGIC_CITY_NAME", "region_id"}
+    missing_columns = sorted(required_columns.difference(region_service_df.columns))
+    if missing_columns:
+        raise ValueError(f"region plan is missing required columns: {', '.join(missing_columns)}")
+    if region_service_df.empty:
+        raise ValueError("region plan contains no service rows")
+    candidate_region_values = region_service_df["region_id"].astype("string").str.strip()
+    invalid_region_mask = (
+        candidate_region_values.isna()
+        | candidate_region_values.eq("")
+        | candidate_region_values.str.lower().isin({"nan", "none", "nat", "<na>", "null"})
+    )
+    if invalid_region_mask.any():
+        missing_count = int(invalid_region_mask.sum())
+        raise ValueError(f"region plan leaves {missing_count} service rows without region_id")
+    candidate_city_values = region_service_df["STRATEGIC_CITY_NAME"].astype("string").str.strip()
+    invalid_city_mask = candidate_city_values.isna() | candidate_city_values.eq("")
+    if invalid_city_mask.any():
+        raise ValueError(f"region plan contains {int(invalid_city_mask.sum())} service rows without city")
+
+    candidate_cities = {
+        str(city).strip()
+        for city in region_service_df["STRATEGIC_CITY_NAME"].dropna().unique()
+        if str(city).strip()
+    }
+    baseline_required_columns = {
+        "GSFS_RECEIPT_NO",
+        "STRATEGIC_CITY_NAME",
+        "service_date",
+        "latitude",
+        "longitude",
+    }
+    missing_baseline_columns = sorted(baseline_required_columns.difference(context.service_df.columns))
+    if missing_baseline_columns:
+        raise ValueError(f"routing baseline is missing required columns: {', '.join(missing_baseline_columns)}")
+
+    baseline_cities = {
+        str(city).strip()
+        for city in context.service_df["STRATEGIC_CITY_NAME"].dropna().unique()
+        if str(city).strip()
+    }
+    unknown_cities = sorted(candidate_cities.difference(baseline_cities))
+    if unknown_cities:
+        raise ValueError(f"region plan contains cities outside the routing baseline: {', '.join(unknown_cities)}")
+
+    baseline_city_values = context.service_df["STRATEGIC_CITY_NAME"].astype("string").str.strip()
+    for city_name in sorted(candidate_cities):
+        baseline_city_df = context.service_df[baseline_city_values.eq(city_name).fillna(False)]
+        candidate_city_df = region_service_df[candidate_city_values.eq(city_name).fillna(False)]
+        baseline_receipt_ids = _validated_receipt_ids(
+            baseline_city_df,
+            dataset_name="routing baseline",
+            city_name=city_name,
+        )
+        candidate_receipt_ids = _validated_receipt_ids(
+            candidate_city_df,
+            dataset_name="region plan",
+            city_name=city_name,
+        )
+        missing_receipt_ids = sorted(baseline_receipt_ids.difference(candidate_receipt_ids))
+        extra_receipt_ids = sorted(candidate_receipt_ids.difference(baseline_receipt_ids))
+        if missing_receipt_ids or extra_receipt_ids:
+            details: list[str] = []
+            if missing_receipt_ids:
+                details.append(
+                    f"missing {len(missing_receipt_ids)} baseline jobs ({', '.join(missing_receipt_ids[:5])})"
+                )
+            if extra_receipt_ids:
+                details.append(
+                    f"contains {len(extra_receipt_ids)} extra jobs ({', '.join(extra_receipt_ids[:5])})"
+                )
+            raise ValueError(f"region plan job coverage mismatch for {city_name}: {'; '.join(details)}")
+
+    baseline_routing_df = context.service_df[baseline_city_values.isin(candidate_cities).fillna(False)].copy()
+    baseline_routing_df = baseline_routing_df.drop(columns=["region_id"], errors="ignore")
+    baseline_routing_df["_evaluation_city"] = baseline_routing_df["STRATEGIC_CITY_NAME"].astype("string").str.strip()
+    baseline_routing_df["_evaluation_receipt"] = baseline_routing_df["GSFS_RECEIPT_NO"].astype("string").str.strip()
+
+    candidate_mapping_df = region_service_df[["STRATEGIC_CITY_NAME", "GSFS_RECEIPT_NO", "region_id"]].copy()
+    candidate_mapping_df["_evaluation_city"] = candidate_city_values
+    candidate_mapping_df["_evaluation_receipt"] = candidate_mapping_df["GSFS_RECEIPT_NO"].astype("string").str.strip()
+    candidate_mapping_df["region_id"] = candidate_region_values
+    candidate_mapping_df = candidate_mapping_df[["_evaluation_city", "_evaluation_receipt", "region_id"]]
+
+    try:
+        evaluated_region_service_df = baseline_routing_df.merge(
+            candidate_mapping_df,
+            on=["_evaluation_city", "_evaluation_receipt"],
+            how="left",
+            sort=False,
+            validate="one_to_one",
+        )
+    except pd.errors.MergeError as exc:
+        raise ValueError(f"region plan mapping is not one-to-one with routing baseline: {exc}") from exc
+    if len(evaluated_region_service_df) != len(baseline_routing_df):
+        raise ValueError("region plan mapping changed routing baseline row cardinality")
+    if evaluated_region_service_df["region_id"].isna().any():
+        raise ValueError("region plan mapping did not cover every routing baseline row")
+    evaluated_region_service_df = evaluated_region_service_df.drop(
+        columns=["_evaluation_city", "_evaluation_receipt"]
+    )
+
+    routing_cfg = context.routing_config
+    effective_service_per_sm = float(routing_cfg.get("effective_service_per_sm", DEFAULT_EFFECTIVE_SERVICE_PER_SM))
+    assignment_distance_backend = str(routing_cfg.get("assignment_distance_backend", "haversine")).strip().lower()
+    service_time_per_job_min = float(routing_cfg.get("service_time_per_job_min", 60.0))
+    max_work_min_per_sm_day = float(routing_cfg.get("max_work_min_per_sm_day", 480.0))
+    max_travel_min_per_sm_day = routing_cfg.get("max_travel_min_per_sm_day")
+    max_travel_km_per_sm_day = routing_cfg.get("max_travel_km_per_sm_day")
+    max_travel_min_per_sm_day = (
+        float(max_travel_min_per_sm_day) if max_travel_min_per_sm_day not in (None, "", 0) else None
+    )
+    max_travel_km_per_sm_day = (
+        float(max_travel_km_per_sm_day) if max_travel_km_per_sm_day not in (None, "", 0) else None
+    )
+
+    current_route_df = context.current_route_df[
+        context.current_route_df["STRATEGIC_CITY_NAME"].astype(str).str.strip().isin(candidate_cities)
+    ].copy()
+    integrated_route_df = _build_integrated_routes(
+        region_service_df=evaluated_region_service_df,
+        client_map=context.client_map,
+        default_client=context.default_client,
+        effective_service_per_sm=effective_service_per_sm,
+        service_time_per_job_min=service_time_per_job_min,
+        max_work_min_per_sm_day=max_work_min_per_sm_day,
+        max_travel_min_per_sm_day=max_travel_min_per_sm_day,
+        max_travel_km_per_sm_day=max_travel_km_per_sm_day,
+        assignment_distance_backend=assignment_distance_backend,
+    )
+    route_detail_df = pd.concat([current_route_df, integrated_route_df], ignore_index=True)
+    daily_summary_df = _build_daily_summary(route_detail_df)
+    city_summary_df = _build_city_summary(daily_summary_df)
+    return RegionPlanEvaluationResult(
+        route_detail_df=route_detail_df,
+        daily_summary_df=daily_summary_df,
+        city_summary_df=city_summary_df,
+    )
+
+
 def build_routing_compare(
     service_file: Path = DEFAULT_SERVICE_FILE,
     region_service_file: Path | None = None,
-    config_file: Path = Path("config.json"),
+    config_file: Path = Path("config/config.json"),
     output_dir: Path = OUTPUT_DIR,
     cities: list[str] | None = None,
 ) -> RoutingCompareResult:
     cfg = _load_config(config_file)
     routing_cfg = cfg.get("routing", {})
-    distance_backend = str(routing_cfg.get("distance_backend", "osrm")).strip().lower()
     effective_service_per_sm = float(routing_cfg.get("effective_service_per_sm", DEFAULT_EFFECTIVE_SERVICE_PER_SM))
     assignment_distance_backend = str(routing_cfg.get("assignment_distance_backend", "haversine")).strip().lower()
     service_time_per_job_min = float(routing_cfg.get("service_time_per_job_min", 60.0))
@@ -503,31 +753,7 @@ def build_routing_compare(
         service_df = service_df[service_df["STRATEGIC_CITY_NAME"].isin(allowed)].copy()
         region_service_df = region_service_df[region_service_df["STRATEGIC_CITY_NAME"].isin(allowed)].copy()
 
-    default_client = OSRMTripClient(
-        OSRMConfig(
-            osrm_url=str(routing_cfg.get("osrm_url", "https://router.project-osrm.org")).rstrip("/"),
-            mode="haversine" if distance_backend == "city_osrm_else_haversine" else distance_backend,
-            osrm_profile=str(routing_cfg.get("osrm_profile", "driving")),
-            cache_file=Path(str(routing_cfg.get("osrm_cache_file", "data/cache/osrm_trip_cache.csv"))),
-        )
-    )
-    client_map: dict[str, OSRMTripClient] = {}
-    city_osrm_urls = routing_cfg.get("city_osrm_urls", {})
-    for city_name, city_url in city_osrm_urls.items():
-        cache_name = city_name.lower().replace(",", "").replace(" ", "_")
-        client_map[str(city_name)] = OSRMTripClient(
-            OSRMConfig(
-                osrm_url=str(city_url).rstrip("/"),
-                mode="osrm" if distance_backend == "city_osrm_else_haversine" else distance_backend,
-                osrm_profile=str(routing_cfg.get("osrm_profile", "driving")),
-                cache_file=Path(f"data/cache/osrm_trip_cache_{cache_name}.csv"),
-                fallback_osrm_url=(
-                    None
-                    if distance_backend == "city_osrm_else_haversine"
-                    else str(routing_cfg.get("osrm_url", "https://router.project-osrm.org")).rstrip("/")
-                ),
-            )
-        )
+    client_map, default_client = _build_routing_clients(routing_cfg)
 
     current_route_df = _build_current_routes(service_df, client_map, default_client)
     integrated_route_df = _build_integrated_routes(

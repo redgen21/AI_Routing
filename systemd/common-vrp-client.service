@@ -1,15 +1,25 @@
 [Unit]
 Description=Common VRP Streamlit Client
-After=network.target common-vrp.service
+After=network-online.target common-vrp.service
+Requires=common-vrp.service
 
 [Service]
 Type=simple
 User=csda
-WorkingDirectory=/home/csda/AI_Routing
-Environment=PATH=/home/csda/AI_Routing/.venv/bin:/home/csda/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/bin/bash -lc 'cd /home/csda/AI_Routing && exec streamlit run sr_common_vrp_client_server.py --server.port 8501 --server.address 0.0.0.0'
-Restart=always
+WorkingDirectory=/home/csda/AI_Routing/production
+Environment=PATH=/home/csda/AI_Routing/production/.venv/bin:/home/csda/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=COMMON_VRP_CONFIG_PATH=/home/csda/AI_Routing/production/config_common_vrp.json
+Environment=NA_DATA_CATALOG_PATH=/home/csda/AI_Routing/shared/config/data_catalog.production.json
+ExecStartPre=/usr/bin/test -x /home/csda/AI_Routing/production/.venv/bin/streamlit
+ExecStartPre=/usr/bin/test -x /home/csda/AI_Routing/production/.venv/bin/python
+ExecStartPre=/usr/bin/test -r /home/csda/AI_Routing/production/config_common_vrp.json
+ExecStartPre=/home/csda/AI_Routing/production/.venv/bin/python /home/csda/AI_Routing/production/verify_deployment.py --config /home/csda/AI_Routing/production/config_common_vrp.json --expected-environment production
+ExecStart=/home/csda/AI_Routing/production/.venv/bin/streamlit run /home/csda/AI_Routing/production/sr_common_vrp_client_server.py --server.port 8501 --server.address 0.0.0.0
+ExecStartPost=/bin/bash -c 'for i in {1..30}; do /usr/bin/curl --silent --show-error --fail http://127.0.0.1:8501/_stcore/health >/dev/null && exit 0; sleep 1; done; exit 1'
+Restart=on-failure
 RestartSec=5
+TimeoutStartSec=45
+TimeoutStopSec=20
 
 [Install]
 WantedBy=multi-user.target

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import warnings
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from psycopg2.extras import execute_values
 
 from .area_map import get_latest_geocoded_service_file
 from .census_geocoder import normalize_postal_code
+from .data_catalog import na_data_path
 from .live_atlanta_runtime import _load_config as _load_runtime_config
 from .live_atlanta_runtime import _merge_service_geocodes
 
@@ -22,11 +24,32 @@ warnings.filterwarnings(
 )
 
 
-COMMON_CONFIG_PATH = Path("config_common_vrp.json")
-PROFILE_PATH = Path("260310/production_input/Top 10_DMS_DMS2_Profile_20260317_production.xlsx")
-DEFAULT_REGION_ZIP_PATH = Path("260310/production_input/atlanta_fixed_region_zip_3.csv")
-DEFAULT_HEAVY_REPAIR_LOOKUP_PATH = Path("260310/production_input/atlanta_heavy_repair_lookup.csv")
-DEFAULT_SYMPTOM_FILE = Path("data/Notification_Symptom_mapping_20241120_3depth.xlsx")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+COMMON_CONFIG_PATH = Path(
+    os.environ.get("COMMON_VRP_CONFIG_PATH", str(PROJECT_ROOT / "config" / "common_vrp.prod.json"))
+).resolve()
+GEOCODE_CACHE_RETENTION_DAYS = 7
+GEOCODE_ATTEMPT_RETENTION_DAYS = 400
+
+
+def _active_profile_path() -> Path:
+    """Resolve the selected catalog at call time, after environment setup."""
+    return na_data_path("profile_production")
+
+
+def _default_region_zip_path() -> Path:
+    """Resolve the selected catalog at call time, after environment setup."""
+    return na_data_path("region_seed_dir") / "atlanta_fixed_region_zip_3.csv"
+
+
+def _default_heavy_repair_lookup_path() -> Path:
+    """Resolve after an admin CLI has selected its data catalog."""
+    return na_data_path("heavy_repair_lookup")
+
+
+def _default_symptom_path() -> Path:
+    """Resolve after an admin CLI has selected its data catalog."""
+    return na_data_path("symptom_mapping")
 
 
 def _clean_text(value: Any) -> str:
@@ -292,12 +315,13 @@ create table if not exists common_geocode_cache (
 
 create table if not exists common_geocode_attempt_log (
     address_key text not null,
+    source_bucket text not null,
     attempted_date date not null,
     status text,
     source text,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
-    primary key (address_key, attempted_date)
+    primary key (address_key, source_bucket, attempted_date)
 );
 
 create table if not exists common_geocode_daily_log (
@@ -311,10 +335,63 @@ create table if not exists common_geocode_daily_log (
 """
 
 
+GEOCODE_ATTEMPT_LOG_MIGRATION_SQL = """
+alter table if exists common_geocode_attempt_log
+add column if not exists source_bucket text;
+
+update common_geocode_attempt_log
+set source_bucket = case
+    when lower(coalesce(source, '')) like '%here%' then 'here'
+    when lower(coalesce(source, '')) like '%google%' then 'google'
+    when lower(coalesce(source, '')) like '%census%' then 'census'
+    else 'default'
+end
+where source_bucket is null or btrim(source_bucket) = '';
+
+alter table if exists common_geocode_attempt_log
+alter column source_bucket set not null;
+
+do $$
+declare
+    current_pk_name text;
+    current_pk_columns text[];
+begin
+    select c.conname,
+           array_agg(a.attname::text order by k.ordinality)
+    into current_pk_name, current_pk_columns
+    from pg_constraint c
+    join pg_class t on t.oid = c.conrelid
+    join pg_namespace n on n.oid = t.relnamespace
+    join unnest(c.conkey) with ordinality as k(attnum, ordinality) on true
+    join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum
+    where t.relname = 'common_geocode_attempt_log'
+      and n.nspname = current_schema()
+      and c.contype = 'p'
+    group by c.conname;
+
+    if current_pk_name is not null
+       and current_pk_columns <> array['address_key', 'source_bucket', 'attempted_date']::text[] then
+        execute format(
+            'alter table common_geocode_attempt_log drop constraint %I',
+            current_pk_name
+        );
+        current_pk_name := null;
+    end if;
+
+    if current_pk_name is null then
+        alter table common_geocode_attempt_log
+        add constraint common_geocode_attempt_log_pkey
+        primary key (address_key, source_bucket, attempted_date);
+    end if;
+end $$;
+"""
+
+
 def init_schema(config_path: Path = COMMON_CONFIG_PATH) -> None:
     with get_db_connection(config_path) as conn:
         with conn.cursor() as cur:
             cur.execute(SCHEMA_SQL)
+            cur.execute(GEOCODE_ATTEMPT_LOG_MIGRATION_SQL)
             cur.execute(
                 """
                 alter table if exists common_routing_config_master
@@ -484,8 +561,9 @@ def init_schema(config_path: Path = COMMON_CONFIG_PATH) -> None:
             cur.execute(
                 """
                 delete from common_geocode_attempt_log
-                where updated_at < now() - interval '7 days'
-                """
+                where attempted_date < current_date - (%s || ' days')::interval
+                """,
+                (GEOCODE_ATTEMPT_RETENTION_DAYS,),
             )
             cur.execute(
                 """
@@ -583,6 +661,8 @@ def _execute_values_upsert(
     conflict_cols: list[str],
     update_cols: list[str],
     config_path: Path = COMMON_CONFIG_PATH,
+    *,
+    connection: Any | None = None,
 ) -> int:
     if not rows:
         return 0
@@ -598,6 +678,10 @@ def _execute_values_upsert(
         values %s
         {conflict_sql}
     """
+    if connection is not None:
+        with connection.cursor() as cur:
+            execute_values(cur, sql, rows)
+        return len(rows)
     with get_db_connection(config_path) as conn:
         with conn.cursor() as cur:
             execute_values(cur, sql, rows)
@@ -639,7 +723,12 @@ def _source_bucket_from_path(path: Path | str) -> str:
     return "default"
 
 
-def cleanup_geocode_cache(retention_days: int = 7, config_path: Path = COMMON_CONFIG_PATH) -> None:
+def cleanup_geocode_cache(
+    retention_days: int = GEOCODE_CACHE_RETENTION_DAYS,
+    config_path: Path = COMMON_CONFIG_PATH,
+    *,
+    attempt_retention_days: int = GEOCODE_ATTEMPT_RETENTION_DAYS,
+) -> None:
     with get_db_connection(config_path) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -647,8 +736,9 @@ def cleanup_geocode_cache(retention_days: int = 7, config_path: Path = COMMON_CO
                 (int(retention_days),),
             )
             cur.execute(
-                "delete from common_geocode_attempt_log where updated_at < now() - (%s || ' days')::interval",
-                (int(retention_days),),
+                "delete from common_geocode_attempt_log "
+                "where attempted_date < current_date - (%s || ' days')::interval",
+                (int(attempt_retention_days),),
             )
             cur.execute(
                 "delete from common_geocode_daily_log where updated_at < now() - (%s || ' days')::interval",
@@ -740,13 +830,16 @@ def increment_geocode_daily_log(
 
 
 def load_geocode_attempt_log_df(path: Path | str, config_path: Path = COMMON_CONFIG_PATH) -> pd.DataFrame:
+    bucket = _source_bucket_from_path(path)
     df = _fetch_df(
         """
         select address_key, attempted_date, status, source
         from common_geocode_attempt_log
-        where updated_at >= now() - interval '7 days'
+        where source_bucket = %s
+          and attempted_date >= current_date - (%s || ' days')::interval
         order by updated_at desc
         """,
+        (bucket, GEOCODE_ATTEMPT_RETENTION_DAYS),
         config_path=config_path,
     )
     return df
@@ -755,6 +848,7 @@ def load_geocode_attempt_log_df(path: Path | str, config_path: Path = COMMON_CON
 def upsert_geocode_attempt_log_df(path: Path | str, df: pd.DataFrame, config_path: Path = COMMON_CONFIG_PATH) -> int:
     if df.empty:
         return 0
+    bucket = _source_bucket_from_path(path)
     working = df.copy()
     for col in ["address_key", "attempted_date", "status", "source"]:
         if col not in working.columns:
@@ -767,12 +861,14 @@ def upsert_geocode_attempt_log_df(path: Path | str, df: pd.DataFrame, config_pat
     if working.empty:
         return 0
     working = working.where(pd.notna(working), None)
-    rows = [tuple(row.get(col) for col in ["address_key", "attempted_date", "status", "source"]) for _, row in working.iterrows()]
+    working["source_bucket"] = bucket
+    columns = ["address_key", "source_bucket", "attempted_date", "status", "source"]
+    rows = [tuple(row.get(col) for col in columns) for _, row in working.iterrows()]
     return _execute_values_upsert(
         "common_geocode_attempt_log",
-        ["address_key", "attempted_date", "status", "source"],
+        columns,
         rows,
-        ["address_key", "attempted_date"],
+        ["address_key", "source_bucket", "attempted_date"],
         ["status", "source"],
         config_path=config_path,
     )
@@ -819,7 +915,12 @@ def get_routing_config(subsidiary_name: str, strategic_city_name: str, config_pa
     return row
 
 
-def upsert_routing_config(config_row: dict[str, Any], config_path: Path = COMMON_CONFIG_PATH) -> int:
+def upsert_routing_config(
+    config_row: dict[str, Any],
+    config_path: Path = COMMON_CONFIG_PATH,
+    *,
+    connection: Any | None = None,
+) -> int:
     columns = [
         "subsidiary_name",
         "strategic_city_name",
@@ -847,6 +948,7 @@ def upsert_routing_config(config_row: dict[str, Any], config_path: Path = COMMON
         ["subsidiary_name", "strategic_city_name"],
         [col for col in columns if col not in {"subsidiary_name", "strategic_city_name"}],
         config_path=config_path,
+        connection=connection,
     )
 
 
@@ -863,7 +965,12 @@ def list_engineers(subsidiary_name: str, strategic_city_name: str, config_path: 
     )
 
 
-def upsert_technician_master(technician_row: dict[str, Any], config_path: Path = COMMON_CONFIG_PATH) -> int:
+def upsert_technician_master(
+    technician_row: dict[str, Any],
+    config_path: Path = COMMON_CONFIG_PATH,
+    *,
+    connection: Any | None = None,
+) -> int:
     subsidiary_name = _clean_text(technician_row.get("subsidiary_name"))
     strategic_city_name = _clean_text(technician_row.get("strategic_city_name"))
     employee_code = _clean_text(technician_row.get("employee_code"))
@@ -954,6 +1061,7 @@ def upsert_technician_master(technician_row: dict[str, Any], config_path: Path =
             "max_home_to_job_min",
         ],
         config_path=config_path,
+        connection=connection,
     )
 
 
@@ -1488,7 +1596,11 @@ def delete_avoid_area(
     return deleted
 
 
-def _seed_routing_config(config_path: Path = COMMON_CONFIG_PATH) -> None:
+def _seed_routing_config(
+    config_path: Path = COMMON_CONFIG_PATH,
+    *,
+    connection: Any | None = None,
+) -> None:
     cfg = load_common_config(config_path)
     seed = cfg.get("routing_seed", {})
     defaults = cfg.get("defaults", {})
@@ -1517,8 +1629,8 @@ def _seed_routing_config(config_path: Path = COMMON_CONFIG_PATH) -> None:
     context_rows = list(dict.fromkeys(row for row in context_rows if row[0] and row[1]))
     if bool(context_seed.get("replace", False)) and context_rows:
         configured_subsidiaries = sorted({subsidiary_name for subsidiary_name, _ in context_rows})
-        with get_db_connection(config_path) as conn:
-            with conn.cursor() as cur:
+        if connection is not None:
+            with connection.cursor() as cur:
                 for subsidiary_name in configured_subsidiaries:
                     allowed_cities = [city for sub, city in context_rows if sub == subsidiary_name]
                     cur.execute(
@@ -1529,7 +1641,20 @@ def _seed_routing_config(config_path: Path = COMMON_CONFIG_PATH) -> None:
                         """,
                         (subsidiary_name, allowed_cities),
                     )
-            conn.commit()
+        else:
+            with get_db_connection(config_path) as conn:
+                with conn.cursor() as cur:
+                    for subsidiary_name in configured_subsidiaries:
+                        allowed_cities = [city for sub, city in context_rows if sub == subsidiary_name]
+                        cur.execute(
+                            """
+                            delete from common_routing_config_master
+                            where subsidiary_name = %s
+                              and not (strategic_city_name = any(%s))
+                            """,
+                            (subsidiary_name, allowed_cities),
+                        )
+                conn.commit()
 
     for subsidiary_name, strategic_city_name in context_rows:
         resolved_osrm_url = city_osrm_urls.get(str(strategic_city_name), seed.get("osrm_url"))
@@ -1561,12 +1686,18 @@ def _seed_routing_config(config_path: Path = COMMON_CONFIG_PATH) -> None:
                 "timezone_offset": city_seed.get("timezone_offset", "-04:00"),
             },
             config_path=config_path,
+            connection=connection,
         )
 
 
-def _seed_technician_master(config_path: Path = COMMON_CONFIG_PATH) -> None:
-    slot_df = pd.read_excel(PROFILE_PATH, sheet_name="2. Slot")
-    address_df = pd.read_excel(PROFILE_PATH, sheet_name="4. Address")
+def _seed_technician_master(
+    config_path: Path = COMMON_CONFIG_PATH,
+    *,
+    connection: Any | None = None,
+) -> None:
+    profile_path = _active_profile_path()
+    slot_df = pd.read_excel(profile_path, sheet_name="2. Slot")
+    address_df = pd.read_excel(profile_path, sheet_name="4. Address")
     slot_df = slot_df.rename(columns={"Name": "employee_name", "SVC_ENGINEER_CODE": "employee_code", "SVC_CENTER_TYPE": "center_type"})
     slot_df["strategic_city_name"] = slot_df["STRATEGIC_CITY_NAME"].astype(str).str.strip()
     slot_df["employee_code"] = slot_df["employee_code"].astype(str).str.strip()
@@ -1660,11 +1791,16 @@ def _seed_technician_master(config_path: Path = COMMON_CONFIG_PATH) -> None:
         ["subsidiary_name", "strategic_city_name", "employee_code"],
         ["employee_name", "center_type", "home_address", "home_city", "home_state", "home_country", "home_postal_code", "home_latitude", "home_longitude", "active_flag", "priority_group", "max_home_to_job_min"],
         config_path=config_path,
+        connection=connection,
     )
 
 
-def _seed_technician_capabilities(config_path: Path = COMMON_CONFIG_PATH) -> None:
-    product_df = pd.read_excel(PROFILE_PATH, sheet_name="3. Product")
+def _seed_technician_capabilities(
+    config_path: Path = COMMON_CONFIG_PATH,
+    *,
+    connection: Any | None = None,
+) -> None:
+    product_df = pd.read_excel(_active_profile_path(), sheet_name="3. Product")
     product_df["subsidiary_name"] = "LGEAI"
     product_df["strategic_city_name"] = product_df["STRATEGIC_CITY_NAME"].astype(str).str.strip()
     product_df["employee_code"] = product_df["SVC_ENGINEER_CODE"].astype(str).str.strip()
@@ -1709,6 +1845,7 @@ def _seed_technician_capabilities(config_path: Path = COMMON_CONFIG_PATH) -> Non
         ["subsidiary_name", "strategic_city_name", "employee_code", "product_group_code", "product_code"],
         ["repair_allowed", "heavy_repair_allowed", "priority_score", "effective_start_date", "effective_end_date"],
         config_path=config_path,
+        connection=connection,
     )
 
 
@@ -1721,7 +1858,7 @@ def _region_seed_specs(config_path: Path = COMMON_CONFIG_PATH) -> list[dict[str,
             {
                 "subsidiary_name": defaults.get("subsidiary_name", "LGEAI"),
                 "strategic_city_name": defaults.get("strategic_city_name", "Atlanta, GA"),
-                "file": str(DEFAULT_REGION_ZIP_PATH),
+                "file": str(_default_region_zip_path()),
             }
         ]
 
@@ -1794,9 +1931,11 @@ def _replace_region_master_rows(
     strategic_city_name: str,
     rows: list[tuple[Any, ...]],
     config_path: Path = COMMON_CONFIG_PATH,
+    *,
+    connection: Any | None = None,
 ) -> int:
-    with get_db_connection(config_path) as conn:
-        with conn.cursor() as cur:
+    if connection is not None:
+        with connection.cursor() as cur:
             cur.execute(
                 """
                 delete from common_region_master
@@ -1804,7 +1943,17 @@ def _replace_region_master_rows(
                 """,
                 (subsidiary_name, strategic_city_name),
             )
-        conn.commit()
+    else:
+        with get_db_connection(config_path) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    delete from common_region_master
+                    where subsidiary_name = %s and strategic_city_name = %s
+                    """,
+                    (subsidiary_name, strategic_city_name),
+                )
+            conn.commit()
     return _execute_values_upsert(
         "common_region_master",
         [
@@ -1821,12 +1970,19 @@ def _replace_region_master_rows(
         ["subsidiary_name", "strategic_city_name", "postal_code"],
         ["region_seq", "region_name", "area_type", "region_center_latitude", "region_center_longitude"],
         config_path=config_path,
+        connection=connection,
     )
 
 
-def _seed_region_master(config_path: Path = COMMON_CONFIG_PATH) -> None:
+def _seed_region_master(
+    config_path: Path = COMMON_CONFIG_PATH,
+    *,
+    connection: Any | None = None,
+) -> None:
     for spec in _region_seed_specs(config_path):
         seed_path = Path(spec["file"])
+        if not seed_path.is_absolute() and not seed_path.exists():
+            seed_path = na_data_path("region_seed_dir") / seed_path.name
         if not seed_path.exists():
             continue
         subsidiary_name = str(spec["subsidiary_name"])
@@ -1861,14 +2017,25 @@ def _seed_region_master(config_path: Path = COMMON_CONFIG_PATH) -> None:
                     center[1],
                 )
             )
-        _replace_region_master_rows(subsidiary_name, strategic_city_name, rows, config_path=config_path)
+        _replace_region_master_rows(
+            subsidiary_name,
+            strategic_city_name,
+            rows,
+            config_path=config_path,
+            connection=connection,
+        )
 
 
-def _seed_heavy_repair_rules(config_path: Path = COMMON_CONFIG_PATH) -> None:
-    if DEFAULT_HEAVY_REPAIR_LOOKUP_PATH.exists():
-        lookup_df = pd.read_csv(DEFAULT_HEAVY_REPAIR_LOOKUP_PATH, encoding="utf-8-sig")
+def _seed_heavy_repair_rules(
+    config_path: Path = COMMON_CONFIG_PATH,
+    *,
+    connection: Any | None = None,
+) -> None:
+    heavy_repair_lookup_path = _default_heavy_repair_lookup_path()
+    if heavy_repair_lookup_path.exists():
+        lookup_df = pd.read_csv(heavy_repair_lookup_path, encoding="utf-8-sig")
     else:
-        lookup_df = pd.read_excel(DEFAULT_SYMPTOM_FILE)
+        lookup_df = pd.read_excel(_default_symptom_path())
     cols = ["SERVICE_PRODUCT_GROUP_CODE", "SERVICE_PRODUCT_CODE", "SYMP_CODE_THREE"]
     lookup_df = lookup_df[cols].dropna(subset=["SYMP_CODE_THREE"]).drop_duplicates()
     rows = [
@@ -1887,16 +2054,25 @@ def _seed_heavy_repair_rules(config_path: Path = COMMON_CONFIG_PATH) -> None:
         ["product_group_code", "product_code", "detailed_symptom_code"],
         [],
         config_path=config_path,
+        connection=connection,
     )
 
 
-def seed_default_masters(config_path: Path = COMMON_CONFIG_PATH) -> None:
+def seed_default_masters(
+    config_path: Path = COMMON_CONFIG_PATH,
+    *,
+    connection: Any | None = None,
+    initialize_schema: bool = True,
+) -> None:
     cfg = load_common_config(config_path)
     seed_options = cfg.get("master_seed", {}) if isinstance(cfg.get("master_seed", {}), dict) else {}
-    init_schema(config_path)
-    _seed_routing_config(config_path)
+    if initialize_schema:
+        if connection is not None:
+            raise ValueError("initialize_schema must be false when using an existing transaction connection.")
+        init_schema(config_path)
+    _seed_routing_config(config_path, connection=connection)
     if bool(seed_options.get("technician_master", True)):
-        _seed_technician_master(config_path)
-    _seed_technician_capabilities(config_path)
-    _seed_region_master(config_path)
-    _seed_heavy_repair_rules(config_path)
+        _seed_technician_master(config_path, connection=connection)
+    _seed_technician_capabilities(config_path, connection=connection)
+    _seed_region_master(config_path, connection=connection)
+    _seed_heavy_repair_rules(config_path, connection=connection)

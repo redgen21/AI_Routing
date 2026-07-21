@@ -1,0 +1,9 @@
+{
+  "protocol": "sftp",
+  "host": "<SERVER_IP>",
+  "sftp_port": 22,
+  "username": "<USERNAME>",
+  "password": "<PASSWORD>",
+  "remote_root": "/home/csda/AI_Routing",
+  "read_only": true
+}

@@ -1,32 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HOST="${1:-0.0.0.0}"
-PORT="${2:-8065}"
-CHECK_INTERVAL_SECONDS="${CHECK_INTERVAL_SECONDS:-10}"
-OUT_LOG="common_vrp_api.out.log"
-ERR_LOG="common_vrp_api.err.log"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+POLL_SECONDS="${POLL_SECONDS:-20}"
+ROOT="${SCRIPT_DIR}"
 
-cd "$(dirname "$0")"
-
-if [ -x ".venv/bin/python" ]; then
-  PYTHON_BIN=".venv/bin/python"
-else
-  PYTHON_BIN="python3"
-fi
-
-echo "[watch] Common VRP API watchdog started for ${HOST}:${PORT} (interval: ${CHECK_INTERVAL_SECONDS}s)"
+# shellcheck source=runtime_env.sh
+source "${SCRIPT_DIR}/runtime_env.sh"
+select_python
 
 while true; do
-  if ! pgrep -f "sr_common_vrp_api_server.py.*--port ${PORT}" >/dev/null 2>&1; then
-    echo "[watch] Common VRP API not running on port ${PORT}. Starting..."
-    nohup "${PYTHON_BIN}" sr_common_vrp_api_server.py --host "${HOST}" --port "${PORT}" > "${OUT_LOG}" 2> "${ERR_LOG}" &
-    sleep 2
-    if pgrep -f "sr_common_vrp_api_server.py.*--port ${PORT}" >/dev/null 2>&1; then
-      echo "[watch] Common VRP API started successfully."
-    else
-      echo "[watch] Failed to start Common VRP API. Check ${OUT_LOG} / ${ERR_LOG}."
-    fi
+  if ! wait_for_http_status "http://127.0.0.1:8065/api/v1/common/contexts" 200 1; then
+    "${SCRIPT_DIR}/start_common_vrp_prod.sh"
   fi
-  sleep "${CHECK_INTERVAL_SECONDS}"
+  sleep "${POLL_SECONDS}"
 done

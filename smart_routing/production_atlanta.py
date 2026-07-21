@@ -10,16 +10,18 @@ import pandas as pd
 
 from .area_map import get_latest_geocoded_service_file
 from .census_geocoder import load_geocode_cache, merge_service_with_geocodes
+from .data_catalog import na_data_path
 from .google_geocoder import GoogleGeocoder
 from .here_geocoder import HereGeocoder
 from .region_sweep import _assign_city_regions
 
 
-DEFAULT_PROFILE_FILE = Path("260310/Top 10_DMS_DMS2_Profile_20260317.xlsx")
-DEFAULT_SERVICE_FILE = Path("260310/input/Service_202603181109_geocoded.csv")
-DEFAULT_SYMPTOM_FILE = Path("data/Notification_Symptom_mapping_20241120_3depth.xlsx")
-DEFAULT_PRODUCTION_INPUT_DIR = Path("260310/production_input")
-DEFAULT_PRODUCTION_OUTPUT_DIR = Path("260310/production_output")
+DEFAULT_PROFILE_FILE = na_data_path("profile_runtime")
+DEFAULT_SERVICE_FILE = na_data_path("service_geocoded")
+DEFAULT_PRODUCTION_PROFILE_FILE = na_data_path("profile_production")
+DEFAULT_SYMPTOM_FILE = na_data_path("symptom_mapping")
+DEFAULT_PRODUCTION_INPUT_DIR = na_data_path("region_candidates_dir") / "atlanta_production_prep"
+DEFAULT_PRODUCTION_OUTPUT_DIR = na_data_path("reports_dir") / "atlanta_production_prep"
 MANUAL_BUCKET_FILE = Path("data/ATL Three Markets 2.xlsx")
 ATLANTA_CITY = "Atlanta, GA"
 EXCLUDED_CENTER_TYPES = {"MAJOR DEALER", "REGIONAL DEALER"}
@@ -481,7 +483,8 @@ def build_atlanta_production_inputs(
     symptom_file: Path = DEFAULT_SYMPTOM_FILE,
     production_input_dir: Path = DEFAULT_PRODUCTION_INPUT_DIR,
     production_output_dir: Path = DEFAULT_PRODUCTION_OUTPUT_DIR,
-    config_file: Path = Path("config.json"),
+    profile_output_file: Path = DEFAULT_PRODUCTION_PROFILE_FILE,
+    config_file: Path = Path("config/config.json"),
 ) -> AtlantaProductionPrepResult:
     sheets = _load_profile_sheets(profile_file)
     zip_df = sheets["1. Zip Coverage"].copy()
@@ -522,7 +525,7 @@ def build_atlanta_production_inputs(
     service_filtered_path = production_input_dir / "atlanta_service_filtered.csv"
     service_enriched_path = production_input_dir / "atlanta_service_enriched.csv"
     region_workload_summary_path = production_output_dir / "atlanta_region_workload_summary.csv"
-    profile_copy_path = production_input_dir / f"{profile_file.stem}_production.xlsx"
+    profile_copy_path = profile_output_file
 
     region_zip_df.to_csv(region_zip_path, index=False, encoding="utf-8-sig")
     engineer_region_df.to_csv(engineer_region_path, index=False, encoding="utf-8-sig")

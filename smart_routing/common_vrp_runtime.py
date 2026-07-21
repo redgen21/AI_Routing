@@ -12,8 +12,8 @@ import pandas as pd
 
 from .common_vrp_db import (
     COMMON_CONFIG_PATH,
-    DEFAULT_HEAVY_REPAIR_LOOKUP_PATH,
-    DEFAULT_SYMPTOM_FILE,
+    _default_heavy_repair_lookup_path,
+    _default_symptom_path,
     delete_routing_result,
     delete_routing_requests_for_date,
     get_latest_routing_request,
@@ -206,6 +206,8 @@ def _positive_float_or_none(value: object) -> float | None:
 
 
 def _default_time_limit_seconds(job_count: int, technician_count: int) -> int:
+    if job_count <= 15:
+        return 8
     if job_count <= 30:
         return 15
     if job_count <= 60:
@@ -269,6 +271,10 @@ def _build_server_routing_options(
                 }
             )
     return {
+        "distance_backend": str(routing_config.get("distance_backend", "city_osrm_else_haversine")),
+        "osrm_url": str(routing_config.get("osrm_url", "")).rstrip("/"),
+        "osrm_profile": str(routing_config.get("osrm_profile", "driving")),
+        "region_policy": str(routing_config.get("region_policy", "home_distance_only")),
         "timezone_offset": str(routing_config.get("timezone_offset", "-04:00")).strip() or "-04:00",
         "avoid_polygons": avoid_polygons,
         "avoid_penalty_multiplier": 4.0,
@@ -370,14 +376,15 @@ def _load_storage_config(config_path: Path = COMMON_CONFIG_PATH) -> dict[str, An
     return {
         "save_job_files": bool(storage_cfg.get("save_job_files", False)),
         "job_file_retention_days": max(retention_days, 1),
+        "job_archive_root": Path(storage_cfg.get("job_archive_root", COMMON_JOB_ARCHIVE_ROOT)),
     }
 
 
-def _cleanup_common_job_archives(retention_days: int) -> None:
-    if not COMMON_JOB_ARCHIVE_ROOT.exists():
+def _cleanup_common_job_archives(job_archive_root: Path, retention_days: int) -> None:
+    if not job_archive_root.exists():
         return
     cutoff = datetime.now(timezone.utc) - timedelta(days=max(int(retention_days), 1))
-    for job_dir in COMMON_JOB_ARCHIVE_ROOT.iterdir():
+    for job_dir in job_archive_root.iterdir():
         if not job_dir.is_dir():
             continue
         status_path = job_dir / "status.json"
@@ -413,9 +420,10 @@ def _write_common_job_archive(
     storage_cfg = _load_storage_config(config_path)
     if not storage_cfg["save_job_files"]:
         return
-    COMMON_JOB_ARCHIVE_ROOT.mkdir(parents=True, exist_ok=True)
-    _cleanup_common_job_archives(storage_cfg["job_file_retention_days"])
-    job_dir = COMMON_JOB_ARCHIVE_ROOT / str(routing_job_id).strip()
+    job_archive_root = storage_cfg["job_archive_root"]
+    job_archive_root.mkdir(parents=True, exist_ok=True)
+    _cleanup_common_job_archives(job_archive_root, storage_cfg["job_file_retention_days"])
+    job_dir = job_archive_root / str(routing_job_id).strip()
     job_dir.mkdir(parents=True, exist_ok=True)
     if request_payload is not None:
         (job_dir / "request.json").write_text(
@@ -552,12 +560,13 @@ def _normalize_heavy_repair_rules(rule_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _load_fallback_heavy_repair_rules() -> pd.DataFrame:
-    if DEFAULT_HEAVY_REPAIR_LOOKUP_PATH.exists():
-        lookup_df = pd.read_csv(DEFAULT_HEAVY_REPAIR_LOOKUP_PATH, encoding="utf-8-sig")
+    heavy_repair_lookup_path = _default_heavy_repair_lookup_path()
+    if heavy_repair_lookup_path.exists():
+        lookup_df = pd.read_csv(heavy_repair_lookup_path, encoding="utf-8-sig")
     else:
         from .production_atlanta import _build_heavy_repair_lookup
 
-        lookup_df = _build_heavy_repair_lookup(DEFAULT_SYMPTOM_FILE)
+        lookup_df = _build_heavy_repair_lookup(_default_symptom_path())
     return _normalize_heavy_repair_rules(lookup_df)
 
 

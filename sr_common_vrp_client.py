@@ -4,6 +4,7 @@ import colorsys
 import copy
 import io
 import json
+import os
 import re
 import uuid
 from pathlib import Path
@@ -20,19 +21,26 @@ except Exception:
     st_folium = None
 
 from smart_routing.area_map import load_city_map_data, load_zcta_geometry
+from smart_routing.data_catalog import na_data_path
 from smart_routing.live_atlanta_runtime import _load_config as _load_runtime_config
 from smart_routing.live_atlanta_runtime import _merge_service_geocodes
 from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
+from services.api.common_vrp_config import configured_api_url, load_and_validate_common_config
 
 
 st.set_page_config(page_title="Smart Routing Client", layout="wide")
 
-CONFIG_COMMON_PATH = Path("config_common_vrp.json")
+_config_path_value = os.environ.get("COMMON_VRP_CONFIG_PATH", "").strip()
+if not _config_path_value:
+    raise RuntimeError(
+        "COMMON_VRP_CONFIG_PATH is required; select an explicit development or production config."
+    )
+CONFIG_COMMON_PATH = Path(_config_path_value).expanduser().resolve()
 
 
-DEFAULT_COMMON_SERVER_URL = "http://20.51.244.68:8065"
-MASTER_PATH = Path("data/All_In_One_Master.xlsx")
-PROFILE_SOURCE_PATH = Path("260310/production_input/Top 10_DMS_DMS2_Profile_20260317_production.xlsx")
+DEFAULT_COMMON_SERVER_URL = configured_api_url(load_and_validate_common_config(CONFIG_COMMON_PATH))
+MASTER_PATH = na_data_path("client_master")
+PROFILE_SOURCE_PATH = na_data_path("profile_production")
 COMMON_JOB_STORE_PATH = Path("data/common_vrp_job_input.parquet")
 COMMON_TECHNICIAN_STORE_PATH = Path("data/common_vrp_technician_input.parquet")
 DEFAULT_SUBSIDIARY_NAME = "LGEAI"

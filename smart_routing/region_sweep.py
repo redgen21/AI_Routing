@@ -7,20 +7,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .data_catalog import na_data_path
 from .osrm_routing import OSRMConfig, OSRMTripClient
 from .region_design import _build_postal_stats, _weighted_kmeans
 from .routing_compare import (
-    DEFAULT_EFFECTIVE_SERVICE_PER_SM,
-    _build_city_summary,
-    _build_current_routes,
-    _build_daily_summary,
-    _build_integrated_routes,
-    _load_service_df,
+    evaluate_region_plan,
+    prepare_region_plan_evaluation,
 )
 
-OUTPUT_DIR = Path("260310/output")
-DEFAULT_SERVICE_FILE = Path("260310/input/Service_202603181109_geocoded.csv")
-FIXED_REGION_DIR = Path("260310/input/fixed_region_maps")
+OUTPUT_DIR = na_data_path("reports_dir")
+DEFAULT_SERVICE_FILE = na_data_path("service_geocoded")
+FIXED_REGION_DIR = na_data_path("reviewed_regions_dir")
 
 
 @dataclass
@@ -38,6 +35,8 @@ def _load_config(config_file: Path) -> dict:
 
 
 def _build_clients(routing_cfg: dict) -> tuple[dict[str, OSRMTripClient], OSRMTripClient]:
+    """Compatibility helper retained for the daily-statistics exporter."""
+
     distance_backend = str(routing_cfg.get("distance_backend", "osrm")).strip().lower()
     default_client = OSRMTripClient(
         OSRMConfig(
@@ -187,7 +186,7 @@ def _extract_outlier_metrics(route_df: pd.DataFrame) -> dict[str, float]:
 
 def sweep_region_counts(
     service_file: Path = DEFAULT_SERVICE_FILE,
-    config_file: Path = Path("config.json"),
+    config_file: Path = Path("config/config.json"),
     output_dir: Path = OUTPUT_DIR,
     city_candidates: dict[str, list[int]] | None = None,
 ) -> RegionSweepResult:
@@ -199,44 +198,25 @@ def sweep_region_counts(
 
     cfg = _load_config(config_file)
     routing_cfg = cfg.get("routing", {})
-    effective_service_per_sm = float(routing_cfg.get("effective_service_per_sm", DEFAULT_EFFECTIVE_SERVICE_PER_SM))
-    assignment_distance_backend = str(routing_cfg.get("assignment_distance_backend", "haversine")).strip().lower()
-    service_time_per_job_min = float(routing_cfg.get("service_time_per_job_min", 60.0))
-    max_work_min_per_sm_day = float(routing_cfg.get("max_work_min_per_sm_day", 480.0))
-    max_travel_min_per_sm_day = routing_cfg.get("max_travel_min_per_sm_day")
-    max_travel_km_per_sm_day = routing_cfg.get("max_travel_km_per_sm_day")
-    max_travel_min_per_sm_day = float(max_travel_min_per_sm_day) if max_travel_min_per_sm_day not in (None, "", 0) else None
-    max_travel_km_per_sm_day = float(max_travel_km_per_sm_day) if max_travel_km_per_sm_day not in (None, "", 0) else None
-    client_map, default_client = _build_clients(routing_cfg)
-    service_df = _load_service_df(service_file)
     target_cities = set(city_candidates.keys())
-    service_df = service_df[service_df["STRATEGIC_CITY_NAME"].isin(target_cities)].copy()
-
-    current_routes_all = _build_current_routes(service_df, client_map, default_client)
+    evaluation_context = prepare_region_plan_evaluation(
+        service_file=service_file,
+        routing_config=routing_cfg,
+        cities=sorted(target_cities),
+    )
+    service_df = evaluation_context.service_df
 
     summary_rows: list[dict] = []
     detail_frames: list[pd.DataFrame] = []
 
     for city_name, candidate_counts in city_candidates.items():
         service_city_df = service_df[service_df["STRATEGIC_CITY_NAME"] == city_name].copy()
-        current_city_routes = current_routes_all[current_routes_all["STRATEGIC_CITY_NAME"] == city_name].copy()
 
         for region_count in candidate_counts:
             region_service_df = _assign_city_regions(service_city_df, city_name, region_count)
-            integrated_routes = _build_integrated_routes(
-                region_service_df=region_service_df,
-                client_map=client_map,
-                default_client=default_client,
-                effective_service_per_sm=effective_service_per_sm,
-                service_time_per_job_min=service_time_per_job_min,
-                max_work_min_per_sm_day=max_work_min_per_sm_day,
-                max_travel_min_per_sm_day=max_travel_min_per_sm_day,
-                max_travel_km_per_sm_day=max_travel_km_per_sm_day,
-                assignment_distance_backend=assignment_distance_backend,
-            )
-            route_df = pd.concat([current_city_routes, integrated_routes], ignore_index=True)
-            daily_df = _build_daily_summary(route_df)
-            city_summary_df = _build_city_summary(daily_df)
+            evaluation = evaluate_region_plan(evaluation_context, region_service_df)
+            route_df = evaluation.route_detail_df
+            city_summary_df = evaluation.city_summary_df
             metrics = _extract_candidate_summary(city_summary_df)
             metrics.update(_extract_outlier_metrics(route_df))
             metrics["balance_score"] = round(metrics["balance_score"] + max(metrics["overflow_480_ratio_delta"], 0.0) * 0.50, 2)

@@ -13,6 +13,7 @@ from folium.plugins import MarkerCluster
 
 from smart_routing.area_map import load_city_map_data
 from smart_routing.bigquery_runtime import query_service_data
+from smart_routing.data_catalog import na_data_path
 from smart_routing.live_atlanta_runtime import build_runtime_atlanta_inputs
 from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
 import smart_routing.production_assign_atlanta as production_assign_atlanta
@@ -21,8 +22,8 @@ from smart_routing.production_assign_atlanta_vrp import build_atlanta_production
 
 st.set_page_config(page_title="Atlanta Smart Routing", layout="wide")
 
-CONFIG_FILE = Path("config.json")
-PROFILE_FILE = Path("260310/Top 10_DMS_DMS2_Profile_20260317.xlsx")
+CONFIG_FILE = Path("config/config.json")
+PROFILE_FILE = na_data_path("profile_raw")
 
 LIVE_STAGE_LABELS = [
     "Loading input data",

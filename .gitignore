@@ -3,8 +3,11 @@ __pycache__/
 *.pyo
 *.pyd
 
-.streamlit/
+.streamlit/*
+!.streamlit/config.toml
 .pytest_cache/
+/deployment/
+/.artifact-admin-test/
 
 260310/input/
 260310/output/
@@ -20,9 +23,25 @@ data/*.csv
 data/*.xlsx
 data/*.zip
 data/*.json
+data/north_america/**
+!data/north_america/README.md
+!data/north_america/reviewed/
+!data/north_america/reviewed/regions/
+!data/north_america/reviewed/regions/*.csv
+!data/north_america/db_input/
+!data/north_america/db_input/regions/
+!data/north_america/db_input/regions/*.csv
+!data/north_america/catalog/
+!data/north_america/catalog/migration_manifest.json
 
 보고서/
 
 *.log
 *.tmp
 *.bak
+
+# Server-only runtime configs and secrets
+/config.json
+/config_common_vrp.json
+/config_common_vrp.dev.json
+/config/*.local.json

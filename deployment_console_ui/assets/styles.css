@@ -1,0 +1,27 @@
+/* Local, Fluent-inspired operational shell. No remote fonts, scripts, or icons. */
+:root {
+  --console-blue: #0f6cbd;
+  --console-blue-hover: #115ea3;
+  --console-border: #d1d1d1;
+  --console-muted: #616161;
+}
+[data-testid="stSidebar"] { background: #f7f9fc; border-right: 1px solid var(--console-border); }
+[data-testid="stSidebar"] > div:first-child { padding-top: 0.8rem; }
+.console-brand { color: #0f172a; font-size: 1.05rem; font-weight: 700; line-height: 1.25; margin: .4rem .3rem 1.4rem; }
+.console-brand span { color: var(--console-muted); font-size: .78rem; font-weight: 500; }
+.nav-group { color: #424242; font-size: .72rem; font-weight: 700; letter-spacing: .04em; margin: 1.05rem .45rem .35rem; text-transform: uppercase; }
+[data-testid="stSidebar"] .stButton > button { border: 0; border-radius: 4px; color: #242424; justify-content: flex-start; margin: 1px 0; min-height: 2.25rem; text-align: left; }
+[data-testid="stSidebar"] .stButton > button:hover { background: #e8f2fc; color: #0f548c; }
+[data-testid="stSidebar"] .stButton > button[kind="primary"] { background: #dbeeff; color: #0b4f8a; font-weight: 650; }
+[data-testid="stSidebar"] .stButton > button:disabled { opacity: .55; }
+.console-toolbar { align-items: center; border-bottom: 1px solid var(--console-border); display: flex; justify-content: space-between; margin: -.3rem 0 1.25rem; padding: .25rem 0 1rem; }
+.console-toolbar h1 { font-size: 1.5rem; line-height: 1.2; margin: 0; }
+.console-toolbar p { color: var(--console-muted); font-size: .85rem; margin: .2rem 0 0; }
+.environment-badge { border-radius: 999px; font-size: .78rem; font-weight: 700; padding: .35rem .75rem; }
+.environment-badge.development { background: #e8f5e9; color: #0b6a35; }
+.environment-badge.production { background: #fff4ce; color: #8a4b00; }
+[data-testid="stMetric"] { background: #fff; border: 1px solid #e1e5ea; border-radius: 6px; padding: .65rem .85rem; }
+[data-testid="stMetricLabel"] { color: var(--console-muted); font-size: .78rem; }
+.stButton > button[kind="primary"] { background: var(--console-blue); border-color: var(--console-blue); }
+.stButton > button[kind="primary"]:hover { background: var(--console-blue-hover); border-color: var(--console-blue-hover); }
+@media (max-width: 800px) { .console-toolbar { align-items: flex-start; gap: .6rem; flex-direction: column; } }

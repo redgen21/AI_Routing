@@ -1,0 +1,48 @@
+[agents]
+max_threads = 4
+max_depth = 1
+interrupt_message = true
+
+[agents.luna_worker]
+description = "Repository exploration, mechanical edits, documentation, logs, and test execution."
+config_file = "agents/luna-worker.toml"
+
+[agents.terra_routing_data]
+description = "Routing input ingestion, canonical schemas, quality, lineage, seed, and backfill specialist."
+config_file = "agents/terra-routing-data.toml"
+
+[agents.terra_geospatial]
+description = "Coordinates, geocoding, postal geometry, spatial joins, and geospatial quality specialist."
+config_file = "agents/terra-geospatial.toml"
+
+[agents.terra_clustering_allocation]
+description = "Territory clustering, DMS/DMS2 policy, postal allocation, balance, and region-plan specialist."
+config_file = "agents/terra-clustering-allocation.toml"
+
+[agents.terra_vrp_solver]
+description = "OR-Tools/VROOM constraints, objectives, daily technician assignment, and visit sequencing specialist."
+config_file = "agents/terra-vrp-solver.toml"
+
+[agents.terra_osrm_engine]
+description = "OSRM profiles, road networks, distance/time matrices, cache, and routing-engine specialist."
+config_file = "agents/terra-osrm-engine.toml"
+
+[agents.terra_routing_api]
+description = "Routing API, database runtime, job state, idempotency, retry, and service interface specialist."
+config_file = "agents/terra-routing-api.toml"
+
+[agents.terra_routing_ui]
+description = "Streamlit/map UI, KPI, upload workflow, route visualization, and result consistency specialist."
+config_file = "agents/terra-routing-ui.toml"
+
+[agents.terra_routing_architecture]
+description = "Cross-layer boundaries, contracts, logical database, security, reliability, and integration specialist."
+config_file = "agents/terra-routing-architecture.toml"
+
+[agents.terra_platform]
+description = "Environment isolation, packaging, services, systemd, health, release, and rollback specialist."
+config_file = "agents/terra-platform.toml"
+
+[agents.qa_routing_reviewer]
+description = "Independent read-only review for regression, constraints, data, performance, and operations."
+config_file = "agents/qa-routing-reviewer.toml"

@@ -5,10 +5,12 @@ from pathlib import Path
 
 import pandas as pd
 
-PROFILE_FILE = Path("260310/Top 10_DMS_DMS2_Profile_20260317.xlsx")
-SERVICE_FILE = Path("260310/Service_202603181109.csv")
-INPUT_DIR = Path("260310/input")
-OUTPUT_DIR = Path("260310/output")
+from .data_catalog import na_data_path
+
+PROFILE_FILE = na_data_path("profile_raw")
+SERVICE_FILE = na_data_path("service_raw")
+INPUT_DIR = na_data_path("region_candidates_dir") / "profile_sync"
+OUTPUT_DIR = na_data_path("reports_dir") / "profile_sync"
 ACTIVE_CENTER_TYPES = {"DMS"}
 DEFAULT_SLOT = 7
 

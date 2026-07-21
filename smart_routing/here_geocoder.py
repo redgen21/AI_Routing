@@ -17,6 +17,7 @@ from .census_geocoder import (
     normalize_text,
     read_table,
 )
+from .geocode_storage import GeocodeBackend, GeocodeStore, resolve_geocode_store
 
 
 DEFAULT_TIMEOUT = 30
@@ -49,6 +50,9 @@ class HereGeocoder:
         sleep_sec: float = DEFAULT_SLEEP_SEC,
         min_query_score: float = DEFAULT_MIN_QUERY_SCORE,
         min_field_score: float = DEFAULT_MIN_FIELD_SCORE,
+        store: GeocodeStore | None = None,
+        cache_backend: GeocodeBackend | str | None = None,
+        database_config_path: Path | str | None = None,
     ) -> None:
         self.api_key = api_key.strip()
         self.cache_path = cache_path
@@ -58,6 +62,7 @@ class HereGeocoder:
         self.sleep_sec = float(sleep_sec)
         self.min_query_score = float(min_query_score)
         self.min_field_score = float(min_field_score)
+        self.store = store or resolve_geocode_store(cache_backend, database_config_path)
 
     def run_for_unmatched(
         self,
@@ -76,12 +81,13 @@ class HereGeocoder:
         census_cache = self._load_cache(census_cache_path)
         here_cache = self._load_cache(self.cache_path)
         here_attempt_log = self._load_attempt_log(self.attempt_log_path)
+        monthly_attempt_log = self._attempts_for_month(here_attempt_log, run_month)
 
         already_done = set(census_cache["address_key"]).union(set(here_cache["address_key"]))
         if not ignore_attempt_log_once:
-            already_done = already_done.union(set(here_attempt_log["address_key"]))
+            already_done = already_done.union(set(monthly_attempt_log["address_key"]))
         pending_df = unique_df[~unique_df["address_key"].isin(already_done)].copy()
-        monthly_used = self._count_monthly_attempts(here_attempt_log, run_month)
+        monthly_used = int(len(monthly_attempt_log))
         monthly_remaining = max(self.monthly_limit - monthly_used, 0)
         pending_df = pending_df.head(monthly_remaining).copy()
 
@@ -108,15 +114,17 @@ class HereGeocoder:
             merged = pd.concat([here_cache, new_df], ignore_index=True)
             merged = merged.drop_duplicates(subset=["address_key"], keep="last").reset_index(drop=True)
             self._save_cache(merged)
-        elif not self.cache_path.exists():
+        elif not self.store.artifact_exists(self.cache_path):
             self._save_cache(here_cache)
 
         attempt_df = pd.DataFrame(attempt_rows) if attempt_rows else self._empty_attempt_log_frame()
         if not attempt_df.empty:
             merged_attempt = pd.concat([here_attempt_log, attempt_df], ignore_index=True)
-            merged_attempt = merged_attempt.drop_duplicates(subset=["address_key"], keep="last").reset_index(drop=True)
+            merged_attempt = merged_attempt.drop_duplicates(
+                subset=["address_key", "attempted_date"], keep="last"
+            ).reset_index(drop=True)
             self._save_attempt_log(merged_attempt)
-        elif not self.attempt_log_path.exists():
+        elif not self.store.artifact_exists(self.attempt_log_path):
             self._save_attempt_log(here_attempt_log)
 
         return HereFallbackResult(
@@ -338,20 +346,9 @@ class HereGeocoder:
         return True
 
     def _load_cache(self, path: Path) -> pd.DataFrame:
-        try:
-            from .common_vrp_db import load_geocode_cache_df
-
-            db_df = load_geocode_cache_df(path)
-            if not db_df.empty:
-                for col in self._empty_cache_frame().columns:
-                    if col not in db_df.columns:
-                        db_df[col] = ""
-                return db_df[self._empty_cache_frame().columns.tolist()].copy()
-        except Exception:
-            pass
-        if not path.exists():
+        df = self.store.load_cache(path)
+        if df.empty:
             return self._empty_cache_frame()
-        df = pd.read_csv(path, encoding="utf-8-sig", low_memory=False)
         for col in self._empty_cache_frame().columns:
             if col not in df.columns:
                 df[col] = ""
@@ -379,48 +376,19 @@ class HereGeocoder:
         return df[self._empty_cache_frame().columns.tolist()].copy()
 
     def _save_cache(self, df: pd.DataFrame) -> None:
-        try:
-            from .common_vrp_db import cleanup_geocode_cache, upsert_geocode_cache_df
-
-            upsert_geocode_cache_df(self.cache_path, df)
-            cleanup_geocode_cache(retention_days=7)
-            return
-        except Exception:
-            pass
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(self.cache_path, index=False, encoding="utf-8-sig")
+        self.store.save_cache(self.cache_path, df)
 
     def _load_attempt_log(self, path: Path) -> pd.DataFrame:
-        try:
-            from .common_vrp_db import load_geocode_attempt_log_df
-
-            db_df = load_geocode_attempt_log_df(path)
-            if not db_df.empty:
-                for col in self._empty_attempt_log_frame().columns:
-                    if col not in db_df.columns:
-                        db_df[col] = ""
-                return db_df[self._empty_attempt_log_frame().columns.tolist()].copy()
-        except Exception:
-            pass
-        if not path.exists():
+        df = self.store.load_attempt_log(path)
+        if df.empty:
             return self._empty_attempt_log_frame()
-        df = pd.read_csv(path, encoding="utf-8-sig", low_memory=False)
         for col in self._empty_attempt_log_frame().columns:
             if col not in df.columns:
                 df[col] = ""
         return df[self._empty_attempt_log_frame().columns.tolist()].copy()
 
     def _save_attempt_log(self, df: pd.DataFrame) -> None:
-        try:
-            from .common_vrp_db import cleanup_geocode_cache, upsert_geocode_attempt_log_df
-
-            upsert_geocode_attempt_log_df(self.attempt_log_path, df)
-            cleanup_geocode_cache(retention_days=7)
-            return
-        except Exception:
-            pass
-        self.attempt_log_path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(self.attempt_log_path, index=False, encoding="utf-8-sig")
+        self.store.save_attempt_log(self.attempt_log_path, df)
 
     @staticmethod
     def _normalize_run_date(run_date: str | None) -> date:
@@ -430,10 +398,14 @@ class HereGeocoder:
 
     @staticmethod
     def _count_monthly_attempts(df: pd.DataFrame, run_month: str) -> int:
+        return int(len(HereGeocoder._attempts_for_month(df, run_month)))
+
+    @staticmethod
+    def _attempts_for_month(df: pd.DataFrame, run_month: str) -> pd.DataFrame:
         if df.empty or "attempted_date" not in df.columns:
-            return 0
+            return df.iloc[0:0].copy()
         attempted = pd.to_datetime(df["attempted_date"], errors="coerce")
-        return int((attempted.dt.strftime("%Y-%m") == run_month).sum())
+        return df.loc[attempted.dt.strftime("%Y-%m").eq(run_month)].copy()
 
     @staticmethod
     def _to_float(value: object) -> float | None:

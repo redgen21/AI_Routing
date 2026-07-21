@@ -12,7 +12,7 @@ from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 from .vrp_api_common import format_planned_timestamp
 
 
-CONFIG_JSON_PATH = Path("config.json")
+CONFIG_JSON_PATH = Path("config/config.json")
 FIXED_Z_WEEKEND_SLOTS = ["09:00", "10:00", "11:00", "12:00"]
 
 

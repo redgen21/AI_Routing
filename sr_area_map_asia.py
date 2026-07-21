@@ -26,7 +26,7 @@ from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
 
 st.set_page_config(page_title="Asia Routing Map", layout="wide")
 
-CONFIG_FILE = Path("config.json")
+CONFIG_FILE = Path("config/config.json")
 AREA_MAP_CONFIG_SECTION = "area_map_asia"
 PROFILE_FILE = Path("260310/Top 10_DMS_DMS2_Profile_20260317.xlsx")
 PRODUCTION_INPUT_DIR = Path("260310/production_input")
