@@ -9,6 +9,7 @@ if [ -d /mnt/data/ai-routing/osrm ]; then
   DEFAULT_OSRM_STORAGE_ROOT="/mnt/data/ai-routing/osrm"
 fi
 OSRM_STORAGE_ROOT="${OSRM_STORAGE_ROOT:-${DEFAULT_OSRM_STORAGE_ROOT}}"
+OSRM_IMAGE="${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend:latest}"
 CONTAINER="osrm-korea"
 PORT="5000"
 LOG_MAX_SIZE="${OSRM_DOCKER_LOG_MAX_SIZE:-100m}"
@@ -29,7 +30,7 @@ docker run -d \
   --log-opt "max-file=${LOG_MAX_FILE}" \
   -p "${PORT}:5000" \
   -v "${OSRM_STORAGE_ROOT}:/data:ro" \
-  ghcr.io/project-osrm/osrm-backend \
+  "${OSRM_IMAGE}" \
   osrm-routed --algorithm mld \
   "/data/south-korea/south-korea-latest.osrm"
 

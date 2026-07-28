@@ -1,0 +1,17 @@
+﻿scenario,region,jobs,requested_slots,assigned_jobs,unassigned_jobs,assigned_slots
+Atlanta_3area,Atlanta_3area ATL East,654,875,534,120,688
+Atlanta_3area,Atlanta_3area ATL South,302,403,248,54,324
+Atlanta_3area,Atlanta_3area ATL West,548,718,502,46,651
+Atlanta_3area,OUTSIDE_ACTIVE_PLAN,2,2,0,2,0
+Atlanta_6area_new,Atlanta_6area_new Zone 1,370,475,300,70,378
+Atlanta_6area_new,Atlanta_6area_new Zone 2,364,495,325,39,437
+Atlanta_6area_new,Atlanta_6area_new Zone 3,99,121,81,18,93
+Atlanta_6area_new,Atlanta_6area_new Zone 4,286,394,239,47,323
+Atlanta_6area_new,Atlanta_6area_new Zone 5,385,511,301,84,376
+Atlanta_6area_new,OUTSIDE_ACTIVE_PLAN,2,2,0,2,0
+Atlanta_6area_overlab,Atlanta_6area_overlab Zone 1,287,384,261,26,343
+Atlanta_6area_overlab,Atlanta_6area_overlab Zone 2,383,503,357,26,461
+Atlanta_6area_overlab,Atlanta_6area_overlab Zone 3,99,121,86,13,101
+Atlanta_6area_overlab,Atlanta_6area_overlab Zone 4,389,514,326,63,427
+Atlanta_6area_overlab,Atlanta_6area_overlab Zone 5,346,474,293,53,387
+Atlanta_6area_overlab,OUTSIDE_ACTIVE_PLAN,2,2,0,2,0

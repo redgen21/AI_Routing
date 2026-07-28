@@ -9,6 +9,12 @@ if [ -d /mnt/data/ai-routing/osrm ]; then
   DEFAULT_OSRM_STORAGE_ROOT="/mnt/data/ai-routing/osrm"
 fi
 OSRM_STORAGE_ROOT="${OSRM_STORAGE_ROOT:-${DEFAULT_OSRM_STORAGE_ROOT}}"
+OSRM_IMAGE="${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend:latest}"
+REQUIRED_SUFFIXES=(
+  partition cells cell_metrics cnbg datasource_names ebg ebg_nodes edges
+  fileIndex geometry icd mldgr names properties ramIndex tld tls
+  turn_duration_penalties turn_weight_penalties
+)
 
 # Format: "<dir_name>|<display_name>|<download_url>"
 CITY_ENTRIES=(
@@ -47,11 +53,14 @@ matches_selected_region() {
 }
 
 cd "${BASE_DIR}"
+docker pull "${OSRM_IMAGE}"
+IMAGE_ID="$(docker image inspect "${OSRM_IMAGE}" --format '{{.Id}}')"
 if [ "${#SELECTED_REGIONS[@]}" -gt 0 ]; then
   echo "Selected region filter: ${SELECTED_REGIONS[*]}"
 fi
 
 update_count=0
+changed_regions=()
 for entry in "${CITY_ENTRIES[@]}"; do
   IFS='|' read -r dir_name display_name download_url <<< "${entry}"
   if ! matches_selected_region "${dir_name}" "${display_name}"; then
@@ -92,8 +101,25 @@ for entry in "${CITY_ENTRIES[@]}"; do
     exit 1
   fi
 
+  artifacts_complete=true
+  for suffix in "${REQUIRED_SUFFIXES[@]}"; do
+    if [ ! -s "${city_dir}/${dir_name}-latest.osrm.${suffix}" ]; then
+      artifacts_complete=false
+      break
+    fi
+  done
+  image_changed=true
+  if [ -f "${city_dir}/.osrm-image-id" ] && [ "$(cat "${city_dir}/.osrm-image-id")" = "${IMAGE_ID}" ]; then
+    image_changed=false
+  fi
+  if [ -f "${pbf_path}" ] && cmp -s "${tmp_path}" "${pbf_path}" && [ "${artifacts_complete}" = "true" ] && [ "${image_changed}" = "false" ]; then
+    rm -f "${tmp_path}"
+    echo "Unchanged: ${pbf_path}"
+    continue
+  fi
   mv -f "${tmp_path}" "${pbf_path}"
-  echo "Saved: ${pbf_path}"
+  changed_regions+=("${dir_name}")
+  echo "Changed: ${pbf_path}"
 done
 
 if [ "${update_count}" -eq 0 ]; then
@@ -102,6 +128,11 @@ if [ "${update_count}" -eq 0 ]; then
 fi
 
 echo "=== Rebuilding USA OSRM artifacts ==="
-OSRM_STORAGE_ROOT="${OSRM_STORAGE_ROOT}" bash "${BASE_DIR}/install_osrm_usa.sh" "${SELECTED_REGIONS[@]}"
+if [ "${#changed_regions[@]}" -eq 0 ]; then
+  echo "No USA PBF changes detected; build and container restart skipped."
+  exit 0
+fi
+OSRM_STORAGE_ROOT="${OSRM_STORAGE_ROOT}" bash "${BASE_DIR}/install_osrm_usa.sh" "${changed_regions[@]}"
+OSRM_STORAGE_ROOT="${OSRM_STORAGE_ROOT}" bash "${BASE_DIR}/run_osrm_usa.sh" "${changed_regions[@]}"
 
 echo "USA OSRM update completed."

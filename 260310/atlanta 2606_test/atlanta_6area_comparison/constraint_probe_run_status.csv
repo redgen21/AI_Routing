@@ -1,0 +1,89 @@
+﻿promise_date,probe,status,runtime_seconds,assigned_jobs,note
+20260601,baseline,main_response,33.60871299999417,60,
+20260601,capacity,completed,21.12932290000026,77,
+20260601,work_time,completed,18.938110100018093,60,
+20260601,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260602,baseline,main_response,35.3547733000014,69,
+20260602,capacity,completed,21.032232700003078,77,
+20260602,work_time,completed,20.706500900007086,68,
+20260602,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260603,baseline,main_response,34.374838199990336,65,
+20260603,capacity,completed,20.896635499986587,71,
+20260603,work_time,completed,19.619898400007514,65,
+20260603,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260604,baseline,main_response,32.647044900018955,58,
+20260604,capacity,completed,19.333050400018692,64,
+20260604,work_time,completed,17.737057099991944,58,
+20260604,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260605,baseline,main_response,34.33304019999923,58,
+20260605,capacity,completed,21.145036300003994,72,
+20260605,work_time,completed,19.432843999995384,56,
+20260605,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260608,baseline,main_response,34.63361499999883,52,
+20260608,capacity,completed,19.75034929998219,66,
+20260608,work_time,completed,19.68507020000834,52,
+20260608,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260609,baseline,main_response,32.61215229998925,56,
+20260609,capacity,completed,19.774357599992072,70,
+20260609,work_time,completed,18.06165119999787,56,
+20260609,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260610,baseline,main_response,31.762964900000952,50,
+20260610,capacity,completed,18.05337690000306,62,
+20260610,work_time,completed,17.530941700009862,50,
+20260610,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260611,baseline,main_response,33.080146799999056,54,
+20260611,capacity,completed,19.82260590000078,61,
+20260611,work_time,completed,18.65185530000599,54,
+20260611,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260612,baseline,main_response,32.6419520000054,54,
+20260612,capacity,completed,19.1864474999893,65,
+20260612,work_time,completed,17.714580800005933,54,
+20260612,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260615,baseline,main_response,33.79046560000279,56,
+20260615,capacity,completed,19.900904000009177,57,
+20260615,work_time,completed,19.220094199990854,56,
+20260615,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260616,baseline,main_response,35.753614599991124,51,
+20260616,capacity,completed,11.206977099995129,60,
+20260616,work_time,completed,21.399787000002107,51,
+20260616,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260617,baseline,main_response,33.34633269999176,50,
+20260617,capacity,completed,19.721986399992602,55,
+20260617,work_time,completed,18.541298199997982,50,
+20260617,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260618,baseline,main_response,35.373055699979886,63,
+20260618,capacity,completed,22.262871099985205,72,
+20260618,work_time,completed,20.40414729999611,63,
+20260618,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260619,baseline,main_response,34.15500920001068,68,
+20260619,capacity,completed,22.021381800004747,76,
+20260619,work_time,completed,19.478964000009,67,
+20260619,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260622,baseline,main_response,33.045792200020514,56,
+20260622,capacity,not_needed,<NA>,0,
+20260622,work_time,not_needed,<NA>,0,
+20260622,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260623,baseline,main_response,29.244310199981555,33,
+20260623,capacity,completed,15.841319300001487,39,
+20260623,work_time,completed,14.69788689998677,33,
+20260623,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260624,baseline,main_response,36.71910809999099,58,
+20260624,capacity,completed,23.037634500011336,67,
+20260624,work_time,completed,21.72428850000142,57,
+20260624,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260625,baseline,main_response,32.27137890001177,50,
+20260625,capacity,completed,18.61103979998734,51,
+20260625,work_time,completed,17.531137899990426,49,
+20260625,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260626,baseline,main_response,30.862018200015882,40,
+20260626,capacity,completed,17.7428501000104,48,
+20260626,work_time,completed,16.38865840001381,40,
+20260626,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260629,baseline,main_response,35.35890299998573,54,
+20260629,capacity,completed,20.520639900001697,55,
+20260629,work_time,completed,20.29697580001084,54,
+20260629,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed
+20260630,baseline,main_response,35.87860610001371,65,
+20260630,capacity,completed,22.10711560002528,71,
+20260630,work_time,completed,21.545135599997593,65,
+20260630,travel_distance,not_configured,<NA>,0,travel caps not configured; no travel-distance probe was needed

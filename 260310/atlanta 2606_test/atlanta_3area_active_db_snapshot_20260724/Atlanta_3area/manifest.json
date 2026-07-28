@@ -1,0 +1,63 @@
+{
+  "schema": "region-workbook-import/v1",
+  "environment": "development",
+  "write_target": "vrp_db_dev only",
+  "production_write_prohibited": true,
+  "source": {
+    "path": "260310\\atlanta 2606_test\\new_region\\atlanta_3area_canonical_workbook.xlsx",
+    "sha256": "7f861cd9000c6e2af6202f643184a376c4bcaef8ec6a02851fac76c5a0c11f4b",
+    "parent_workbook": "atlanta_3area_canonical_workbook.xlsx",
+    "technician_source_city": "Atlanta, GA"
+  },
+  "plan_id": "atlanta_3area_20260723",
+  "city": "Atlanta_3area",
+  "territories": [
+    {
+      "seq": 1,
+      "source_territory": "ATL East",
+      "canonical_postal_count": 123,
+      "technician_count": 5
+    },
+    {
+      "seq": 2,
+      "source_territory": "ATL South",
+      "canonical_postal_count": 96,
+      "technician_count": 3
+    },
+    {
+      "seq": 3,
+      "source_territory": "ATL West",
+      "canonical_postal_count": 101,
+      "technician_count": 5
+    }
+  ],
+  "regions_without_technicians": [],
+  "row_accounting": {
+    "area_input_nonblank": 320,
+    "area_accepted": 320,
+    "area_rejected": 0,
+    "canonical_unique_postals": 320,
+    "technician_input": 13,
+    "technician_accepted": 13,
+    "technician_rejected": 0
+  },
+  "null_policy": "blank formatting rows ignored; populated invalid rows rejected",
+  "duplicate_policy": "exact duplicate keeps earliest row and rejects later rows; distinct-territory duplicate creates primary plus overflow only when enabled",
+  "overflow_policy": {
+    "enabled": false,
+    "explicit_relation_syntax_accepted": false,
+    "distinct_territory_duplicate_accepted": false
+  },
+  "technician_name_policy": "source names excluded from generated artifacts; employee_code is master lookup key",
+  "units": {
+    "postal_code": "US ZIP five-digit string",
+    "region_seq": "integer",
+    "penalty_cost": "policy cost units"
+  },
+  "artifacts": {
+    "boundary_overflow.csv": "6fe91798f1c369f4ed6328b53f9cdd5910201c65fe23156af5496f1d80e345dd",
+    "region_postals.csv": "b644fad4190788c02ba3c4033000fe73694c58b11148a7d12ced4994bdd1f8f1",
+    "rejects.csv": "adeaeb4b732ccfaad28d3d0bf78ca2fa9c1f741b576273d84540c3caa69776ef",
+    "technician_assignments.csv": "b28a8ef354d5dcc83512056c444c4c732e64940e4e85f0703604f401eac595c2"
+  }
+}

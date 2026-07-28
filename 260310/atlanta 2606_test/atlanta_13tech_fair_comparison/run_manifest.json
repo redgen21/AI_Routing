@@ -1,0 +1,98 @@
+{
+  "schema_version": "atlanta_fair_13tech_comparison/v1",
+  "generated_at_utc": "2026-07-23T05:27:00.815935+00:00",
+  "period": {
+    "calendar_start": "2026-06-01",
+    "calendar_end": "2026-06-30",
+    "execution_scope": "all 22 available June 2026 business dates"
+  },
+  "dates": [
+    20260601,
+    20260602,
+    20260603,
+    20260604,
+    20260605,
+    20260608,
+    20260609,
+    20260610,
+    20260611,
+    20260612,
+    20260615,
+    20260616,
+    20260617,
+    20260618,
+    20260619,
+    20260622,
+    20260623,
+    20260624,
+    20260625,
+    20260626,
+    20260629,
+    20260630
+  ],
+  "completed_date_count": 22,
+  "aligned_jobs": 1506,
+  "fair_technician_input": {
+    "path": "260310\\atlanta 2606_test\\atlanta_technicians_20260601_20260630_fair_13tech.csv",
+    "sha256": "63e2bed2cadfe5bda5a7ec9b6fe5331e31328373f08adcd766fcc86331258cf5",
+    "excluded_codes": [
+      "AI102933",
+      "AI105115"
+    ],
+    "unique_employee_codes": [
+      "AI005576",
+      "AI102087",
+      "AI102315",
+      "AI102448",
+      "AI102608",
+      "AI102961",
+      "AI102977",
+      "AI103128",
+      "AI103146",
+      "AI103261",
+      "AI103264",
+      "AI103317",
+      "AI105116"
+    ]
+  },
+  "scenarios": {
+    "Integrated_13tech": "new integrated/no-region OR-Tools solve",
+    "Atlanta_6area_13tech": "reviewed Atlanta6 result copied unchanged; capacity recalculated from fair 13-tech input"
+  },
+  "candidate_reuse": {
+    "source": "260310\\atlanta 2606_test\\atlanta_6area_comparison\\atlanta_6area_routing_results.csv",
+    "source_sha256": "4b05ec98816b94693f7d6960217853cd1a7e56e1684c699025546b0de0e2a249",
+    "copied_result": "atlanta_6area_13tech_routing_results_20260601_20260630.csv",
+    "ai105115_assigned_jobs": 0
+  },
+  "fixed_job_policy": {
+    "integrated": "hard original-technician preservation; no active-plan release",
+    "integrated_accounting": "integrated_fixed_job_policy_accounting.csv",
+    "atlanta6": "reused reviewed result and its original fixed-job policy evidence",
+    "atlanta6_reused_accounting": "atlanta_6area_13tech_fixed_job_policy_accounting.csv"
+  },
+  "solver": {
+    "engine": "OR-Tools na_general / production_assign_atlanta_vrp",
+    "objective": "min_total_travel_time",
+    "time_limit_seconds_per_day": 10,
+    "first_solution_strategy": "PARALLEL_CHEAPEST_INSERTION",
+    "local_search": "GUIDED_LOCAL_SEARCH"
+  },
+  "matrix": {
+    "source": "OSRM table/route via city_osrm_else_haversine",
+    "shape": "(technicians + jobs) square directed matrix per daily solve",
+    "coordinate_order": "longitude,latitude",
+    "fallback": "haversine_on_osrm_error",
+    "units": {
+      "distance": "km",
+      "duration": "minutes",
+      "service_duration": "minutes (45 per slot unless input override)",
+      "slot_capacity": "job slots"
+    }
+  },
+  "result_accounting": {
+    "integrated_unique_result_keys": 1506,
+    "candidate_unique_result_keys": 1506,
+    "every_job_assigned_or_explicitly_unassigned": true
+  }
+}

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import colorsys
+import hashlib
 import html
+import io
 import json
 from pathlib import Path
+import re
 
 import folium
 import geopandas as gpd
@@ -19,6 +22,7 @@ from smart_routing.area_map import (
     CACHE_VERSION as AREA_MAP_CACHE_VERSION,
     get_latest_geocoded_service_file as _area_map_get_latest_geocoded_service_file,
     load_city_map_data as _area_map_load_city_map_data,
+    load_zcta_geometry as _area_map_load_zcta_geometry,
     load_profile_data as _area_map_load_profile_data,
     _get_all_available_fixed_region_options,
     load_region_count_options,
@@ -29,17 +33,24 @@ from smart_routing.area_map import (
 from smart_routing.census_geocoder import load_geocode_cache, merge_service_with_geocodes
 from smart_routing.data_catalog import na_data_path
 from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
+from tools.data.atlanta_6area_plan import (
+    Atlanta6AreaPlanError,
+    parse_atlanta_6area_workbook,
+)
 
 
 st.set_page_config(page_title="Routing Map", layout="wide")
 
 CONFIG_FILE = Path("config/config.json")
+COMMON_CONFIG_FILE = Path("config/common_vrp.dev.json")
 AREA_MAP_CONFIG_SECTION = "area_map_usa"
 PROFILE_FILE = na_data_path("profile_production")
+ATLANTA_6AREA_WORKBOOK = Path("260310/New ATL Buckets.xlsx")
 PRODUCTION_INPUT_DIR = na_data_path("region_seed_dir")
 CURRENT_REGION_LABEL = "Current Coverage"
 AREA_TYPE_REGION_PREFIX = "Area Type Clusters"
 BUCKET_SIM_DRAFT_LABEL = "Bucket Sim Draft"
+ATLANTA_6AREA_LABEL = "6 Area"
 ALL_OPTION = "ALL"
 BLANK_CITY_OPTION = "(Blank)"
 AREA_TYPE_FILTERS = [
@@ -52,10 +63,20 @@ DEFAULT_CITY_OSRM_URLS = {
     "Los Angeles, CA": "http://20.51.244.68:5001",
     "Atlanta, GA": "http://20.51.244.68:5002",
 }
+ATLANTA_6AREA_CITY_NAME = "Atlanta_6area"
+ATLANTA_REGION_CITY_NAMES = (
+    ATLANTA_6AREA_CITY_NAME,
+    "Atlanta_3area",
+    "Atlanta_6area_new",
+    "Atlanta_6area_overlab",
+)
+DEFAULT_CITY_OSRM_URLS.update({city_name: DEFAULT_CITY_OSRM_URLS["Atlanta, GA"] for city_name in ATLANTA_REGION_CITY_NAMES})
+CITY_BASE_ALIASES = {city_name: "Atlanta, GA" for city_name in ATLANTA_REGION_CITY_NAMES}
 COUNTRY_ROUTE_KEYS = {"THAILAND", "INDONESIA", "MALAYSIA"}
 ROUTE_CITY_ALIASES = {
     "North Jersey, NJ": "Northeast",
     "Philadelphia, PA": "Northeast",
+    **CITY_BASE_ALIASES,
 }
 PINK_SM_LABEL_CODES = {
     "AI102692",
@@ -102,13 +123,20 @@ def get_latest_geocoded_service_file():
     return _area_map_get_latest_geocoded_service_file(config_section=AREA_MAP_CONFIG_SECTION)
 
 
+def _base_city_name(city_name: str) -> str:
+    normalized = str(city_name or "").strip()
+    return CITY_BASE_ALIASES.get(normalized, normalized)
+
+
 def load_city_map_data(city_name: str = ALL_CITIES):
-    return _area_map_load_city_map_data(city_name=city_name, config_section=AREA_MAP_CONFIG_SECTION)
+    return _area_map_load_city_map_data(
+        city_name=_base_city_name(city_name), config_section=AREA_MAP_CONFIG_SECTION
+    )
 
 
 def load_route_explorer_data(city_name: str, region_count: int | None = None):
     return _area_map_load_route_explorer_data(
-        city_name=city_name,
+        city_name=_base_city_name(city_name),
         region_count=region_count,
         config_section=AREA_MAP_CONFIG_SECTION,
     )
@@ -120,14 +148,33 @@ def _load_config(config_file: Path = CONFIG_FILE) -> dict:
     return json.loads(config_file.read_text(encoding="utf-8"))
 
 
+def _current_coverage_source_fingerprint(service_file: Path | None) -> str:
+    if service_file is None or not service_file.exists():
+        return "unavailable"
+    stat = service_file.stat()
+    return f"{service_file.resolve()}::{stat.st_mtime_ns}::{stat.st_size}"
+
+
 @st.cache_data(show_spinner=False)
-def get_route_explorer_data(city_name: str, region_count: int | None, cache_version: str):
-    return load_route_explorer_data(city_name=city_name, region_count=region_count)
+def get_route_explorer_data(
+    city_name: str,
+    region_count: int | None,
+    cache_version: str,
+    service_source_fingerprint: str = "",
+):
+    # Atlanta_6area is sourced only from the reviewed workbook. Never ask the
+    # clustering/sweep loader to synthesize an integrated 6-region candidate.
+    source_region_count = None if city_name == ATLANTA_6AREA_CITY_NAME else region_count
+    # The fingerprint exists only to invalidate Streamlit's in-memory cache.
+    # The authoritative loader resolves the configured source and validates its
+    # own disk-cache metadata (source path, mtime, and config) before returning.
+    _ = service_source_fingerprint
+    return load_route_explorer_data(city_name=city_name, region_count=source_region_count)
 
 
 @st.cache_data(show_spinner=False)
 def get_region_stats(city_name: str):
-    return load_region_count_stats(city_name)
+    return load_region_count_stats(_base_city_name(city_name))
 
 
 @st.cache_resource(show_spinner=False)
@@ -256,6 +303,19 @@ def _region_option_labels(city_name: str, candidate_counts: list[int]) -> tuple[
     return labels, mapping
 
 
+def _region_options_for_city(city_name: str) -> tuple[list[str], dict[str, int | None]]:
+    if city_name == ATLANTA_6AREA_CITY_NAME:
+        return (
+            [CURRENT_REGION_LABEL, ATLANTA_6AREA_LABEL],
+            {CURRENT_REGION_LABEL: None, ATLANTA_6AREA_LABEL: 6},
+        )
+    runtime_city_name = _base_city_name(city_name)
+    return _region_option_labels(
+        runtime_city_name,
+        load_region_count_options(runtime_city_name),
+    )
+
+
 def _normalize_center_bucket(center_type: object) -> str:
     text = _normalize_filter_text(center_type)
     upper = text.upper()
@@ -309,6 +369,11 @@ def get_service_scope_options(service_file: str | None):
         options = [ALL_OPTION] + cities
         if scoped["STRATEGIC_CITY_NAME"].fillna("").astype(str).str.strip().eq("").any():
             options.append(BLANK_CITY_OPTION)
+        if "Atlanta, GA" in options:
+            atlanta_index = options.index("Atlanta, GA") + 1
+            for city_name in reversed(ATLANTA_REGION_CITY_NAMES):
+                if city_name not in options:
+                    options.insert(atlanta_index, city_name)
         city_options_by_subsidiary[subsidiary] = options
     return subsidiary_options, city_options_by_subsidiary
 
@@ -320,7 +385,7 @@ def _apply_service_scope_filters(service_df: pd.DataFrame, subsidiary_name: str,
     if strategic_city_name == BLANK_CITY_OPTION and "STRATEGIC_CITY_NAME" in filtered.columns:
         filtered = filtered[filtered["STRATEGIC_CITY_NAME"].map(_normalize_filter_text).eq("")].copy()
     elif strategic_city_name != ALL_OPTION and "STRATEGIC_CITY_NAME" in filtered.columns:
-        selected_key = strategic_city_name.casefold()
+        selected_key = _base_city_name(strategic_city_name).casefold()
         filtered = filtered[
             filtered["STRATEGIC_CITY_NAME"].map(_normalize_filter_text).str.casefold().eq(selected_key)
         ].copy()
@@ -389,7 +454,7 @@ def _get_service_time_series(service_df: pd.DataFrame) -> pd.Series:
 
 
 def _city_slug(city_name: str) -> str:
-    city_part = str(city_name).split(",", 1)[0]
+    city_part = _base_city_name(city_name).split(",", 1)[0]
     return city_part.lower().strip().replace(" ", "_")
 
 
@@ -452,6 +517,139 @@ def _get_selected_frames(explorer_data, region_count: int | None):
         explorer_data.integrated_area_layer.copy(),
         explorer_data.integrated_service_df.copy(),
     )
+
+
+def _candidate_workbook_source() -> tuple[bytes | Path | None, str]:
+    """Return the uploaded canonical source, falling back only to the local file."""
+    widget_value = st.session_state.get("atlanta-canonical-workbook-upload")
+    if widget_value is not None and callable(getattr(widget_value, "getvalue", None)):
+        try:
+            widget_bytes = widget_value.getvalue()
+        except Exception:
+            widget_bytes = b""
+        if isinstance(widget_bytes, bytes):
+            # An invalid upload deliberately wins over the local fallback so a
+            # failed validation can never leave a partial/stale local map shown.
+            return widget_bytes, "uploaded canonical workbook"
+    uploaded = st.session_state.get("atlanta-canonical-workbook-bytes")
+    if isinstance(uploaded, bytes) and uploaded:
+        return uploaded, "uploaded canonical workbook"
+    if ATLANTA_6AREA_WORKBOOK.is_file():
+        return ATLANTA_6AREA_WORKBOOK, "local canonical workbook fallback"
+    return None, "no canonical workbook"
+
+
+def _load_atlanta_6area_workbook(source: bytes | Path | str | None = None) -> pd.DataFrame:
+    """Normalize only through the canonical parser; invalid inputs produce no map rows."""
+    actual_source = source if source is not None else _candidate_workbook_source()[0]
+    if actual_source is None:
+        return pd.DataFrame(columns=["POSTAL_CODE", "Territory", "ambiguity_status"])
+    try:
+        parsed = parse_atlanta_6area_workbook(actual_source)
+    except Atlanta6AreaPlanError:
+        return pd.DataFrame(columns=["POSTAL_CODE", "Territory", "ambiguity_status"])
+    ambiguous = set(parsed.ambiguous_postals)
+    return pd.DataFrame(
+        [
+            {
+                "POSTAL_CODE": membership.postal_code,
+                "Territory": membership.territory,
+                "ambiguity_status": "unresolved" if membership.postal_code in ambiguous else "resolved",
+            }
+            for membership in parsed.memberships
+        ]
+    )
+
+
+def _load_atlanta_6area_zcta_geometry() -> tuple[gpd.GeoDataFrame, tuple[str, ...]]:
+    workbook = _load_atlanta_6area_workbook()
+    requested = sorted(workbook["POSTAL_CODE"].unique().tolist()) if not workbook.empty else []
+    geometry = _area_map_load_zcta_geometry(
+        requested,
+        config_section=AREA_MAP_CONFIG_SECTION,
+    )
+    if not geometry.empty:
+        geometry = geometry.copy()
+        geometry["POSTAL_CODE"] = geometry["POSTAL_CODE"].astype(str).str.strip().str.zfill(5)
+    loaded = set(geometry["POSTAL_CODE"].tolist()) if "POSTAL_CODE" in geometry.columns else set()
+    return geometry, tuple(sorted(set(requested) - loaded))
+
+
+def _get_atlanta_6area_frames(explorer_data) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, pd.DataFrame]:
+    workbook = _load_atlanta_6area_workbook()
+    base_zip, _missing_geometry = _load_atlanta_6area_zcta_geometry()
+    base_zip = base_zip.copy()
+    base_service = explorer_data.current_service_df.copy()
+    if workbook.empty or base_zip.empty:
+        return (
+            gpd.GeoDataFrame(columns=["POSTAL_CODE", "AREA_NAME", "geometry"], geometry="geometry", crs=getattr(base_zip, "crs", "EPSG:4326")),
+            gpd.GeoDataFrame(columns=["AREA_NAME", "postal_count", "service_count", "geometry"], geometry="geometry", crs=getattr(base_zip, "crs", "EPSG:4326")),
+            base_service.iloc[0:0].copy(),
+        )
+    base_zip["POSTAL_CODE"] = base_zip["POSTAL_CODE"].astype(str).str.strip().str.zfill(5)
+    # Workbook membership is authoritative for the 6-area preview. Keep all
+    # 301 rows (297 unique ZIPs) even when Census has no ZCTA polygon; missing
+    # geometry is reported explicitly instead of dropping or interpolating it.
+    zip_layer = workbook.merge(base_zip, on="POSTAL_CODE", how="left")
+    zip_layer = gpd.GeoDataFrame(zip_layer, geometry="geometry", crs=base_zip.crs)
+    zip_layer["AREA_NAME"] = zip_layer["Territory"]
+    zone_order = {
+        "Zone 1": 1, "Zone 2": 2, "Zone 3": 3,
+        "Zone 4": 4, "Zone 5": 5, "ATL Outer Area": 6,
+    }
+    zip_layer["region_seq"] = zip_layer["AREA_NAME"].map(zone_order)
+    zip_layer["region_id"] = zip_layer["region_seq"].map(lambda value: f"atlanta-6area-{int(value)}")
+
+    base_service["POSTAL_CODE"] = base_service["POSTAL_CODE"].astype(str).str.strip().str.zfill(5)
+    territory_choices = (
+        workbook.groupby("POSTAL_CODE")["Territory"]
+        .agg(lambda values: tuple(sorted(set(map(str, values)))))
+        .to_dict()
+    )
+    def display_owner(postal_code: object) -> str:
+        choices = territory_choices.get(str(postal_code), ())
+        if len(choices) == 1:
+            return choices[0]
+        if len(choices) > 1:
+            return "UNRESOLVED: " + " | ".join(choices)
+        return "POSTAL_NOT_IN_ACTIVE_PLAN"
+    service_df = base_service.copy()
+    service_df["AREA_NAME"] = service_df["POSTAL_CODE"].map(display_owner)
+    service_df["ambiguity_status"] = "resolved"
+    service_df.loc[
+        service_df["AREA_NAME"].str.startswith("UNRESOLVED:"), "ambiguity_status"
+    ] = "unresolved"
+    service_df.loc[
+        service_df["AREA_NAME"].eq("POSTAL_NOT_IN_ACTIVE_PLAN"), "ambiguity_status"
+    ] = "unmapped"
+    service_df["scenario"] = "atlanta_6area_workbook"
+
+    resolved_service = service_df[service_df["ambiguity_status"].eq("resolved")]
+    service_counts = (
+        resolved_service.groupby("AREA_NAME")["GSFS_RECEIPT_NO"].nunique().to_dict()
+        if "GSFS_RECEIPT_NO" in resolved_service.columns
+        else {}
+    )
+    area_rows: list[dict[str, object]] = []
+    for area_name, group in zip_layer.groupby("AREA_NAME", sort=False):
+        geometry = group.geometry.dropna().union_all()
+        area_rows.append(
+            {
+                "AREA_NAME": area_name,
+                "postal_count": int(group["POSTAL_CODE"].nunique()),
+                "postal_codes": " | ".join(sorted(group["POSTAL_CODE"].unique())),
+                "service_count": int(service_counts.get(area_name, 0)),
+                "ambiguity_zip_count": int(
+                    group[group["ambiguity_status"].eq("unresolved")]["POSTAL_CODE"].nunique()
+                ),
+                "geometry": geometry,
+            }
+        )
+    area_layer = gpd.GeoDataFrame(area_rows, geometry="geometry", crs=zip_layer.crs)
+    if not area_layer.empty:
+        projected = area_layer.to_crs(epsg=3857)
+        area_layer["area_km2"] = projected.geometry.area / 1_000_000.0
+    return zip_layer, area_layer, service_df
 
 
 def _get_missing_geometry_zips(city_name: str) -> list[str]:
@@ -700,6 +898,7 @@ def _build_home_lookup_from_geocode_df(home_df: pd.DataFrame) -> dict[str, dict]
 
 @st.cache_data(show_spinner=False)
 def get_home_location_lookup(city_name: str, engineer_codes: tuple[str, ...] = ()) -> dict[str, dict]:
+    city_name = _base_city_name(city_name)
     if str(city_name).strip().upper() in COUNTRY_ROUTE_KEYS:
         return _build_home_lookup_from_geocode_df(_load_saved_home_geocode_df(city_name))
 
@@ -985,8 +1184,16 @@ def build_map(
     selected_sm: str,
     selected_center_buckets: list[str],
 ):
-    explorer_data = get_route_explorer_data(city_name, region_count, AREA_MAP_CACHE_VERSION)
-    zip_layer, area_layer, service_df = _get_selected_frames(explorer_data, region_count)
+    explorer_data = get_route_explorer_data(
+        city_name,
+        region_count,
+        AREA_MAP_CACHE_VERSION,
+        _current_coverage_source_fingerprint(get_latest_geocoded_service_file()),
+    )
+    if city_name == ATLANTA_6AREA_CITY_NAME and region_count == 6:
+        zip_layer, area_layer, service_df = _get_atlanta_6area_frames(explorer_data)
+    else:
+        zip_layer, area_layer, service_df = _get_selected_frames(explorer_data, region_count)
     area_col = _get_area_column_name(region_count, zip_layer)
 
     service_df = _apply_service_scope_filters(service_df, subsidiary_name, strategic_city_name)
@@ -1286,6 +1493,17 @@ def build_map(
 
 
 def _build_candidate_display_df(city_name: str) -> pd.DataFrame:
+    if city_name == ATLANTA_6AREA_CITY_NAME:
+        workbook = _load_atlanta_6area_workbook()
+        unresolved_count = int(
+            workbook[workbook["ambiguity_status"].eq("unresolved")]["POSTAL_CODE"].nunique()
+        ) if not workbook.empty else 0
+        return pd.DataFrame(
+            [
+                {"Area View": CURRENT_REGION_LABEL, "Source": "Atlanta, GA reviewed baseline", "Unresolved ZIPs": 0},
+                {"Area View": ATLANTA_6AREA_LABEL, "Source": "New ATL Buckets.xlsx", "Unresolved ZIPs": unresolved_count},
+            ]
+        )
     stats_df = get_region_stats(city_name)
     if stats_df.empty:
         return stats_df
@@ -1317,6 +1535,318 @@ def _build_candidate_display_df(city_name: str) -> pd.DataFrame:
     numeric_cols = [col for col in display_df.columns if col not in {"Area View", "Best"}]
     display_df[numeric_cols] = display_df[numeric_cols].apply(pd.to_numeric, errors="coerce").round(2)
     return display_df
+
+
+def _region_plan_api_origin(config_path: Path = COMMON_CONFIG_FILE) -> str:
+    area_map_origin = str(
+        (_load_config().get(AREA_MAP_CONFIG_SECTION, {}) or {}).get("common_vrp_api_url")
+        or ""
+    ).strip().rstrip("/")
+    if area_map_origin.startswith(("http://", "https://")) and "@" not in area_map_origin:
+        return area_map_origin
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return ""
+    origin = str(payload.get("routing_api_url") or "").strip().rstrip("/")
+    if not origin.startswith(("http://", "https://")) or "@" in origin:
+        return ""
+    return origin
+
+
+@st.cache_data(show_spinner=False, ttl=30)
+def _load_atlanta_6area_plans(api_origin: str) -> dict[str, object]:
+    if not api_origin:
+        return {"status": "unavailable", "plans": []}
+    try:
+        response = requests.get(
+            f"{api_origin}/api/v1/common/region-plans",
+            params={"city_key": ATLANTA_6AREA_CITY_NAME},
+            timeout=5,
+        )
+        if not response.ok:
+            return {"status": "unavailable", "plans": []}
+        payload = response.json()
+    except Exception:
+        return {"status": "unavailable", "plans": []}
+    if isinstance(payload, list):
+        plans = payload
+    elif isinstance(payload, dict):
+        plans = payload.get("plans") or payload.get("items") or []
+        if not isinstance(plans, list) and payload.get("plan_id"):
+            plans = [payload]
+    else:
+        plans = []
+    return {
+        "status": "available" if isinstance(plans, list) else "unavailable",
+        "plans": [dict(item) for item in plans if isinstance(item, dict)],
+    }
+
+
+@st.cache_data(show_spinner=False, ttl=30)
+def _load_atlanta_6area_active_plan(api_origin: str) -> dict[str, object]:
+    """Read the runtime snapshot; this UI never writes or activates a plan."""
+    if not api_origin:
+        return {"status": "unavailable", "plan": None}
+    try:
+        response = requests.get(
+            f"{api_origin}/api/v1/common/region-plans/active",
+            params={"city_key": ATLANTA_6AREA_CITY_NAME},
+            timeout=5,
+        )
+        if not response.ok:
+            return {"status": "unavailable", "plan": None}
+        payload = response.json()
+    except Exception:
+        return {"status": "unavailable", "plan": None}
+    return {
+        "status": "available" if isinstance(payload, dict) else "unavailable",
+        "plan": dict(payload) if isinstance(payload, dict) else None,
+    }
+
+
+def _region_plan_ambiguity_rows(plan: dict[str, object]) -> list[dict[str, object]]:
+    values = plan.get("ambiguities") or plan.get("ambiguity_resolutions") or []
+    if not isinstance(values, list):
+        return []
+    rows: list[dict[str, object]] = []
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        owner = item.get("owner_region") or item.get("selected_owner") or ""
+        overflow = item.get("overflow_region") or item.get("selected_overflow") or ""
+        status = str(item.get("status") or "").strip().lower()
+        resolved = status in {"resolved", "approved"} or bool(owner and overflow)
+        rows.append(
+            {
+                "ZIP": str(item.get("postal_code") or item.get("zip") or ""),
+                "Owner decision": str(owner),
+                "Overflow decision": str(overflow),
+                "Status": "resolved" if resolved else "unresolved",
+            }
+        )
+    return rows
+
+
+def _safe_plan_artifact(plan: dict[str, object], key: str) -> tuple[bytes, str] | None:
+    artifacts = plan.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return None
+    item = artifacts.get(key)
+    if not isinstance(item, dict):
+        return None
+    content = item.get("content")
+    if isinstance(content, str):
+        payload = content.encode("utf-8")
+    elif isinstance(content, bytes):
+        payload = content
+    else:
+        return None
+    if key == "technician_policy_csv":
+        try:
+            technician_df = pd.read_csv(
+                io.BytesIO(payload),
+                encoding="utf-8-sig",
+                dtype=str,
+                keep_default_na=False,
+            )
+        except Exception:
+            return None
+        if "SVC_ENGINEER_NAME" in technician_df.columns:
+            technician_df["SVC_ENGINEER_NAME"] = ""
+        payload = _to_csv_bytes(technician_df)
+    file_name = Path(str(item.get("file_name") or f"{key}.csv")).name
+    return payload, file_name
+
+
+def _candidate_decision_digest(decisions: dict[str, dict[str, object]]) -> str:
+    """Bind one local candidate download to its exact canonical UI decisions."""
+    canonical = {
+        postal_code: {
+            "primary_region": str(decision.get("primary_region") or ""),
+            "allow_overflow": decision.get("allow_overflow"),
+            "rationale": str(decision.get("rationale") or ""),
+        }
+        for postal_code, decision in sorted(decisions.items())
+    }
+    payload = json.dumps(
+        canonical,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _snapshot_plan_artifacts(plan: dict[str, object], api_origin: str) -> dict[str, tuple[bytes, str]]:
+    """Create deterministic exports only when the API snapshot is internally complete."""
+    checksum = str(plan.get("checksum") or "").strip().lower()
+    plan_id = str(plan.get("plan_id") or "").strip()
+    city_name = str(plan.get("strategic_city_name") or ATLANTA_6AREA_CITY_NAME).strip()
+    regions = plan.get("regions")
+    postals = plan.get("postals")
+    technicians = plan.get("technicians")
+    if (
+        not plan_id
+        or not re.fullmatch(r"[0-9a-f]{64}", checksum)
+        or not isinstance(regions, list)
+        or not isinstance(postals, list)
+        or not isinstance(technicians, list)
+    ):
+        return {}
+    region_lookup: dict[int, dict[str, object]] = {}
+    for region in regions:
+        if not isinstance(region, dict):
+            return {}
+        try:
+            seq = int(region.get("region_seq"))
+        except (TypeError, ValueError):
+            return {}
+        if seq in region_lookup or not str(region.get("region_id") or "").strip():
+            return {}
+        region_lookup[seq] = region
+    if len(region_lookup) != 6:
+        return {}
+    fixed_rows: list[dict[str, object]] = []
+    seen_postals: set[str] = set()
+    region_postal_counts = {seq: 0 for seq in region_lookup}
+    for postal in postals:
+        if not isinstance(postal, dict) or str(postal.get("plan_id") or plan_id) != plan_id:
+            return {}
+        try:
+            seq = int(postal.get("region_seq"))
+        except (TypeError, ValueError):
+            return {}
+        region = region_lookup.get(seq)
+        postal_code = str(postal.get("postal_code") or "").strip()
+        postal_code = postal_code.zfill(5) if postal_code else ""
+        if region is None or not re.fullmatch(r"[0-9]{5}", postal_code) or postal_code in seen_postals:
+            return {}
+        area_type = str(postal.get("area_type") or "").strip().upper() or "DMS"
+        if area_type not in {"DMS", "DMS2"}:
+            return {}
+        seen_postals.add(postal_code)
+        region_postal_counts[seq] += 1
+        fixed_rows.append({
+            "POSTAL_CODE": postal_code, "STRATEGIC_CITY_NAME": city_name,
+            "region_id": str(region["region_id"]), "region_seq": seq,
+            "AREA_NAME": str(region.get("source_territory") or ""),
+            "new_region_name": str(region.get("region_name") or ""), "area_type": area_type,
+        })
+    technician_rows: list[dict[str, object]] = []
+    seen_employee_codes: set[str] = set()
+    for technician in technicians:
+        if not isinstance(technician, dict) or str(technician.get("plan_id") or plan_id) != plan_id:
+            return {}
+        if technician.get("active_flag") is False:
+            return {}
+        try:
+            seq = int(technician.get("assigned_region_seq"))
+        except (TypeError, ValueError):
+            return {}
+        region = region_lookup.get(seq)
+        employee_code = str(technician.get("employee_code") or "").strip()
+        if region is None or not employee_code or employee_code in seen_employee_codes:
+            return {}
+        seen_employee_codes.add(employee_code)
+        technician_rows.append({
+            "plan_id": plan_id, "STRATEGIC_CITY_NAME": city_name,
+            "SVC_ENGINEER_CODE": employee_code,
+            # This local debug UI has no authenticated PII entitlement.  Keep
+            # the canonical column for import compatibility but never export
+            # the runtime snapshot's technician name.
+            "SVC_ENGINEER_NAME": "",
+            "assigned_region_id": str(region["region_id"]),
+            "assigned_region_name": str(region.get("region_name") or ""),
+            "assigned_region_seq": seq, "policy_mode": str(technician.get("policy_mode") or ""),
+        })
+    if (
+        len(fixed_rows) != 297
+        or len(technician_rows) != 14
+        or any(count <= 0 for count in region_postal_counts.values())
+    ):
+        return {}
+    fixed_df = pd.DataFrame(fixed_rows).sort_values(["POSTAL_CODE", "region_seq"]).reset_index(drop=True)
+    technician_df = pd.DataFrame(technician_rows).sort_values("SVC_ENGINEER_CODE").reset_index(drop=True)
+    fixed_bytes, technician_bytes = _to_csv_bytes(fixed_df), _to_csv_bytes(technician_df)
+    manifest = {
+        "schema": "region-plan-runtime-snapshot-export/v1", "source_endpoint": f"{api_origin}/api/v1/common/region-plans/active",
+        "city_key": ATLANTA_6AREA_CITY_NAME, "plan_id": plan_id,
+        "lifecycle": str(plan.get("lifecycle_stage") or plan.get("status") or "active"), "checksum": checksum,
+        "row_counts": {"fixed_regions": len(fixed_df), "technician_policy": len(technician_df)},
+        "generated_file_sha256": {"fixed_region_csv": hashlib.sha256(fixed_bytes).hexdigest(), "technician_policy_csv": hashlib.sha256(technician_bytes).hexdigest()},
+        "privacy": "Technician names are excluded from this manifest.",
+    }
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", plan_id)[:80] or "active_plan"
+    return {
+        "fixed_region_csv": (fixed_bytes, f"atlanta_6area_{stem}_fixed_regions.csv"),
+        "technician_policy_csv": (technician_bytes, f"atlanta_6area_{stem}_technician_policy.csv"),
+        "manifest": (json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8"), f"atlanta_6area_{stem}_runtime_snapshot_manifest.json"),
+    }
+
+
+def _render_atlanta_plan_comparison(selected_city: str) -> None:
+    """Show API-sourced plan status only; plan authoring and exports live elsewhere."""
+    if _base_city_name(selected_city) != "Atlanta, GA":
+        return
+    st.subheader("Atlanta Region Plan Comparison")
+    baseline, proposed = st.columns(2)
+    baseline.metric("Atlanta, GA", "3 areas")
+    baseline.caption("Reviewed baseline region plan")
+    proposed.metric(ATLANTA_6AREA_CITY_NAME, "6 areas")
+    proposed.caption("Runtime plan status is read from the routing API.")
+
+    api_origin = _region_plan_api_origin()
+    result = _load_atlanta_6area_plans(api_origin)
+    plans = result.get("plans") if isinstance(result, dict) else []
+    if not isinstance(plans, list) or not plans:
+        st.info(
+            "No reviewed or active Atlanta_6area server plan is available from "
+            f"{api_origin or 'the routing_api_url configuration'}. Manage candidates, review, activation, "
+            "and exports in Deployment Console; this map is visualization/debug only."
+        )
+        return
+    metadata = next(
+        (
+            item for item in plans
+            if str(item.get("lifecycle_stage") or item.get("status") or "").lower()
+            in {"active", "reviewed"}
+        ),
+        plans[0],
+    )
+    metadata_lifecycle = str(metadata.get("lifecycle_stage") or metadata.get("status") or "candidate").lower()
+    if metadata_lifecycle not in {"active", "reviewed"}:
+        st.info(
+            "Atlanta_6area has no active or reviewed server plan. Upload, review, and activate the region "
+            "in Deployment Console; this map does not activate plans, write the database, or generate downloads."
+        )
+        plan = metadata
+    else:
+        snapshot_result = _load_atlanta_6area_active_plan(api_origin)
+        plan = snapshot_result.get("plan") if isinstance(snapshot_result, dict) else None
+        if not isinstance(plan, dict):
+            st.info(
+                "Atlanta_6area plan metadata is available, but the active runtime snapshot is unavailable from "
+                f"{api_origin or 'the routing_api_url configuration'}. Upload, review, and activate the region "
+                "in Deployment Console, then refresh."
+            )
+            plan = metadata
+    safe_plan_id = str(plan.get("plan_id") or plan.get("id") or "")[:80]
+    lifecycle = str(plan.get("lifecycle_stage") or plan.get("status") or "candidate")[:40]
+    checksum = str(plan.get("checksum") or "-")[:80]
+    st.caption(f"Plan: {safe_plan_id or '-'} | checksum: {checksum} | lifecycle: {lifecycle}")
+    ambiguity_rows = _region_plan_ambiguity_rows(plan)
+    unresolved = [row for row in ambiguity_rows if row["Status"] == "unresolved"]
+    unresolved_count = int(plan.get("unresolved_ambiguity_count") or len(unresolved) or 0)
+    if ambiguity_rows:
+        st.markdown("#### Ambiguous ZIP owner / overflow decisions")
+        st.dataframe(ambiguity_rows, width="stretch", hide_index=True)
+    if unresolved_count:
+        st.error(
+            f"{unresolved_count} ambiguous ZIP decision(s) remain unresolved. "
+            "Each ZIP requires explicit owner and overflow decisions before review or activation."
+        )
+    st.caption("Candidate bundles and exports are intentionally unavailable in this map UI.")
 
 
 def _build_monthly_area_stats_df(service_df: pd.DataFrame) -> pd.DataFrame:
@@ -1453,13 +1983,20 @@ def main():
         selected_strategic_city = st.selectbox("STRATEGIC_CITY_NAME", strategic_city_options, index=0)
         city_name = selected_strategic_city if selected_strategic_city not in {ALL_OPTION, BLANK_CITY_OPTION} else ALL_CITIES
 
-        candidate_counts = load_region_count_options(city_name)
-        region_options, region_option_count_map = _region_option_labels(city_name, candidate_counts)
+        region_options, region_option_count_map = _region_options_for_city(city_name)
         region_option = st.selectbox("Area View", region_options, index=0)
         selected_region_count = region_option_count_map.get(region_option, _parse_region_option(region_option))
 
-        explorer_data = get_route_explorer_data(city_name, selected_region_count, AREA_MAP_CACHE_VERSION)
-        _, area_layer, service_df = _get_selected_frames(explorer_data, selected_region_count)
+        explorer_data = get_route_explorer_data(
+            city_name,
+            selected_region_count,
+            AREA_MAP_CACHE_VERSION,
+            _current_coverage_source_fingerprint(latest_service),
+        )
+        if city_name == ATLANTA_6AREA_CITY_NAME and selected_region_count == 6:
+            _, area_layer, service_df = _get_atlanta_6area_frames(explorer_data)
+        else:
+            _, area_layer, service_df = _get_selected_frames(explorer_data, selected_region_count)
         service_df = service_df.copy()
         service_df = _apply_service_scope_filters(service_df, selected_subsidiary, selected_strategic_city)
         service_df["service_date_key"] = pd.to_datetime(service_df["service_date"]).dt.strftime("%Y-%m-%d")
@@ -1616,6 +2153,8 @@ def main():
         st.subheader("Service Count by Area")
         st.dataframe(area_count_df, width="stretch", height=220)
 
+    _render_atlanta_plan_comparison(city_name)
+
     map_obj, filtered_service_df, filtered_area_layer, route_groups = build_map(
         city_name=city_name,
         subsidiary_name=selected_subsidiary,
@@ -1657,15 +2196,6 @@ def main():
         if jobs_input_df.empty:
             st.caption("No jobs for the selected filters.")
         else:
-            selected_area_label = "all_areas" if _is_all_area_selection(selected_area_names) else f"{len(selected_area_names)}_areas"
-            selected_date_label = str(selected_date).replace("-", "") if selected_date != "ALL" else "all_dates"
-            st.download_button(
-                "Download Jobs CSV",
-                data=_to_csv_bytes(jobs_input_df),
-                file_name=f"jobs_input_{city_name.split(',')[0].lower().replace(' ', '_')}_{selected_area_label}_{selected_date_label}.csv",
-                mime="text/csv",
-                width="stretch",
-            )
             st.dataframe(jobs_input_df, width="stretch", height=300)
 
     with summary_col:

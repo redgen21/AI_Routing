@@ -1,0 +1,39 @@
+현재 10:00~11:00 CPU 상승 원인을 찾으려면 그 시간대에 어떤 프로세스가 올라가는지 기록해야 합니다. 다음 명령을 10시 직전에 실행해 두세요.
+
+sudo bash -c '
+while true; do
+  date -Is
+  ps -eo pid,ppid,comm,pcpu,pmem,etime,args --sort=-pcpu | head -15
+  echo "-----"
+  sleep 10
+done
+' | tee /tmp/cpu-window-$(date +%F).log
+
+서비스 단위 사용량은 별도로 기록합니다.
+
+sudo systemd-cgtop --iterations 360 --delay 10 \
+  | tee /tmp/systemd-cpu-window-$(date +%F).log
+
+가능하면 pidstat도 같이 실행하세요.
+
+sudo pidstat -u -r -d -p ALL 10 360 \
+  | tee /tmp/pidstat-window-$(date +%F).log
+
+10시 전후에 예약 작업이 실행되는지도 확인해야 합니다.
+
+systemctl list-timers --all --no-pager
+sudo crontab -l
+crontab -l
+
+로그 시간대도 주의해야 합니다. journalctl의 시간이 UTC로 표시될 수 있으므로, 서버 로컬 시간이 KST인지 확인하세요.
+
+timedatectl
+date
+
+확인 결과 해석은 다음과 같습니다.
+python PID가 상승: API 요청, 라우팅 작업, DB 조회 가능성
+streamlit PID가 상승: Console refresh 또는 사용자 화면 동작
+postgres 상승: DB 쿼리·vacuum·백업
+osrm 상승: 경로/행렬 계산
+systemd-cgtop 전체는 낮고 특정 PID만 상승: 해당 프로세스 집중 조사
+모든 프로세스가 동시에 상승: 백업, 디스크 I/O, cron, 외부 작업 가능성

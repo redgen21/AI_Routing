@@ -1,0 +1,46 @@
+{
+  "schema": "atlanta-6area-legacy-common-region-import/v1",
+  "created_date": "2026-07-22",
+  "target_environment": "development",
+  "target_database": "vrp_db_dev",
+  "target_table": "public.common_region_master",
+  "plan_id": "atlanta_6area_v2_78efd085794cda992d4bce738c5395f0174b1b80c3560c7eddb46b47f67d7523",
+  "plan_identity_digest": "78efd085794cda992d4bce738c5395f0174b1b80c3560c7eddb46b47f67d7523",
+  "csv": {
+    "local_path": "data/north_america/reviewed/regions/fixed_region_postal_atlanta_6area_atlanta_6area_new_atl_buckets_20260721_v2.csv",
+    "server_path": "/home/csda/AI_Routing/shared/north_america/reviewed/regions/fixed_region_postal_atlanta_6area_atlanta_6area_new_atl_buckets_20260721_v2.csv",
+    "psql_client_staging_path": "/tmp/fixed_region_postal_atlanta_6area_atlanta_6area_new_atl_buckets_20260721_v2.csv",
+    "sha256": "27786ecae987fb8d302ec7f4a0e4f6fa67b92f9c5313e01c4ba71eb3eaf05fc9",
+    "rows": 297,
+    "unique_postals": 297,
+    "contains_pii": false
+  },
+  "sql": {
+    "local_path": "260310/upsert_atlanta_6area_common_region_master_vrp_db_dev.sql",
+    "server_path": "/home/csda/AI_Routing/state/development/db_admin/upsert_atlanta_6area_common_region_master_vrp_db_dev.sql",
+    "sha256": "f5c72dbcc3484e4b8035118d8555c57522d27da02151bf1ee817fc5245c88bdc"
+  },
+  "approved_decisions": {
+    "primary_owner": {
+      "30028": "Zone 3",
+      "30040": "Zone 3",
+      "30041": "Zone 3",
+      "30107": "Zone 3"
+    },
+    "allow_overflow": true,
+    "rationale": null,
+    "default_area_type": "DMS"
+  },
+  "execution_contract": {
+    "psql_client_host": "csda-osrm2",
+    "copy_to_staging_command": "sudo install -o postgres -g postgres -m 0600 /home/csda/AI_Routing/shared/north_america/reviewed/regions/fixed_region_postal_atlanta_6area_atlanta_6area_new_atl_buckets_20260721_v2.csv /tmp/fixed_region_postal_atlanta_6area_atlanta_6area_new_atl_buckets_20260721_v2.csv",
+    "verify_csv_command": "sha256sum /tmp/fixed_region_postal_atlanta_6area_atlanta_6area_new_atl_buckets_20260721_v2.csv",
+    "run_sql_command": "cd /tmp && sudo -u postgres psql -X -d vrp_db_dev -v ON_ERROR_STOP=1 < /home/csda/AI_Routing/state/development/db_admin/upsert_atlanta_6area_common_region_master_vrp_db_dev.sql",
+    "database_write_executed": false
+  },
+  "limitations": [
+    "The legacy common_region_master table does not store boundary overflow policy.",
+    "The legacy common_region_master table does not store plan ID, source checksum, or technician assignment policy.",
+    "No rows are deleted by this SQL; unexpected pre-existing Atlanta_6area ZIPs abort the transaction."
+  ]
+}

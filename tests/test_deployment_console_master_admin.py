@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import json
 import subprocess
 import sys
@@ -99,6 +101,53 @@ class _Remote:
         return list(self.inventory)
 
 
+class _RegionPlanRemote:
+    """In-memory remote for the fixed region-plan Admin Tools bridge."""
+
+    def __init__(self, payloads: dict[str, dict[str, object]]) -> None:
+        self.payloads = payloads
+        self.files: dict[str, bytes] = {}
+        self.modes: dict[str, int] = {}
+        self.commands: list[str] = []
+        self.uploads: list[str] = []
+        self.locks: list[tuple[str, str]] = []
+
+    def __enter__(self) -> "_RegionPlanRemote":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    @contextlib.contextmanager
+    def deployment_lock(self, root: str, deployment_id: str):
+        self.locks.append((root, deployment_id))
+        yield
+
+    def exists(self, target: str) -> bool:
+        return target in self.files
+
+    def sha256(self, target: str) -> str | None:
+        payload = self.files.get(target)
+        return hashlib.sha256(payload).hexdigest() if payload is not None else None
+
+    def mode(self, target: str) -> int | None:
+        return self.modes.get(target)
+
+    def upload_bytes_atomic(self, payload: bytes, target: str, backup: object = None) -> None:
+        if backup is not None:
+            raise AssertionError("region-plan requests are immutable")
+        self.files[target] = payload
+        self.modes[target] = 0o600
+        self.uploads.append(target)
+
+    def execute_region_plan_json(self, command: str, timeout: int = 45):
+        self.commands.append(command)
+        for operation, payload in self.payloads.items():
+            if f"--json {operation} " in command:
+                return 0, json.dumps(payload), ""
+        raise AssertionError(f"unexpected command: {command}")
+
+
 def _payload(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
         "contract_version": "db-admin/v1",
@@ -109,6 +158,89 @@ def _payload(**overrides: object) -> dict[str, object]:
     }
     payload.update(overrides)
     return payload
+
+
+def _region_payload(operation: str, **overrides: object) -> dict[str, object]:
+    version = "a" * 64
+    migration = console_backend._region_plan_migration_spec(
+        "V001__atlanta_6area_region_plan"
+    )
+    base: dict[str, object] = {
+        "environment": "development",
+        "plan_id": f"atlanta_6area_v2_{version}",
+    }
+    if operation in {"migration-preview", "install-schema"}:
+        base.update(
+            {
+                "contract_version": "region-plan-migration/v1",
+                "status": "ready" if operation == "migration-preview" else "applied",
+                "migration_id": "V001__atlanta_6area_region_plan",
+                "checksum_sha256": migration.checksum_sha256,
+                "statement_count": 7,
+            }
+        )
+        if operation == "migration-preview":
+            base.update(
+                {
+                    "required_confirmation": "APPLY V001__atlanta_6area_region_plan TO DEVELOPMENT vrp_db_dev",
+                    "statement_types": ["CREATE TABLE", "CREATE INDEX"],
+                    "rollback_instructions": "Disable feature and retain audit tables.",
+                }
+            )
+    else:
+        base["contract_version"] = "region-plan-workflow/v1"
+        if operation == "resolve":
+            base.update(
+                {
+                    "status": "candidate_imported",
+                    "revision": 2,
+                    "checksum": version,
+                    "resolution_digest": version,
+                    "lifecycle_stage": "candidate_resolved",
+                }
+            )
+        elif operation == "review":
+            base.update({"status": "reviewed", "revision": 3})
+        elif operation == "activation-preview":
+            base.update(
+                {
+                    "status": "ready",
+                    "preview_id": version,
+                    "preview_digest": version,
+                    "checksum": "b" * 64,
+                    "plan_revision": 3,
+                    "expected_activation_revision": 4,
+                    "region_count": 6,
+                    "postal_count": 297,
+                    "technician_count": 14,
+                    "boundary_resolution_count": 4,
+                }
+            )
+        elif operation == "activate":
+            base.update(
+                {
+                    "status": "activated",
+                    "activation_revision": 5,
+                    "preview_digest": version,
+                }
+            )
+    base.update(overrides)
+    return base
+
+
+def _region_schema_payload(status: str = "ready") -> dict[str, object]:
+    return {
+        "contract_version": "region-plan-schema/v2",
+        "status": status,
+        "environment": "development",
+        "dbname": "vrp_db_dev",
+        "target_id": "development:vrp_db_dev",
+        "schema_id": "common_region_plan_schema_v2",
+        "checksum_sha256": "f" * 64,
+        "requires_confirmation": (
+            "RECONCILE COMMON REGION PLAN SCHEMA V2 TO DEVELOPMENT vrp_db_dev"
+        ),
+    }
 
 
 class MasterAdminBridgeTests(unittest.TestCase):
@@ -130,6 +262,14 @@ class MasterAdminBridgeTests(unittest.TestCase):
         ), mock.patch.object(
             console_backend, "_remote_session_factory", return_value=remote
         ), mock.patch.object(console_backend, "_verify_master_admin_release"):
+            return callback()
+
+    def _region_call(self, remote: _RegionPlanRemote, callback: object) -> object:
+        with mock.patch.object(
+            console_backend, "_master_admin_profile", return_value=self.profile
+        ), mock.patch.object(
+            console_backend, "_remote_session_factory", return_value=remote
+        ), mock.patch.object(console_backend, "_verify_region_plan_admin_release"):
             return callback()
 
     def test_overview_is_ssh_only_and_pins_remote_release_runtime_and_config(self) -> None:
@@ -190,6 +330,366 @@ class MasterAdminBridgeTests(unittest.TestCase):
             with self.subTest(command=malformed):
                 with self.assertRaisesRegex(ValueError, "allowlisted|canonically"):
                     remote.execute_master_json(malformed)
+
+    def test_region_candidate_command_is_fixed_to_development_admin_tools_bridge(self) -> None:
+        context = console_backend._master_admin_context(self.profile, "development")
+        version = "a" * 64
+        source = (
+            "/home/csda/AI_Routing/state/development/managed_data/"
+            f"territory_plan_workbook/{version}/payload.xlsx"
+        )
+        command = console_backend._region_plan_admin_command(
+            context, source_path=source, version=version
+        )
+        self.assertIn(" -B -m admin_tools.db.region_plan_backend", command)
+        self.assertIn(" stage-candidate ", command)
+        self.assertIn("--source-sha256", command)
+        self.assertIn("--managed-version", command)
+        self.assertNotIn("--table", command)
+        self.assertNotIn("--destination", command)
+        self.assertNotIn("--confirm-production", command)
+
+        raw_remote = console_backend.ParamikoRemote(self.profile)
+        raw_remote.client = _Client(
+            json.dumps(
+                {
+                    "contract_version": "region-plan/v1",
+                    "environment": "development",
+                    "source_sha256": version,
+                    "managed_version": version,
+                    "status": "candidate_staged",
+                    "plan_id": "atlanta_6area_new_atl_buckets_20260721_v1",
+                    "lifecycle_stage": "candidate_plan",
+                    "approval_status": "pending_boundary_resolutions",
+                    "promotable": False,
+                    "promotion_required": True,
+                    "direct_db_upsert": False,
+                }
+            ).encode()
+        )
+        _, stdout, _ = raw_remote.execute_region_plan_json(command)
+        result = console_backend._parse_region_plan_candidate_json(
+            stdout, context=context, version=version
+        )
+        self.assertEqual(result["plan_id"], "atlanta_6area_new_atl_buckets_20260721_v1")
+        self.assertFalse(result["promotable"])
+        for malformed in (
+            command.replace("stage-candidate", "apply"),
+            command.replace("--managed-version", "--destination"),
+            command.replace(" -B -m ", " -m "),
+            command.replace(source, "/etc/passwd"),
+        ):
+            with self.subTest(command=malformed):
+                with self.assertRaisesRegex(ValueError, "allowlisted|invalid"):
+                    raw_remote.execute_region_plan_json(malformed)
+        with self.assertRaisesRegex(PermissionError, "development-only"):
+            console_backend._region_plan_admin_command(
+                console_backend._master_admin_context(self.profile, "production"),
+                source_path=source,
+                version=version,
+            )
+
+    def test_fixed_region_bundle_transport_is_path_free_on_import(self) -> None:
+        context = console_backend._master_admin_context(self.profile, "development")
+        version = "a" * 64
+        bundle_path = (
+            "/home/csda/AI_Routing/state/development/managed_data/"
+            f"fixed_region_plan_bundle/{version}/payload.zip"
+        )
+        preview = console_backend._fixed_region_plan_bundle_cli_command(
+            context,
+            "stage-bundle",
+            (
+                "--source", bundle_path,
+                "--bundle-sha256", version,
+                "--managed-version", version,
+            ),
+        )
+        request_path = (
+            "/home/csda/AI_Routing/state/development/region_plan_bundle_requests/"
+            f"{version}.json"
+        )
+        apply = console_backend._fixed_region_plan_bundle_cli_command(
+            context,
+            "import-bundle",
+            ("--request", request_path, "--request-sha256", version),
+        )
+        raw_remote = console_backend.ParamikoRemote(self.profile)
+        raw_remote.client = _Client(b"{}")
+        raw_remote.execute_region_plan_json(preview)
+        raw_remote.execute_region_plan_json(apply)
+        self.assertIn(" stage-bundle ", preview)
+        self.assertIn(" import-bundle ", apply)
+        self.assertNotIn("--source", apply)
+        self.assertNotIn("--bundle", apply)
+        for malformed in (
+            preview.replace(bundle_path, "/tmp/bundle.zip"),
+            preview.replace("--managed-version", "--destination"),
+            apply.replace(request_path, "/tmp/request.json"),
+            apply + " --source /tmp/bundle.zip",
+        ):
+            with self.subTest(command=malformed):
+                with self.assertRaisesRegex(ValueError, "allowlisted|invalid|binding"):
+                    raw_remote.execute_region_plan_json(malformed)
+
+    def test_fixed_region_bundle_preview_apply_use_only_pinned_operations(self) -> None:
+        version = "b" * 64
+        remote = _RegionPlanRemote(
+            {
+                "stage-bundle": {
+                    "contract_version": "region-plan-bundle-import/v1",
+                    "environment": "development",
+                    "managed_version": version,
+                    "bundle_sha256": version,
+                    "status": "ready",
+                    "write_allowed": False,
+                    "target_environment": "development",
+                    "lifecycle_stage": "resolved_candidate",
+                    "verification_only": True,
+                    "promotable": False,
+                    "plan_id": f"atlanta_6area_v2_{version}",
+                    "region_count": 6,
+                },
+                "status-bundle": {
+                    "contract_version": "region-plan-bundle-import/v1",
+                    "environment": "development",
+                    "managed_version": version,
+                    "bundle_sha256": version,
+                    "status": "reviewed",
+                    "plan_id": f"atlanta_6area_v2_{version}",
+                    "revision": 1,
+                    "checksum": version,
+                    "lifecycle_stage": "reviewed",
+                    "verification_only": True,
+                    "promotable": False,
+                },
+                "import-bundle": {
+                    "contract_version": "region-plan-bundle-import/v1",
+                    "environment": "development",
+                    "managed_version": version,
+                    "status": "candidate_imported",
+                    "plan_id": f"atlanta_6area_v2_{version}",
+                    "revision": 1,
+                    "checksum": version,
+                    "lifecycle_stage": "candidate",
+                    "verification_only": True,
+                    "promotable": False,
+                },
+            }
+        )
+        with mock.patch.object(
+            console_backend, "_master_admin_profile", return_value=self.profile
+        ), mock.patch.object(
+            console_backend, "_remote_session_factory", return_value=remote
+        ), mock.patch.object(
+            console_backend,
+            "_load_managed_data_version",
+            return_value=({"payload_name": "payload.zip"}, b"opaque-zip"),
+        ), mock.patch.object(console_backend, "_verify_fixed_region_plan_bundle_admin_release"):
+            preview = console_backend.preview_fixed_region_plan_bundle_import(
+                environment="development", version=version
+            )
+            status = console_backend.get_fixed_region_plan_bundle_status(
+                environment="development", version=version
+            )
+            applied = console_backend.apply_fixed_region_plan_bundle_import(
+                environment="development",
+                version=version,
+                imported_by="operator-1",
+                idempotency_key=str(uuid.uuid4()),
+                confirm=True,
+            )
+        self.assertEqual(preview["status"], "ready")
+        self.assertEqual(status["status"], "reviewed")
+        self.assertEqual(status["resolution_digest"], version)
+        self.assertEqual(applied["status"], "candidate_imported")
+        self.assertEqual(len(remote.uploads), 1)
+        self.assertIn("/region_plan_bundle_requests/", remote.uploads[0])
+        commands = "\n".join(remote.commands)
+        self.assertIn("--json stage-bundle", commands)
+        self.assertIn("--json status-bundle", commands)
+        self.assertIn("--json import-bundle", commands)
+        self.assertNotIn("--source", commands.split("--json import-bundle", 1)[1])
+        self.assertNotIn("/home/", json.dumps({"preview": preview, "applied": applied}))
+
+    def test_region_workflow_is_fixed_request_bound_and_development_only(self) -> None:
+        with console_backend._REGION_PLAN_SCHEMA_CONFIRMATION_LOCK:
+            console_backend._REGION_PLAN_SCHEMA_CONFIRMATIONS.clear()
+        with console_backend._REGION_PLAN_ACTIVATION_PREVIEW_LOCK:
+            console_backend._REGION_PLAN_ACTIVATION_PREVIEWS.clear()
+        remote = _RegionPlanRemote(
+            {
+                "preview": _region_schema_payload(),
+                "reconcile": _region_schema_payload("reconciled"),
+                "resolve": _region_payload("resolve"),
+                "review": _region_payload("review"),
+                "activation-preview": _region_payload("activation-preview"),
+                "activate": _region_payload("activate"),
+            }
+        )
+        version = "c" * 64
+        key = str(uuid.uuid4())
+        resolutions = {
+            postal: {"primary_region": "Zone 2", "allow_overflow": False, "rationale": "approved"}
+            for postal in ("30028", "30040", "30041", "30107")
+        }
+        with mock.patch.object(console_backend, "_load_managed_data_version", return_value=({}, b"source")):
+            schema = self._region_call(
+                remote, lambda: console_backend.preview_region_plan_schema(environment="development")
+            )
+            self.assertNotIn("required_confirmation", schema)
+            self.assertEqual(
+                self._region_call(
+                    remote,
+                    lambda: console_backend.install_region_plan_schema(
+                        environment="development", confirm=True
+                    ),
+                )["status"],
+                "reconciled",
+            )
+            preview = self._region_call(
+                remote,
+                lambda: console_backend.preview_region_plan_resolutions(
+                    environment="development", source_version=version,
+                    boundary_resolutions=resolutions, imported_by="operator-1", idempotency_key=key,
+                ),
+            )
+            resolved = self._region_call(
+                remote,
+                lambda: console_backend.apply_region_plan_resolutions(
+                    environment="development", source_version=version,
+                    boundary_resolutions=resolutions, imported_by="operator-1", idempotency_key=key,
+                    expected_request_sha256=preview["request_sha256"], confirm=True,
+                ),
+            )
+            self.assertEqual(resolved["status"], "candidate_imported")
+            reviewed = self._region_call(
+                remote,
+                lambda: console_backend.review_region_plan(
+                    environment="development", expected_revision=2, reviewed_by="reviewer-1",
+                    review_reference="review-1",
+                    resolution_digest=resolved["resolution_digest"], confirm=True,
+                ),
+            )
+            self.assertEqual(reviewed["revision"], 3)
+            activation = self._region_call(
+                remote, lambda: console_backend.preview_region_plan_activation(
+                    environment="development",
+                    resolution_digest=resolved["resolution_digest"],
+                )
+            )
+            activated = self._region_call(
+                remote,
+                lambda: console_backend.apply_region_plan_activation(
+                    environment="development", preview_id=activation["preview_id"],
+                    preview_digest=activation["preview_digest"], activated_by="operator-1",
+                    activation_reference="activate-1", idempotency_key=str(uuid.uuid4()), confirm=True,
+                ),
+            )
+        self.assertEqual(activated["activation_revision"], 5)
+        self.assertTrue(any("/region_plan_requests/" in path for path in remote.uploads))
+        self.assertTrue(all(remote.modes[path] == 0o600 for path in remote.uploads))
+        commands = "\n".join(remote.commands)
+        for operation in ("preview", "reconcile", "resolve", "review", "activation-preview", "activate"):
+            self.assertIn(f"--json {operation}", commands)
+        self.assertNotIn("--table", commands)
+        self.assertNotIn("--destination", commands)
+
+    def test_region_schema_previews_single_common_v2_reconciler(self) -> None:
+        remote = _RegionPlanRemote({"preview": _region_schema_payload()})
+        result = self._region_call(
+            remote,
+            lambda: console_backend.preview_region_plan_schema(environment="development"),
+        )
+        self.assertEqual(result["schema_id"], "common_region_plan_schema_v2")
+        self.assertIn("admin_tools.db.region_plan_schema_backend", remote.commands[0])
+        self.assertNotIn("--migration-id", remote.commands[0])
+
+    def test_region_command_verifier_allows_only_fixed_schema_and_request_shapes(self) -> None:
+        context = console_backend._master_admin_context(self.profile, "development")
+        remote = console_backend.ParamikoRemote(self.profile)
+        remote.client = _Client(json.dumps(_region_schema_payload()).encode())
+        schema_preview = console_backend._region_plan_schema_cli_command(context, "preview")
+        self.assertIn("--json preview --config", schema_preview)
+        remote.execute_region_plan_json(schema_preview)
+
+        digest = "e" * 64
+        request_path = (
+            "/home/csda/AI_Routing/state/development/region_plan_requests/"
+            f"{digest}.json"
+        )
+        workflow = console_backend._region_plan_cli_command(
+            context, "review", ("--request", request_path, "--request-sha256", digest)
+        )
+        remote.execute_region_plan_json(workflow)
+        for malformed in (
+            workflow.replace(" review ", " arbitrary "),
+            workflow.replace(request_path, "/tmp/request.json"),
+            schema_preview + " --sql 'drop table'",
+        ):
+            with self.subTest(command=malformed):
+                with self.assertRaisesRegex(ValueError, "allowlisted|invalid|arguments"):
+                    remote.execute_region_plan_json(malformed)
+
+    def test_region_operations_reject_production_before_profile_or_remote(self) -> None:
+        with mock.patch.object(console_backend, "_master_admin_profile") as profile, mock.patch.object(
+            console_backend, "_remote_session_factory"
+        ) as remote:
+            with self.assertRaisesRegex(PermissionError, "development-only"):
+                console_backend.preview_region_plan_schema(environment="production")
+            with self.assertRaisesRegex(PermissionError, "development-only"):
+                console_backend.apply_region_plan_activation(
+                    environment="production", preview_id="a" * 64, preview_digest="a" * 64,
+                    activated_by="operator", activation_reference="ref", idempotency_key=str(uuid.uuid4()), confirm=True,
+                )
+            with self.assertRaisesRegex(PermissionError, "development-only"):
+                console_backend.apply_region_plan_resolutions(
+                    environment="production", source_version="a" * 64, boundary_resolutions={},
+                    imported_by="operator", idempotency_key=str(uuid.uuid4()), confirm=True,
+                )
+        profile.assert_not_called()
+        remote.assert_not_called()
+
+    def test_region_artifact_download_returns_bytes_only_on_explicit_bound_request(self) -> None:
+        from tools.data.atlanta_6area_plan import (
+            BOUNDARY_POLICY_FILENAME,
+            FIXED_REGION_FILENAME,
+            MANIFEST_FILENAME,
+            TECHNICIAN_POLICY_FILENAME,
+        )
+
+        with console_backend._REGION_PLAN_RESOLUTION_DOWNLOAD_LOCK:
+            console_backend._REGION_PLAN_RESOLUTION_DOWNLOADS.clear()
+        version = "d" * 64
+        resolutions = {
+            postal: {"primary_region": "Zone 2", "allow_overflow": False, "rationale": "reviewed"}
+            for postal in ("30028", "30040", "30041", "30107")
+        }
+        artifacts = {
+            FIXED_REGION_FILENAME: b"POSTAL_CODE\n30028\n",
+            BOUNDARY_POLICY_FILENAME: b"POSTAL_CODE\n30028\n",
+            TECHNICIAN_POLICY_FILENAME: b"SVC_ENGINEER_CODE\nAI100001\n",
+            MANIFEST_FILENAME: b"{}\n",
+        }
+        bundle = type("Bundle", (), {"artifacts": artifacts})()
+        with mock.patch.object(console_backend, "_master_admin_profile", return_value=self.profile), mock.patch.object(
+            console_backend, "_load_managed_data_version", return_value=({}, b"immutable-source")
+        ), mock.patch(
+            "tools.data.atlanta_6area_plan.build_atlanta_6area_bundle", return_value=bundle
+        ):
+            preview = console_backend.preview_region_plan_resolutions(
+                environment="development", source_version=version,
+                boundary_resolutions=resolutions, imported_by="operator-1", idempotency_key=str(uuid.uuid4()),
+            )
+            self.assertNotIn("content", json.dumps(preview))
+            result = console_backend.download_region_plan_resolution_artifact(
+                environment="development", resolution_digest=preview["resolution_digest"],
+                artifact_id="technician_policy_csv",
+            )
+        self.assertEqual(result["content"], b"SVC_ENGINEER_CODE\nAI100001\n")
+        public = {key: value for key, value in result.items() if key != "content"}
+        self.assertNotIn("SVC_ENGINEER_NAME", json.dumps(public))
+        self.assertEqual(result["content_type"], "text/csv")
 
     def test_python_bytecode_flag_preserves_exact_release_inventory(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

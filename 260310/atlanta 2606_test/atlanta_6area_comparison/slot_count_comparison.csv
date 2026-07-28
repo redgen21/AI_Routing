@@ -1,0 +1,9 @@
+﻿scenario,job_slot_count,total_jobs,assigned_jobs,unassigned_jobs,requested_slots,assigned_slots,job_fill_rate_pct
+Existing,1,1032,999,33,1032,999,96.80232558139535
+Existing,2,457,423,34,914,846,92.5601750547046
+Existing,3,16,16,0,48,48,100.0
+Existing,4,1,1,0,4,4,100.0
+Atlanta_6area,1,1032,882,150,1032,882,85.46511627906976
+Atlanta_6area,2,457,321,136,914,642,70.24070021881839
+Atlanta_6area,3,16,16,0,48,48,100.0
+Atlanta_6area,4,1,1,0,4,4,100.0

@@ -10,6 +10,7 @@ if [ -d /mnt/data/ai-routing/osrm ]; then
   DEFAULT_OSRM_STORAGE_ROOT="/mnt/data/ai-routing/osrm"
 fi
 OSRM_STORAGE_ROOT="${OSRM_STORAGE_ROOT:-${DEFAULT_OSRM_STORAGE_ROOT}}"
+OSRM_IMAGE="${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend:latest}"
 LOG_MAX_SIZE="${OSRM_DOCKER_LOG_MAX_SIZE:-100m}"
 LOG_MAX_FILE="${OSRM_DOCKER_LOG_MAX_FILE:-3}"
 REQUIRED_SUFFIXES=(
@@ -108,7 +109,7 @@ for entry in "${CITY_ENTRIES[@]}"; do
     --log-opt "max-file=${LOG_MAX_FILE}" \
     -v "${OSRM_STORAGE_ROOT}:/data" \
     -v "${BASE_DIR}/profiles:/profiles:ro" \
-    ghcr.io/project-osrm/osrm-backend \
+    "${OSRM_IMAGE}" \
     osrm-extract \
     -p "/profiles/custom_car.lua" \
     "/data/${dir_name}/${dir_name}-latest.osm.pbf"
@@ -119,7 +120,7 @@ for entry in "${CITY_ENTRIES[@]}"; do
     --log-opt "max-size=${LOG_MAX_SIZE}" \
     --log-opt "max-file=${LOG_MAX_FILE}" \
     -v "${OSRM_STORAGE_ROOT}:/data" \
-    ghcr.io/project-osrm/osrm-backend \
+    "${OSRM_IMAGE}" \
     osrm-partition \
     "${osrm_path}"
 
@@ -129,7 +130,7 @@ for entry in "${CITY_ENTRIES[@]}"; do
     --log-opt "max-size=${LOG_MAX_SIZE}" \
     --log-opt "max-file=${LOG_MAX_FILE}" \
     -v "${OSRM_STORAGE_ROOT}:/data" \
-    ghcr.io/project-osrm/osrm-backend \
+    "${OSRM_IMAGE}" \
     osrm-customize \
     "${osrm_path}"
 
@@ -141,6 +142,13 @@ for entry in "${CITY_ENTRIES[@]}"; do
       exit 1
     fi
   done
+done
+
+IMAGE_ID="$(docker image inspect "${OSRM_IMAGE}" --format '{{.Id}}')"
+for entry in "${CITY_ENTRIES[@]}"; do
+  IFS='|' read -r dir_name display_name <<< "${entry}"
+  if ! matches_selected_region "${dir_name}" "${display_name}"; then continue; fi
+  printf '%s\n' "${IMAGE_ID}" > "${OSRM_STORAGE_ROOT}/${dir_name}/.osrm-image-id"
 done
 
 if [ "${build_count}" -eq 0 ]; then

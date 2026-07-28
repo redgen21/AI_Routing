@@ -94,6 +94,15 @@ module_names = (
     "admin_tools.db.seeds.build_la_bucket_vrp_inputs",
     "admin_tools.db.seeds.import_asia_technician_centroids",
 )
+candidate_backend = staging / "admin_tools" / "db" / "region_plan_backend.py"
+if candidate_backend.is_file():
+    module_names += ("admin_tools.db.region_plan_backend",)
+technician_profile_backend = staging / "admin_tools" / "db" / "technician_profile_backend.py"
+if technician_profile_backend.is_file():
+    module_names += ("admin_tools.db.technician_profile_backend",)
+region_plan_schema_backend = staging / "admin_tools" / "db" / "region_plan_schema_backend.py"
+if region_plan_schema_backend.is_file():
+    module_names += ("admin_tools.db.region_plan_schema_backend",)
 modules = tuple(importlib.import_module(name) for name in module_names)
 for module in modules:
     location = Path(module.__file__).resolve()
@@ -109,10 +118,22 @@ if backend.CONTRACT_VERSION != "db-admin/v1" or len(backend.TABLE_REGISTRY) != 1
     Push-Location -LiteralPath $StagingDirectory
     try {
         # A dependency warning on stderr must not bypass the explicit exit-code
-        # gate below or leak into build output.
+        # gate below or leak into build output. On the Windows/NAS development
+        # workspace, endpoint scanning can transiently deny Python a newly
+        # copied module. Retry in a fresh isolated interpreter; deterministic
+        # syntax/import failures still fail every attempt.
         $ErrorActionPreference = "Continue"
-        $smokeOutput = @(& $PythonExecutable "-I" "-B" $smokePath 2>&1)
-        $smokeExitCode = $LASTEXITCODE
+        $smokeExitCode = 1
+        for ($smokeAttempt = 1; $smokeAttempt -le 3; $smokeAttempt++) {
+            $smokeOutput = @(& $PythonExecutable "-I" "-B" $smokePath 2>&1)
+            $smokeExitCode = $LASTEXITCODE
+            if ($smokeExitCode -eq 0) {
+                break
+            }
+            if ($smokeAttempt -lt 3) {
+                Start-Sleep -Milliseconds 250
+            }
+        }
     }
     finally {
         $ErrorActionPreference = $previousErrorActionPreference
@@ -203,6 +224,14 @@ $PackageSourcePaths = @(
     "admin_tools/db/README.md",
     "admin_tools/db/migrations/__init__.py",
     "admin_tools/db/migrations/README.md",
+    "admin_tools/db/migrations/manifest.json",
+    "admin_tools/db/migrations/V001__atlanta_6area_region_plan.manifest.json",
+    "admin_tools/db/migrations/V001__atlanta_6area_region_plan.sql",
+    "admin_tools/db/migrations/V002__region_plan_unbounded_region_seq.sql",
+    "admin_tools/db/migrations/V003__region_plan_technician_source_id.sql",
+    "admin_tools/db/migrations/V004__region_plan_area_type_region_soft.sql",
+    "admin_tools/db/region_plan_schema_backend.py",
+    "admin_tools/db/region_plan_schema_v2.sql",
     "admin_tools/db/runners/__init__.py",
     "admin_tools/db/runners/reset_common_vrp_data.py",
     "admin_tools/db/seeds/__init__.py",
@@ -214,6 +243,37 @@ $PackageSourcePaths = @(
     "config/data_catalog.admin.template.json",
     "config/data_catalog.json"
 )
+# Candidate-plan staging is an optional, fixed Admin Tools capability.  The
+# package never reaches back into the checkout: if the data-owned CLI is not
+# present, it is absent from both the exact allowlist and the manifest, and
+# the console bridge refuses to stage territory candidates through that
+# release.  Once present it is imported from the generated staging directory.
+$RegionPlanBackend = "admin_tools/db/region_plan_backend.py"
+if (Test-Path -LiteralPath (Join-Path $Root $RegionPlanBackend) -PathType Leaf) {
+    # This CLI deliberately uses the data-owned immutable workbook parser.
+    # Package only those exact Python package files so the isolated staging
+    # smoke cannot fall back to the source checkout.
+    $RegionPlanSupportPaths = @(
+        "tools/__init__.py",
+        "tools/data/__init__.py",
+        "tools/data/atlanta_6area_plan.py"
+    )
+    $PackageSourcePaths += @($RegionPlanBackend) + $RegionPlanSupportPaths
+}
+# Technician profile synchronization is likewise opt-in at build time, but it
+# has a fixed executable and transform dependency.  If either source is
+# missing it is absent from the exact manifest and the console rejects that
+# pinned release; no import may escape the generated staging directory.
+$TechnicianProfileBackend = "admin_tools/db/technician_profile_backend.py"
+if (Test-Path -LiteralPath (Join-Path $Root $TechnicianProfileBackend) -PathType Leaf) {
+    $TechnicianProfileSupportPaths = @(
+        "tools/__init__.py",
+        "tools/data/__init__.py",
+        "tools/data/technician_profile_data.py"
+    )
+    $PackageSourcePaths += @($TechnicianProfileBackend) + $TechnicianProfileSupportPaths
+}
+$PackageSourcePaths = @($PackageSourcePaths | Select-Object -Unique)
 foreach ($relativePath in $PackageSourcePaths) {
     Copy-RequiredFile -RelativePath $relativePath
 }
@@ -286,6 +346,19 @@ $Files = Get-ChildItem -LiteralPath $StagingDir -Recurse -File | ForEach-Object 
         sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     }
 }
+$Entrypoints = @(
+    "admin_tools.db.runners.reset_common_vrp_data",
+    "admin_tools.db.master_data_backend",
+    "admin_tools.db.seeds.build_la_bucket_vrp_inputs",
+    "admin_tools.db.seeds.import_asia_technician_centroids"
+)
+if ($PackageSourcePaths -contains $TechnicianProfileBackend) {
+    $Entrypoints += "admin_tools.db.technician_profile_backend"
+}
+# region_plan_backend remains a release-local compatibility dependency for the
+# schema reconciler. Do not advertise its historical per-migration CLI as an
+# executable release surface.
+$Entrypoints += "admin_tools.db.region_plan_schema_backend"
 $Manifest = [ordered]@{
     package_name = $PackageName
     artifact_type = "db-admin-tools"
@@ -296,12 +369,7 @@ $Manifest = [ordered]@{
     target_root = "/home/csda/AI_Routing/admin_tools/releases/$Version"
     contains_secrets = $false
     contains_data = $false
-    entrypoints = @(
-        "admin_tools.db.runners.reset_common_vrp_data",
-        "admin_tools.db.master_data_backend",
-        "admin_tools.db.seeds.build_la_bucket_vrp_inputs",
-        "admin_tools.db.seeds.import_asia_technician_centroids"
-    )
+    entrypoints = @($Entrypoints)
     files = @($Files)
     notes = @(
         "No database command is executed by this build.",

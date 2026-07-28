@@ -1,0 +1,242 @@
+{
+    "package_name":  "ai-routing-runtime-development-contract-test-139a3cc11fe54fc6bd28484607790f05",
+    "artifact_type":  "server-runtime",
+    "created_at":  "2026-07-23T17:30:46.583342Z",
+    "source_revision":  "d0cde9826fbb91526644f50be25f0caeb68ad3b9",
+    "source_dirty":  true,
+    "source_mode":  "worktree",
+    "promotable":  false,
+    "target_environment":  "development",
+    "target_root":  "/home/csda/AI_Routing/development",
+    "enabled_services":  [
+                             "common_api",
+                             "common_ui",
+                             "smart_routing_api"
+                         ],
+    "runtime_scope":  [
+                          "smart_routing",
+                          "services/api",
+                          "root_entrypoints",
+                          "matching_systemd_units"
+                      ],
+    "includes_docs":  false,
+    "files":  [
+                  {
+                      "path":  "bootstrap_common_vrp_dev.sh",
+                      "sha256":  "526c5d35ea9d6be55e7e4d53bead5e916ad68ab60ace93416c9a5e95e5aa4a0c"
+                  },
+                  {
+                      "path":  "requirements.txt",
+                      "sha256":  "217844ec6680db46d9ae87afc3ce371c40e6ac316e7acce16fc643b989899c16"
+                  },
+                  {
+                      "path":  "restart_smart_routing_api.sh",
+                      "sha256":  "1db1f8b5d9e03c6d0139ede4af13a0938038384a50f61df4594bfbbeaddc82fc"
+                  },
+                  {
+                      "path":  "runtime_env.sh",
+                      "sha256":  "f13859e21396dfd42261d9aa20915150e66f31253ae76b229de6437fa0481e02"
+                  },
+                  {
+                      "path":  "sr_common_vrp_api_server.py",
+                      "sha256":  "ebe78dda78da436c67993768a66488612d4d50a36424192fa61410502e498c05"
+                  },
+                  {
+                      "path":  "sr_common_vrp_client_server.py",
+                      "sha256":  "e9170fb28b9dd81833dfffcdfb4a069755d9b7e97b415da8918793776a78d739"
+                  },
+                  {
+                      "path":  "sr_vrp_api_server.py",
+                      "sha256":  "bfb182456b9a47b46578f9483d2920b3cf11404508b0812b05d54bff479d3e0c"
+                  },
+                  {
+                      "path":  "start_common_vrp_client_server_dev.sh",
+                      "sha256":  "1b0fd8c9a917b456d73a0aafc748e33ac888703643f7be0d72d716e31180b7d7"
+                  },
+                  {
+                      "path":  "start_common_vrp_dev.sh",
+                      "sha256":  "b0916b6c7cacb5881e4f928165e6e0ea5fa6d5fa2bbecfab24c2ceb4da980142"
+                  },
+                  {
+                      "path":  "verify_deployment.py",
+                      "sha256":  "88fb0b954b3996f1fb9def8fe5633247ed9f94528551560bfc883fd8e99feb91"
+                  },
+                  {
+                      "path":  "config/common_vrp.dev.template.json",
+                      "sha256":  "822e228254a624c1f9d480e1d680191a5a7bc708609e017b7fc15e2f6f9019c2"
+                  },
+                  {
+                      "path":  "config/config.template.json",
+                      "sha256":  "28bd4a85b6550a58fdf35ffccfe7d645ee2678eca2d8e665307292431ed5f685"
+                  },
+                  {
+                      "path":  "config/data_catalog.json",
+                      "sha256":  "21cc446cba1b508dd0bd317d1dd3a3bcb9e87f29c892d025b7421a44f72d69e4"
+                  },
+                  {
+                      "path":  "services/__init__.py",
+                      "sha256":  "64f1a8c68ce0c42f9e9440aeaec1110785e7192944ea9ff2b570e9878b1ec4e3"
+                  },
+                  {
+                      "path":  "services/api/common_vrp_config.py",
+                      "sha256":  "62fb6b5e3183f77a6ca930e1cc1f91ec288639e7d77086027f43dd11dcd72434"
+                  },
+                  {
+                      "path":  "services/api/region_plan_repository_v2.py",
+                      "sha256":  "9c103cef3416f7b1c9dbc033096f54ffe8ec2ab3e31214ec07b07dc169f5c86b"
+                  },
+                  {
+                      "path":  "services/api/region_plan_v2.py",
+                      "sha256":  "a95f7575c4494d4b9597d7a0202db5164965493c802b3574e8d878e0d53aa73d"
+                  },
+                  {
+                      "path":  "services/api/run_common_vrp_api.py",
+                      "sha256":  "2e1206ca5fac71b3f3bea74771b9214222eeb3e83b3f682d6e915bbf75311ce2"
+                  },
+                  {
+                      "path":  "services/api/sr_vrp_api_server.py",
+                      "sha256":  "fd0eb54dc55e84e5ae133321abcd695305311f76d25c0e55d8150ba9bd29e392"
+                  },
+                  {
+                      "path":  "services/api/__init__.py",
+                      "sha256":  "2ef9dfd287abe06ed9c5dfec18498cb8aa0031f6397da0fb4820a9b62ca33785"
+                  },
+                  {
+                      "path":  "smart_routing/area_map.py",
+                      "sha256":  "ffabf6d2550027141e4a9291091b01a56b06c3f51caf2777851b514a7ea0f7f9"
+                  },
+                  {
+                      "path":  "smart_routing/census_geocoder.py",
+                      "sha256":  "341dd45458374eb4d6ef25b18688a3e815da8d6e96677126a6dd8d9b2e4592c5"
+                  },
+                  {
+                      "path":  "smart_routing/common_vrp_api_server.py",
+                      "sha256":  "d5d3561f0258b68d84a08420d6014740f1b33f0806c17ca251266ab34220827a"
+                  },
+                  {
+                      "path":  "smart_routing/common_vrp_db.py",
+                      "sha256":  "8b8f69d1fbdd7526aa1d40dfd05caf660ac7cb647e6897f52d63a96ec7801975"
+                  },
+                  {
+                      "path":  "smart_routing/common_vrp_runtime.py",
+                      "sha256":  "1c07cecbed648b17dda73884ee78a91038f044e200bf275242f8745615f9fdc5"
+                  },
+                  {
+                      "path":  "smart_routing/data_catalog.py",
+                      "sha256":  "057f7f11bda1f3d93f58533de1ec47938da07f849a32d658598d6fda77ffbb96"
+                  },
+                  {
+                      "path":  "smart_routing/geocode_storage.py",
+                      "sha256":  "ed12274d74aeaed5f51307bafa025b23105769d91606f5e63ee834edcf77c1c9"
+                  },
+                  {
+                      "path":  "smart_routing/google_geocoder.py",
+                      "sha256":  "bfdb6ca591de9ecc216338b9a4ec3c26cfad7162526975569926ccfa517b31d7"
+                  },
+                  {
+                      "path":  "smart_routing/here_geocoder.py",
+                      "sha256":  "40ac86b0270018b694771023eeddc4cb5dc74880d8391b98b84cb5cc38ce25aa"
+                  },
+                  {
+                      "path":  "smart_routing/live_atlanta_runtime.py",
+                      "sha256":  "b792d45f6368bf608c879732d9c45b9747e762ac5ba1dec2b9eece40f17b636f"
+                  },
+                  {
+                      "path":  "smart_routing/nominatim_geocoder.py",
+                      "sha256":  "a8bd21bfb313c7597bab7b6a20fc6fa1ecec8ca6750c3012f538076fa673fa95"
+                  },
+                  {
+                      "path":  "smart_routing/osrm_routing.py",
+                      "sha256":  "1fe0325b6dbbf44d2e8c48b390ec5187309ff608e15cef3935e8c8064864ba73"
+                  },
+                  {
+                      "path":  "smart_routing/production_assign_atlanta.py",
+                      "sha256":  "b7e9819e687032989dc0ed6b18109ea384ebdb44d086806858b147e0db415b4a"
+                  },
+                  {
+                      "path":  "smart_routing/production_assign_atlanta_vrp.py",
+                      "sha256":  "eac1e77c71833ecb494ad652332f60c328d33cc70162e1dd8808f261e9c53274"
+                  },
+                  {
+                      "path":  "smart_routing/production_atlanta.py",
+                      "sha256":  "a5611918004bb9d6f25c47b3ad5f07295ef0a07eccb64cda56608fc25f6c9e39"
+                  },
+                  {
+                      "path":  "smart_routing/region_design.py",
+                      "sha256":  "230c867cc035fe1d791468cfc38cace726d95158c116d74b634d86a05a0c14cc"
+                  },
+                  {
+                      "path":  "smart_routing/region_sweep.py",
+                      "sha256":  "369cb10c1e5baf83b72ec0b04b7c5f0b7444b7ffb5f35a20e409fd2334128c68"
+                  },
+                  {
+                      "path":  "smart_routing/routing_compare.py",
+                      "sha256":  "bcf494f676ad4635547e432a96fa27c6ea7ebf6a895e80c0e7d49c6becbaaa9b"
+                  },
+                  {
+                      "path":  "smart_routing/service_preprocess.py",
+                      "sha256":  "e4242c47f0f230c7f62cbb2fe3b9de33116db48910b0497df9ca71d84bc52042"
+                  },
+                  {
+                      "path":  "smart_routing/us_geocode_cleaner.py",
+                      "sha256":  "d5da5dc6b251c77d273ae139c9ab0a303ab58e16dc442e992f27c88a79ddf805"
+                  },
+                  {
+                      "path":  "smart_routing/vrp_api_common.py",
+                      "sha256":  "7046b24ac69eb9507cdc90e967d0d5da8f19a80e790693d821e011b0234e2f82"
+                  },
+                  {
+                      "path":  "smart_routing/vrp_api_server.py",
+                      "sha256":  "6fdcd40bc51c842f9d2728f51c4cfa6b43d76984e60088abab1b9d348a362a9d"
+                  },
+                  {
+                      "path":  "smart_routing/vrp_api_service.py",
+                      "sha256":  "90d1cd4cb41981d44e6e0f3ff794749c434eb2a774f2caca0344800dd135089d"
+                  },
+                  {
+                      "path":  "smart_routing/vrp_mode_na_general.py",
+                      "sha256":  "31a7c4701dac90b39894506d8d1599598c04e6d4b9bf120dd58716a19eaf882e"
+                  },
+                  {
+                      "path":  "smart_routing/vrp_mode_z_weekend.py",
+                      "sha256":  "ab460bf708caa91dc5cf5d0e226646657ae8c88ba34d0e6f7c85b12f86a68d0d"
+                  },
+                  {
+                      "path":  "smart_routing/__init__.py",
+                      "sha256":  "5797f59e8baa2063ed9a3bb59670041719c41b1c81988dd2ca8e6f838c3b8c8b"
+                  },
+                  {
+                      "path":  "systemd/common-vrp-client-dev.service",
+                      "sha256":  "9947e453e4c74ec2722537c4952047b89270fd3f500be386bf3f8fdf00b12b77"
+                  },
+                  {
+                      "path":  "systemd/common-vrp-dev.service",
+                      "sha256":  "32e26d2775482a8bc1f3a192b115a1048600b0deec44e87828c614e8147e9cb0"
+                  },
+                  {
+                      "path":  "systemd/smart-routing-dev.service",
+                      "sha256":  "3ac5323dd0947abae1007bd04aa5647fe5aab473a382f4c1e3a266a4a7d78e43"
+                  },
+                  {
+                      "path":  "tools/__init__.py",
+                      "sha256":  "ce572bff452808a2e13e81c42a2bbd1c1a44f333f4a605d5b9f65c0740420760"
+                  },
+                  {
+                      "path":  "tools/data/region_plan_workflow_v2.py",
+                      "sha256":  "9af29b0b100464e8821b55330f8ea40e714bfd3a3751756848cc6172551878a5"
+                  },
+                  {
+                      "path":  "tools/data/__init__.py",
+                      "sha256":  "551c3bd0efff50c0a92bdf8d02471cd7da44d785a7f1b09dcb7b50b0eef6d2ee"
+                  }
+              ],
+    "notes":  [
+                  "Environment JSON files with values are not included; only checked-in templates are packaged.",
+                  "Production release artifacts must have source_dirty=false and cannot use -AllowDirtySource.",
+                  "Copy the checked-in templates to environment JSON files and fill secrets on the target server.",
+                  "Create production server-only configuration from templates. Development secure configuration is uploaded separately by the deployment console.",
+                  "Runtime data, logs, caches, OSRM graph files, job results, and local data folders are always excluded.",
+                  "DB admin/seed tools, deploy builders, tests, offline tools, OSRM operations, and non-server root applications are excluded.",
+                  "Run with -IncludeDocs to include documentation. Supply runtime data separately through the hydration process."
+              ]
+}

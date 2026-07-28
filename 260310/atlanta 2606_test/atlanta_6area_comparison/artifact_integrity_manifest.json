@@ -1,0 +1,202 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-07-23T03:58:40.167368+00:00",
+  "algorithm": "sha256",
+  "allowlisted_artifact_count": 31,
+  "allowlisted_artifacts": [
+    {
+      "path": "area_assignment_flow.csv",
+      "size_bytes": 6716,
+      "sha256": "de2954a63e9b9486e0c279613d47090f848d52d9dd9c8d95d9e19bcdd906a4c7"
+    },
+    {
+      "path": "area_daily_demand_stats.csv",
+      "size_bytes": 7999,
+      "sha256": "4e91b9530e86d666cef7cb4d600e57c62724dd90ff74dc557f368a1e469b87f5"
+    },
+    {
+      "path": "area_daily_technician_stats.csv",
+      "size_bytes": 10024,
+      "sha256": "aabd6d6e36f03423486576a63d878fd1b6b5a6786206275cb2e0d64b828ef359"
+    },
+    {
+      "path": "area_overall_demand_stats.csv",
+      "size_bytes": 558,
+      "sha256": "206fc4efd953bc83b065cc64ed31a3471fb78dda12fc1f37aa2a90f5afb19da8"
+    },
+    {
+      "path": "area_overall_technician_stats.csv",
+      "size_bytes": 623,
+      "sha256": "83485cedd3f8636f57d1bed9a493d4bb29538a904085e29cbb8a9e81c96a5c73"
+    },
+    {
+      "path": "area_technician_route_distance_detail.csv",
+      "size_bytes": 27163,
+      "sha256": "94088b97d1cb774ed744136d529e6c2d2dab72ceb3b42265ac723c6c3abe96dc"
+    },
+    {
+      "path": "area_unassigned_reasons.csv",
+      "size_bytes": 2550,
+      "sha256": "787c9bc773fce7b3fc953b5cbc7fd44f5f5abacb77f82970ccd53b51d96e54c0"
+    },
+    {
+      "path": "atlanta_6area_area_statistics.xlsx",
+      "size_bytes": 33034,
+      "sha256": "59676c9f80a5b76a9150377460465e667baa941bb5635e2c64e7ca0c1822d2c3"
+    },
+    {
+      "path": "atlanta_6area_daily_metrics.csv",
+      "size_bytes": 4436,
+      "sha256": "121bd0fb64d4efe06bf5d238b083400bb560fbcf11b6549a341fc8e48a5cc36a"
+    },
+    {
+      "path": "atlanta_6area_integrated_area_statistics.csv",
+      "size_bytes": 1214,
+      "sha256": "6e02011ab78b80ce6ea4e0348340d525ab6700f545d6e6039c4c603adebfef06"
+    },
+    {
+      "path": "atlanta_6area_integrated_statistics.xlsx",
+      "size_bytes": 48889,
+      "sha256": "5cc288feaab1a3050018f12dba58c21d85556372f1e5bb7e6d3053ee09b9f5bc"
+    },
+    {
+      "path": "atlanta_6area_result_type_slot_counts.csv",
+      "size_bytes": 26071,
+      "sha256": "f8c55ab6515bc66f874788d55b4ec8d27c6ddd6e9b9bf69104c3bdd73ae17918"
+    },
+    {
+      "path": "atlanta_6area_routing_results.csv",
+      "size_bytes": 325315,
+      "sha256": "4b05ec98816b94693f7d6960217853cd1a7e56e1684c699025546b0de0e2a249"
+    },
+    {
+      "path": "atlanta_6area_unassigned_diagnostics.csv",
+      "size_bytes": 59708,
+      "sha256": "5c6c6fe314b337ea5335cc22efd7760da1675d0cd0885fef41ac5a4947f357c6"
+    },
+    {
+      "path": "atlanta_6area_unassigned_reasons.csv",
+      "size_bytes": 1863,
+      "sha256": "8ed5272a7c143d3a5ebe0589f79b328d4aea9df454ff0f553287c6d87a87ae9d"
+    },
+    {
+      "path": "atlanta_6area_vs_existing_summary.xlsx",
+      "size_bytes": 64228,
+      "sha256": "0cda21cb6dacc53a0df36acc894186e1044b6f7e774c5bebf6319312c0626b45"
+    },
+    {
+      "path": "constraint_probe_run_status.csv",
+      "size_bytes": 6007,
+      "sha256": "f192d7138702b784a0a249145be514031ea1f6a28bd22de2724940bbe1553f26"
+    },
+    {
+      "path": "daily_comparison.csv",
+      "size_bytes": 11338,
+      "sha256": "4bc7d235f83f8a5e7f85297b38c46fff7aee12a09bd6c4a14737a2ed564c7949"
+    },
+    {
+      "path": "daily_metrics_all_scenarios.csv",
+      "size_bytes": 7584,
+      "sha256": "ee06bbba1faafa8f3cd50664544916226c860a318c00631e86d3ed6e6962f306"
+    },
+    {
+      "path": "executive_comparison.csv",
+      "size_bytes": 518,
+      "sha256": "c1998921780dd7f30906bb12047361da8a8ae90e2fab68234f65de3341c3feb6"
+    },
+    {
+      "path": "fixed_job_policy_accounting.csv",
+      "size_bytes": 37583,
+      "sha256": "ca7395a9ec491e071d5d75124b707166a0898afefcd9129f2db2eace24a854b6"
+    },
+    {
+      "path": "jobs_excluded_from_aligned_comparison.csv",
+      "size_bytes": 1809,
+      "sha256": "79286b1a4a98ac2543f25e66d8e2da5c37ae6d3df02e9efadc8573f208f5163c"
+    },
+    {
+      "path": "overall_comparison.csv",
+      "size_bytes": 501,
+      "sha256": "99c7bcd48711aa2c5e6b95c72b46fe7e04a70ddd34892c7679ba78a4e9090351"
+    },
+    {
+      "path": "run_manifest.json",
+      "size_bytes": 5927,
+      "sha256": "d80a422c789e6088d20f5a9624e2041063a2222a9cff8ce4c16db97b97571a77"
+    },
+    {
+      "path": "run_status.csv",
+      "size_bytes": 1467,
+      "sha256": "acd19a8e9ce21d8b23525b565dec7d6d9441d4695054ebf7a62f47a11f5caf08"
+    },
+    {
+      "path": "slot_count_comparison.csv",
+      "size_bytes": 459,
+      "sha256": "b112fc13fbf5920da670f28010d71a404fdd2f24937f1f40535c72cfcf689f62"
+    },
+    {
+      "path": "slot_count_result_type_comparison.csv",
+      "size_bytes": 421,
+      "sha256": "dcdc3dc56ffd5e8bcf1696644fa9bc28846d4bf2710ab62cced675d7636d93b7"
+    },
+    {
+      "path": "solver_diagnostics_by_day.json",
+      "size_bytes": 91721,
+      "sha256": "68833136502dbf8ed011e0936b687cb75aa19e16d8f043c65589e5b4bdb3dcd2"
+    },
+    {
+      "path": "technician_input_capacity_roster.csv",
+      "size_bytes": 56452,
+      "sha256": "4d3045a37f154dd943162233340dd0d4fd7af166cfd553ef2aa038505ffd127b"
+    },
+    {
+      "path": "weekday_comparison.csv",
+      "size_bytes": 1798,
+      "sha256": "22edbacc164d10bb72ec1ad5134a9ec675221dcc886123c2d0b7501b1940306a"
+    },
+    {
+      "path": "weekday_unassigned_diagnostics.csv",
+      "size_bytes": 2696,
+      "sha256": "7034e8d0a7bfcdac1eb6baad50237c6a703b66fd64a4646a11703254c9b5054b"
+    }
+  ],
+  "ignored_non_artifact_patterns": [
+    {
+      "pattern": "~$*",
+      "reason": "Microsoft Excel owner/lock files are transient non-artifacts",
+      "warning": "A detected lock file may mean an Excel workbook is currently open; it was not deleted or checksummed."
+    }
+  ],
+  "detected_ignored_non_artifacts": [
+    "~$atlanta_6area_area_statistics.xlsx"
+  ],
+  "non_allowlisted_files": [
+    "checkpoint_smoke_stderr.log",
+    "checkpoint_smoke_stdout.log",
+    "rerun_20260722_stderr.log",
+    "rerun_20260722_stdout.log",
+    "rerun_checkpointed_stderr.log",
+    "rerun_checkpointed_stdout.log",
+    "rerun_v2_checkpointed_stderr.log",
+    "rerun_v2_checkpointed_stdout.log"
+  ],
+  "top_level_directory_classification": {
+    "directories": [
+      {
+        "path": "_archive_prior_run",
+        "classification": "excluded_archive_non_current"
+      },
+      {
+        "path": "_constraint_probe_checkpoints_v3_policy_v2",
+        "classification": "current_execution_evidence"
+      },
+      {
+        "path": "daily_inputs",
+        "classification": "input_derivatives"
+      }
+    ],
+    "unexpected_top_level_directories": [],
+    "status": "clean"
+  },
+  "integrity_manifest_self_excluded": "artifact_integrity_manifest.json"
+}

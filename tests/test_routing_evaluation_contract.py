@@ -200,6 +200,31 @@ class RegionPlanEvaluationContractTest(unittest.TestCase):
 
 
 class KoreanCompatibilityRegressionTest(unittest.TestCase):
+    def _weekend_payload(self, *, skills: list[dict], job_count: int = 1) -> dict:
+        return {
+            "request_id": "weekend-regression",
+            "planning_date": "2026-05-22",
+            "city": "Korea",
+            "technicians": [
+                {
+                    "employee_code": "T1",
+                    "employee_name": "Tech 1",
+                    "start_location": {"lat": 37.5, "lng": 127.0},
+                    "max_jobs": 1,
+                    "skills": skills,
+                }
+            ],
+            "jobs": [
+                {
+                    "salesforce_id": f"J{idx}",
+                    "receipt_no": f"J{idx}",
+                    "product": "P1",
+                    "location": {"lat": 37.5 + idx / 1000, "lng": 127.0 + idx / 1000},
+                }
+                for idx in range(1, job_count + 1)
+            ],
+        }
+
     def test_functional_korean_values_match_head_contract(self) -> None:
         self.assertEqual(production_atlanta.HEAVY_REPAIR_SHEET, "3depth 기준 중수리 증상")
         empty = pd.DataFrame()
@@ -232,6 +257,23 @@ class KoreanCompatibilityRegressionTest(unittest.TestCase):
         tech_state = solve_jobs.call_args.kwargs["tech_states"][0]
         self.assertEqual(tech_state["employee_code"], "1001")
         self.assertEqual(tech_state["start_coord"], (37.5, 127.0))
+
+    @patch.object(vrp_mode_z_weekend, "_osrm_route_distance_km", return_value=1.0)
+    def test_weekend_capacity_shortage_assigns_feasible_subset(self, _route_distance) -> None:
+        result = vrp_mode_z_weekend.run_mode(
+            self._weekend_payload(skills=[{"product": "P1"}], job_count=2)
+        )
+
+        self.assertEqual(result["summary"], {"total_jobs": 2, "assigned_jobs": 1, "unassigned_jobs": 1})
+        self.assertEqual(len(result["assignments"]), 1)
+        self.assertEqual(len(result["unassigned"]), 1)
+
+    @patch.object(vrp_mode_z_weekend, "_osrm_route_distance_km", return_value=1.0)
+    def test_weekend_empty_skills_cannot_receive_product(self, _route_distance) -> None:
+        result = vrp_mode_z_weekend.run_mode(self._weekend_payload(skills=[], job_count=1))
+
+        self.assertEqual(result["summary"], {"total_jobs": 1, "assigned_jobs": 0, "unassigned_jobs": 1})
+        self.assertEqual(result["unassigned"][0]["reason"], "NO_ELIGIBLE_TECHNICIAN")
 
 
 if __name__ == "__main__":

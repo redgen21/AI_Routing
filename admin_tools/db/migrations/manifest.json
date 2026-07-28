@@ -1,0 +1,17 @@
+{
+  "schema": "vrp-schema-migration-registry/v1",
+  "migrations": [
+    {
+      "migration_id": "V001__atlanta_6area_region_plan",
+      "description": "Create additive versioned PII-redacted Atlanta_6area plan and activation storage without changing legacy region masters.",
+      "sql_file": "V001__atlanta_6area_region_plan.sql",
+      "checksum_sha256": "177aa2c008430ac11c91c27ce7612e1a948f3d83a9801b4d63d0b5a30dc9805e",
+      "rollback_instructions": "Disable Atlanta_6area and retain additive plan/audit tables. Do not delete plan history or drop tables automatically.",
+      "reversible": false,
+      "rollback_migration_id": null
+    },
+    {"migration_id":"V002__region_plan_unbounded_region_seq","description":"Remove Atlanta-specific six-region cap for generic region plans.","sql_file":"V002__region_plan_unbounded_region_seq.sql","checksum_sha256":"cbf219e4cc66830c2bd79fefdde5ea15c227ca174f145d358deda69c065a7323","rollback_instructions":"Restore a reviewed bounded constraint only after confirming no region_seq above six exists.","reversible":false,"rollback_migration_id":null},
+    {"migration_id":"V003__region_plan_technician_source_id","description":"Allow validated source-system technician identifiers in generic region plans while preserving existing AI technician identifiers.","sql_file":"V003__region_plan_technician_source_id.sql","checksum_sha256":"bb2489979500538511d301e4fcb41584f17c975287c5580c7bfa073a55ba7ecb","rollback_instructions":"Do not narrow automatically. Add a reviewed follow-on migration only after proving no active plan references non-AI technician identifiers.","reversible":false,"rollback_migration_id":null},
+    {"migration_id":"V004__region_plan_area_type_region_soft","description":"Persist per-region DMS/DMS2 classification and allow the frozen area-type-fallback/region-soft policy while preserving explicit-workbook and earlier candidate policy rows.","sql_file":"V004__region_plan_area_type_region_soft.sql","checksum_sha256":"d10bf6da0c29ae9fb2e1385f78dfd424c46abf89bbdaf0e98a4efce27fd6c982","rollback_instructions":"Retain the nullable required_center_type column and policy audit rows. Do not narrow policy_mode while any plan references either active-roster region-soft policy.","reversible":false,"rollback_migration_id":null}
+  ]
+}

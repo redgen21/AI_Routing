@@ -1,0 +1,163 @@
+{
+  "plan_id": "atlanta_6area_v2_51a40fc9ddf29b6b2e095050ecc24a72e874b9f93f383b33f55360f21f3202d2",
+  "plan_checksum": "94869889f2e8ea60ca528aa59f0562c9f4b38d655c50782bd57cbcc833c2047b",
+  "policy": "own_region_with_approved_boundary_overflow/v2",
+  "dates": [
+    20260601,
+    20260602,
+    20260603,
+    20260604,
+    20260605,
+    20260608,
+    20260609,
+    20260610,
+    20260611,
+    20260612,
+    20260615,
+    20260616,
+    20260617,
+    20260618,
+    20260619,
+    20260622,
+    20260623,
+    20260624,
+    20260625,
+    20260626,
+    20260629,
+    20260630
+  ],
+  "job_rows": 1506,
+  "comparison_universe": "date+receipt keys present in atlanta_routing_results_20260601_20260630.csv",
+  "excluded_job_rows": 6,
+  "technician_input_rows": 329,
+  "plan_technicians": [
+    "AI005576",
+    "AI102087",
+    "AI102315",
+    "AI102448",
+    "AI102608",
+    "AI102961",
+    "AI102977",
+    "AI103128",
+    "AI103146",
+    "AI103261",
+    "AI103264",
+    "AI103317",
+    "AI105115",
+    "AI105116"
+  ],
+  "overflow_postals": [
+    "30028",
+    "30040",
+    "30041",
+    "30107"
+  ],
+  "fixed_job_policy": {
+    "authorization": "A fixed job remains with its original technician unless that technician is outside the active plan; only rows explicitly flagged fixed_technician_outside_active_plan_relaxed may be reassigned within remaining hard eligibility.",
+    "accounting_artifact": "fixed_job_policy_accounting.csv",
+    "hard_assertion": "zero unauthorized non-flagged fixed-job reassignments",
+    "aligned_fixed_jobs": 348,
+    "preserved_original_technician": 176,
+    "authorized_outside_plan_reassignments": 144,
+    "unassigned_fixed_jobs": 28,
+    "unassigned_fixed_technician_not_available": 20,
+    "unassigned_postal_not_in_active_plan": 6,
+    "unassigned_no_eligible_technician": 2,
+    "released_outside_plan_unassigned": 8,
+    "unauthorized_non_flagged_reassignments": 0
+  },
+  "time_limit_seconds_per_day": 10,
+  "solver": {
+    "engine": "OR-Tools na_general / production_assign_atlanta_vrp",
+    "first_solution_strategy": "PARALLEL_CHEAPEST_INSERTION",
+    "local_search": "GUIDED_LOCAL_SEARCH",
+    "objective": "min_total_travel_time"
+  },
+  "units": {
+    "matrix_distance": "km",
+    "matrix_duration": "minutes",
+    "service_duration": "minutes (45 per slot unless input override)",
+    "reported_route_distance": "km and miles (km * 0.621371)",
+    "slot_capacity": "job slots"
+  },
+  "matrix": {
+    "source": "OSRM table/route via city_osrm_else_haversine",
+    "shape": "(technicians + jobs) square directed matrix per daily solve",
+    "coordinate_order": "longitude,latitude",
+    "fallback": "haversine_on_osrm_error"
+  },
+  "constraint_probe_method": {
+    "scope": "NO_FEASIBLE_ROUTE and NO_FEASIBLE_MANDATORY_ROUTE with explicit eligible candidates only; raw reason is preserved for every job",
+    "baseline": "authoritative main routing response (no duplicate replay solve)",
+    "probe_time_limit_seconds": 3,
+    "capacity": "increase max_slots/max_jobs only while retaining each normalized effective max_minutes",
+    "work_time": "increase max_minutes only to solver absolute ceiling (600 min), retaining slots",
+    "travel_distance": "remove only explicit daily/leg/home travel caps; not run when no cap is configured",
+    "classification": "single observed isolating probe; MULTIPLE_CONSTRAINTS or UNDETERMINED otherwise (including a 3-second probe that does not isolate a job)"
+  },
+  "comparison_artifacts": {
+    "slot_count_comparison.csv": "Existing and Atlanta_6area requested/assigned/unassigned jobs and slots by job_slot_count",
+    "slot_count_result_type_comparison.csv": "Long assigned/unassigned result-type counts and slots by scenario and job_slot_count",
+    "fixed_job_policy_accounting.csv": "Per-fixed-job authorized policy outcome plus verified summary rows",
+    "weekday_comparison.csv": "Existing and Atlanta_6area performance by ISO weekday (Monday=1)",
+    "weekday_unassigned_diagnostics.csv": "Atlanta unassigned reason/class/slot counts by ISO weekday"
+  },
+  "formulas": {
+    "avg_jobs": "dispatch_jobs / active_technicians",
+    "avg_slots": "dispatch_slots / active_technicians",
+    "job_fill_rate_pct": "dispatch_jobs / total_jobs * 100",
+    "fill_rate_pct": "dispatch_slots / available_slots * 100",
+    "travel_distance_miles": "travel_distance_km * 0.621371"
+  },
+  "completed_dates": [
+    20260601,
+    20260602,
+    20260603,
+    20260604,
+    20260605,
+    20260608,
+    20260609,
+    20260610,
+    20260611,
+    20260612,
+    20260615,
+    20260616,
+    20260617,
+    20260618,
+    20260619,
+    20260622,
+    20260623,
+    20260624,
+    20260625,
+    20260626,
+    20260629,
+    20260630
+  ],
+  "failed_dates": [],
+  "weekday_reporting": {
+    "weekday_number_contract": "ISO weekday: Monday=1, Tuesday=2, Wednesday=3, Thursday=4, Friday=5, Saturday=6, Sunday=7",
+    "comparison_artifact": "weekday_comparison.csv",
+    "unassigned_diagnostic_artifact": "weekday_unassigned_diagnostics.csv",
+    "source_aligned_job_count_per_scenario": 1506
+  },
+  "atlanta_6area_vs_existing_summary": {
+    "path": "atlanta_6area_vs_existing_summary.xlsx",
+    "regenerated_without_reroute": true,
+    "atlanta_6area_dispatch_jobs": 1220,
+    "atlanta_6area_unassigned_jobs": 286,
+    "atlanta_6area_dispatch_slots": 1576
+  },
+  "artifact_integrity": {
+    "manifest_path": "artifact_integrity_manifest.json",
+    "algorithm": "sha256",
+    "allowlisted_artifact_count": 31,
+    "ignored_non_artifact_patterns": [
+      "~$*"
+    ],
+    "detected_excel_lock_files": [
+      "~$atlanta_6area_area_statistics.xlsx"
+    ],
+    "warning": "Excel owner/lock files were not deleted; their presence may mean a workbook is currently open.",
+    "integrity_manifest_self_excluded": true
+  }
+}

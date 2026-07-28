@@ -20,6 +20,15 @@ from typing import Any, Iterable, Mapping
 
 import pandas as pd
 
+from tools.data.atlanta_6area_plan import (
+    AREA_SHEET_NAME,
+    Atlanta6AreaPlanError,
+    BOUNDARY_POLICY_FILENAME,
+    FIXED_REGION_FILENAME,
+    TECHNICIAN_SHEET_NAME,
+    preview_atlanta_6area_plan,
+    validate_atlanta_6area_bundle,
+)
 from smart_routing.data_catalog import na_data_path
 
 
@@ -92,6 +101,10 @@ class DatasetSpec:
     pii_columns: tuple[str, ...]
     preview_schema: PreviewSchema
     description: str
+    lifecycle_stage: str = "source_upload"
+    data_domain: str = "Reference Data"
+    primary_section: bool = False
+    ui_hidden: bool = False
 
     @property
     def allowed_targets(self) -> tuple[str, ...]:
@@ -127,6 +140,12 @@ class DatasetSpec:
                 "preview_columns": list(self.preview_schema.preview_columns),
             },
             "description": self.description,
+            "lifecycle_stage": self.lifecycle_stage,
+            "direct_db_upsert": self.db_profile is not None,
+            "promotion_required": self.lifecycle_stage == "candidate_plan",
+            "data_domain": self.data_domain,
+            "primary_section": self.primary_section,
+            "ui_hidden": self.ui_hidden,
         }
 
 
@@ -202,10 +221,28 @@ class HeavyRepairNormalization:
 
 
 _PROFILE_SHEETS = (
-    ("1. Zip Coverage", ("SVC_ENGINEER_CODE", "POSTAL_CODE", "STRATEGIC_CITY_NAME")),
-    ("2. Slot", ("SVC_ENGINEER_CODE", "STRATEGIC_CITY_NAME", "Slot")),
-    ("3. Product", ("SVC_ENGINEER_CODE", "SERVICE_PRODUCT_GROUP_CODE", "SERVICE_PRODUCT_CODE")),
-    ("4. Address", ("SVC_ENGINEER_CODE", "Name")),
+    ("1. Zip Coverage", (
+        "SHIP_TO", "DEPARTMENT_NAME", "SVC_ENGINEER_CODE", "AREA_CODE", "AREA_NAME",
+        "POSTAL_CODE", "STRATEGIC_CITY_NAME", "SVC_CENTER_TYPE",
+    )),
+    ("2. Slot", (
+        "Ship To Code", "SVC_ENGINEER_CODE", "Name", "Slot", "STRATEGIC_CITY_NAME",
+        "SVC_CENTER_TYPE",
+    )),
+    ("3. Product", (
+        "AREA_CODE", "AREA_NAME", "Ship To", "SVC_ENGINEER_CODE",
+        "SERVICE_PRODUCT_GROUP_CODE", "SERVICE_PRODUCT_CODE", "REPAIR_FLAG", "INSTALL_FLAG",
+        "DEMO_FLAG", "SS_FLAG", "DEPT_SS_FLAG", "SKS_FLAG", "DEPT_SKS_FLAG",
+        "AREA_PRODUCT_FLAG", "STRATEGIC_CITY_NAME", "SVC_CENTER_TYPE",
+    )),
+    ("4. Address", (
+        "SVC_ENGINEER_CODE", "Name", "Home Street Address", "City ", "State", "Zip",
+    )),
+)
+
+_ATLANTA_6AREA_SOURCE_SHEETS = (
+    (AREA_SHEET_NAME, ("ZIPCode", "Territory")),
+    (TECHNICIAN_SHEET_NAME, ("Tech ID", "Tech Name", "Assignment")),
 )
 
 
@@ -234,73 +271,59 @@ DATASET_SPECS: tuple[DatasetSpec, ...] = (
         "Common client/product/symptom reference workbook. Upload and preview only.",
     ),
     DatasetSpec(
-        "service_raw", DEVELOPMENT, True, (".csv",), 160 * 1024 * 1024,
-        "service_raw", "development_upload_snapshot", None, True,
-        ("SVC_ENGINEER_NAME", "SHIP_TO_FULL_NAME", "ADDRESS_LINE1_INFO", "BILL_TO_NAME"),
-        PreviewSchema(required_columns=(
-            "STRATEGIC_CITY_NAME", "GSFS_RECEIPT_NO", "POSTAL_CODE", "ADDRESS_LINE1_INFO",
-        )),
-        "Development raw service snapshot. Preview is intentionally tolerant of malformed trailing columns.",
-    ),
-    DatasetSpec(
-        "service_geocoded", DEVELOPMENT, True, (".csv",), 96 * 1024 * 1024,
-        "service_geocoded", "development_processed_stage", None, True,
-        ("SVC_ENGINEER_NAME", "ADDRESS_LINE1_INFO", "matched_address", "address_key", "latitude", "longitude"),
-        PreviewSchema(required_columns=(
-            "STRATEGIC_CITY_NAME", "GSFS_RECEIPT_NO", "POSTAL_CODE", "latitude", "longitude",
-        )),
-        "Development processed/geocoded service artifact. Upload and preview only; job DB loads are transactional.",
-    ),
-    DatasetSpec(
-        "profile_raw", DEVELOPMENT, True, (".xlsx",), 32 * 1024 * 1024,
+        "technician_profile_workbook", DEVELOPMENT, True, (".xlsx",), 32 * 1024 * 1024,
         "profile_raw", "development_upload_snapshot", None, True,
         ("Name", "Home Street Address", "City ", "State", "Zip"),
         PreviewSchema(sheet_columns=_PROFILE_SHEETS),
-        "Development profile source workbook. Upload and preview only.",
+        "Development source technician profile workbook. Derived production/home/region projections are not accepted.",
+        "source_upload",
+        "Technician Data",
+        False,
     ),
     DatasetSpec(
-        "service_geocoded", PRODUCTION, True, (".csv",), 96 * 1024 * 1024,
-        "service_geocoded", "production_staged_upload", None, True,
-        ("SVC_ENGINEER_NAME", "ADDRESS_LINE1_INFO", "matched_address", "address_key", "latitude", "longitude"),
-        PreviewSchema(required_columns=(
-            "STRATEGIC_CITY_NAME", "GSFS_RECEIPT_NO", "POSTAL_CODE", "latitude", "longitude",
-        )),
-        "Production staged geocoded service artifact. It cannot directly upsert job inputs.",
-    ),
-    DatasetSpec(
-        "profile_production", PRODUCTION, True, (".xlsx",), 32 * 1024 * 1024,
-        "profile_production", "production_staged_upload", None, True,
-        ("Name", "Home Street Address", "City ", "State", "Zip", "matched_address", "address_key", "latitude", "longitude"),
+        "technician_data_workbook", DEVELOPMENT, True, (".xlsx",), 32 * 1024 * 1024,
+        "profile_raw", "development_technician_data", DbSyncProfile(
+            "technician_data_bundle",
+            ("subsidiary_name", "strategic_city_name", "employee_code"),
+            "preview_then_composite_upsert",
+        ), True,
+        ("Name", "Home Street Address", "City ", "State", "Zip"),
         PreviewSchema(sheet_columns=_PROFILE_SHEETS),
-        "Production staged profile workbook. Upload and preview only; promotion is a separate approval action.",
+        "Primary Technician Data workbook. Address and Product capabilities are applied transactionally; assigned regions are verified from reviewed Region Data and are never inferred.",
+        "db_candidate",
+        "Technician Data",
+        True,
     ),
-    # Disabled specifications stay visible so the UI can describe the lifecycle
-    # without exposing a write path before the related policy contracts exist.
-    DatasetSpec("reviewed_regions", COMMON, False, (".csv",), 32 * 1024 * 1024,
-                "reviewed_regions_dir", "common_reviewed_read_only", None, False, (),
-                PreviewSchema(required_columns=("POSTAL_CODE", "region_id", "region_seq")),
-                "Reviewed region plans are read-only until the promotion workflow is connected."),
-    DatasetSpec("region_seeds", COMMON, False, (".csv",), 32 * 1024 * 1024,
-                "region_seed_dir", "common_db_seed_read_only", None, False, (),
-                PreviewSchema(required_columns=("POSTAL_CODE", "region_seq")),
-                "Region DB seed files are read-only; approved plan promotion owns their lifecycle."),
-    DatasetSpec("technician_list", COMMON, False, (".xlsx",), 16 * 1024 * 1024,
-                "technician_list", "common_restricted_read_only", None, True,
-                ("Tech Name", "Home Address", "Home Zip"), PreviewSchema(required_columns=("EMP_NUMBER", "Tech Name")),
-                "Technician source data is read-only pending a reviewed technician contract."),
-    DatasetSpec("technician_map", COMMON, False, (".xlsx",), 16 * 1024 * 1024,
-                "technician_map", "common_read_only", None, True, ("Tech Name",),
-                PreviewSchema(required_columns=("EMP_NUMBER", "Tech Name")),
-                "Address-free technician map view is read-only."),
-    DatasetSpec("atlanta_engineer_region", COMMON, False, (".csv",), 8 * 1024 * 1024,
-                "atlanta_engineer_region", "common_restricted_read_only", None, True, ("Name", "SVC_ENGINEER_CODE"),
-                PreviewSchema(required_columns=("SVC_ENGINEER_CODE", "assigned_region_seq")),
-                "City-specific technician-region derivative is read-only."),
-    DatasetSpec("atlanta_engineer_home", COMMON, False, (".csv",), 8 * 1024 * 1024,
-                "atlanta_engineer_home", "common_restricted_read_only", None, True,
-                ("Name", "Home Street Address", "City ", "State", "Zip", "latitude", "longitude"),
-                PreviewSchema(required_columns=("SVC_ENGINEER_CODE", "latitude", "longitude")),
-                "City-specific technician-home derivative is read-only."),
+    DatasetSpec(
+        "fixed_region_plan_bundle", DEVELOPMENT, True, (".zip",), 8 * 1024 * 1024,
+        "region_candidates_dir", "development_fixed_region_plan_bundle", None, True, (),
+        PreviewSchema(),
+        "Deterministic Atlanta six-area fixed-region candidate bundle. The ZIP is verified against the builder contract; it is Development-only and never writes a database directly.",
+        "candidate_plan",
+        "Region Data",
+        True,
+    ),
+    DatasetSpec(
+        "territory_plan_workbook", DEVELOPMENT, True, (".xlsx",), 8 * 1024 * 1024,
+        "region_candidates_dir", "development_candidate_plan", None, True,
+        ("Tech ID", "Tech Name"),
+        PreviewSchema(sheet_columns=_ATLANTA_6AREA_SOURCE_SHEETS),
+        "Legacy hidden Atlanta six-area source workbook. It is preview-only; use the visible Region Data fixed-region bundle for lifecycle import/review/activation.",
+        "candidate_plan",
+        "Region Data",
+        False,
+        True,
+    ),
+    DatasetSpec(
+        "technician_profile_workbook", PRODUCTION, True, (".xlsx",), 32 * 1024 * 1024,
+        "profile_raw", "production_source_profile_candidate", None, True,
+        ("Name", "Home Street Address", "City ", "State", "Zip"),
+        PreviewSchema(sheet_columns=_PROFILE_SHEETS),
+        "Production source technician profile workbook. Upload is staged; derived production/home/region projections are not accepted.",
+        "source_upload",
+        "Technician Data",
+        False,
+    ),
 )
 
 _SPECS_BY_KEY = {(spec.id, spec.scope): spec for spec in DATASET_SPECS}
@@ -341,9 +364,9 @@ def list_managed_data_sets(scope: str) -> tuple[dict[str, Any], ...]:
 def get_managed_data_set(dataset_id: str, scope: str | None = None) -> DatasetSpec:
     """Get a fixed data set without accepting an arbitrary path or table name.
 
-    ``service_geocoded`` exists in both Development and Production, therefore
-    callers must pass ``scope`` for it.  Single-scope Common data sets remain
-    convenient to inspect by their stable ID alone.
+    ``technician_profile_workbook`` exists in both Development and Production,
+    therefore callers must pass ``scope`` for it.  Single-scope Common data
+    sets remain convenient to inspect by their stable ID alone.
     """
     if scope is not None:
         return get_dataset_spec(dataset_id, scope)
@@ -381,6 +404,8 @@ def _validate_upload(spec: DatasetSpec, filename: str, data: bytes) -> str:
     extension = _extension(filename)
     if extension not in spec.extensions:
         raise ManagedDataValidationError("FILE_EXTENSION_NOT_ALLOWED")
+    if spec.id in {"technician_profile_workbook", "technician_data_workbook"} and "_production" in Path(filename).stem.lower():
+        raise ManagedDataValidationError("DERIVED_PROFILE_UPLOAD_NOT_ALLOWED")
     if b"\x00" in data and extension == ".csv":
         raise ManagedDataValidationError("CSV_INVALID")
     return extension
@@ -468,8 +493,8 @@ def _xlsx_preview(data: bytes, schema: PreviewSchema) -> list[tuple[str, list[st
 
 
 def _validate_schema(headers: Iterable[str], required: Iterable[str], *, allow_heavy_source: bool = False) -> None:
-    actual = set(headers)
-    expected = set(required)
+    actual = {str(value).strip() for value in headers}
+    expected = {str(value).strip() for value in required}
     if allow_heavy_source:
         if set(_CANONICAL_HEAVY_COLUMNS).issubset(actual) or set(_HEAVY_SOURCE_COLUMNS).issubset(actual):
             return
@@ -497,13 +522,63 @@ def _preview_table(
 ) -> PreviewTable:
     selected = list(spec.preview_schema.preview_columns) or headers[:MAX_PREVIEW_COLUMNS]
     selected = [column for column in selected if column in headers][:MAX_PREVIEW_COLUMNS]
-    pii_columns = set(spec.pii_columns)
+    pii_columns = {str(column).strip() for column in spec.pii_columns}
     masked = tuple(column for column in selected if column in pii_columns or _SECRET_COLUMN_RE.search(column))
     safe_rows = tuple(
         {column: _safe_cell(column, row.get(column), pii_columns) for column in selected}
         for row in rows
     )
     return PreviewTable(name, tuple(selected), safe_rows, len(safe_rows), masked, warnings)
+
+
+def _fixed_region_bundle_preview_tables(
+    *, spec: DatasetSpec, artifacts: Mapping[str, bytes]
+) -> tuple[PreviewTable, ...]:
+    """Return a bounded preview that never renders the technician-policy CSV."""
+
+    tables: list[PreviewTable] = []
+    for label, artifact_name in (
+        ("fixed_region", FIXED_REGION_FILENAME),
+        ("boundary_policy", BOUNDARY_POLICY_FILENAME),
+    ):
+        headers, rows, warnings = _csv_preview(artifacts[artifact_name], tolerant=False)
+        tables.append(_preview_table(label, headers, rows, spec, warnings))
+    return tuple(tables)
+
+
+def _fixed_region_bundle_normalization(bundle_sha256: str, bundle: Any) -> dict[str, Any]:
+    """Expose only lineage and non-personal accounting from a validated bundle."""
+
+    manifest = bundle.manifest
+    artifact_metadata = manifest["artifacts"]
+    manifest_name = next(name for name in bundle.artifacts if name.endswith(".json"))
+    return {
+        "schema": manifest["schema"],
+        "schema_version": manifest["schema_version"],
+        "policy_version": manifest["policy_version"],
+        "lifecycle_stage": "candidate_plan",
+        "privacy_classification": manifest["privacy_classification"],
+        "technician_names_redacted": manifest["technician_names_redacted"],
+        "source_technician_master_context": dict(
+            manifest["source_technician_master_context"]
+        ),
+        "target_technician_master_context": dict(
+            manifest["target_technician_master_context"]
+        ),
+        "direct_db_upsert": False,
+        "promotion_required": True,
+        "promotable": bundle.promotable,
+        "approval_status": bundle.approval_status,
+        "plan_id": bundle.plan_id,
+        "source_sha256": manifest["source"]["sha256"],
+        "parent_source_sha256": manifest["source"]["sha256"],
+        "bundle_sha256": bundle_sha256,
+        "manifest_sha256": hashlib.sha256(bundle.artifacts[manifest_name]).hexdigest(),
+        "artifact_checksums": {
+            name: metadata["sha256"] for name, metadata in artifact_metadata.items()
+        },
+        **dict(bundle.summary),
+    }
 
 
 def validate_and_preview_bytes(
@@ -515,21 +590,61 @@ def validate_and_preview_bytes(
     """
     spec = get_dataset_spec(dataset_id, scope)
     extension = _validate_upload(spec, filename, data)
-    if extension == ".csv":
+    normalization = None
+    if spec.id == "fixed_region_plan_bundle":
+        try:
+            bundle = validate_atlanta_6area_bundle(data)
+        except Atlanta6AreaPlanError as exc:
+            raise ManagedDataValidationError(f"FIXED_REGION_PLAN_BUNDLE_{exc.code}") from exc
+        tables = _fixed_region_bundle_preview_tables(spec=spec, artifacts=bundle.artifacts)
+        normalization = _fixed_region_bundle_normalization(
+            hashlib.sha256(data).hexdigest(), bundle
+        )
+    elif extension == ".csv":
         headers, rows, warnings = _csv_preview(data, tolerant=spec.id == "service_raw")
         _validate_schema(headers, spec.preview_schema.required_columns, allow_heavy_source=spec.id == "heavy_repair_rules")
         tables = (_preview_table(None, headers, rows, spec, warnings),)
     else:
         frames = _xlsx_preview(data, spec.preview_schema)
+        if spec.id in {"technician_profile_workbook", "technician_data_workbook"}:
+            address_headers = next(
+                (headers for sheet_name, headers, _rows in frames if sheet_name == "4. Address"),
+                [],
+            )
+            derived_address_columns = {
+                "matched_address",
+                "match_indicator",
+                "match_type",
+                "latitude",
+                "longitude",
+                "geocoded_date",
+                "source",
+                "address_key",
+            }
+            if derived_address_columns.intersection(address_headers):
+                raise ManagedDataValidationError("DERIVED_PROFILE_UPLOAD_NOT_ALLOWED")
         tables_list: list[PreviewTable] = []
         for sheet_name, headers, rows in frames:
             required = spec.preview_schema.required_for_sheet(sheet_name)
             _validate_schema(headers, required, allow_heavy_source=spec.id == "heavy_repair_rules")
             tables_list.append(_preview_table(sheet_name, headers, rows, spec))
         tables = tuple(tables_list)
-    normalization = None
     if spec.id == "heavy_repair_rules":
         normalization = normalize_heavy_repair_rules(filename, data).as_dict()
+    elif spec.id == "territory_plan_workbook":
+        try:
+            territory_preview = preview_atlanta_6area_plan(data)
+        except Atlanta6AreaPlanError as exc:
+            raise ManagedDataValidationError(f"TERRITORY_PLAN_{exc.code}") from exc
+        normalization = {
+            "schema": "atlanta-6area-plan-preview/v1",
+            "lifecycle_stage": spec.lifecycle_stage,
+            "direct_db_upsert": False,
+            "promotion_required": True,
+            "promotable": territory_preview.promotable,
+            "approval_status": territory_preview.approval_status,
+            **dict(territory_preview.summary),
+        }
     return UploadPreview(
         dataset_id=spec.id,
         scope=spec.scope,

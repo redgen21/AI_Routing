@@ -78,6 +78,21 @@ class DeploymentHydrationTests(unittest.TestCase):
             self.assertEqual(checked["zcta_geometry:area_map_default"], str(default_zcta.resolve()))
             self.assertEqual(checked["zcta_geometry:area_map_usa"], str(configured_usa.resolve()))
 
+            config["environment"] = "production"
+            with (
+                mock.patch("verify_deployment.load_and_validate_common_config", return_value=config),
+                mock.patch("verify_deployment.load_na_data_catalog", return_value=catalog),
+            ):
+                with self.assertRaisesRegex(FileNotFoundError, "does not match the active production data catalog"):
+                    verify_deployment(root / "config_common_vrp.json", "production")
+
+                (root / "config/config.json").write_text(
+                    json.dumps({"area_map_usa": {"zcta_zip_file": str(default_zcta)}}),
+                    encoding="utf-8",
+                )
+                result = verify_deployment(root / "config_common_vrp.json", "production")
+            self.assertEqual(result["status"], "ok")
+
 
 if __name__ == "__main__":
     unittest.main()

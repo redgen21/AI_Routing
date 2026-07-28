@@ -4,5 +4,6 @@
   "admin_tools_release_version": "<PINNED_ADMIN_TOOLS_RELEASE_VERSION>",
   "allow_upload": false,
   "allow_development_secure_config_upload": false,
+  "allow_production_secure_config_upload": false,
   "allow_service_control": false
 }

@@ -9,5 +9,4 @@ cd "${BASE_DIR}"
 
 echo "[nightly] Korea OSRM update started: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 bash "${BASE_DIR}/update_osrm_korea.sh"
-bash "${BASE_DIR}/run_osrm_korea.sh"
 echo "[nightly] Korea OSRM update finished: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"

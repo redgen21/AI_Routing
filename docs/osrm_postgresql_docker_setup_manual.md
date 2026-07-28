@@ -927,10 +927,8 @@ crontab -e
 
 ```cron
 CRON_TZ=Asia/Seoul
-0 0 * * * /usr/bin/nohup /home/osrm/nightly_update_osrm_korea.sh >/home/osrm/log/nightly_update_korea.out 2>&1
-
-CRON_TZ=America/New_York
-0 0 * * * /usr/bin/nohup /home/osrm/nightly_update_osrm_usa.sh >/home/osrm/log/nightly_update_usa.out 2>&1
+0 0 * * * /usr/bin/flock -n /tmp/nightly_update_osrm_korea.lock /home/osrm/nightly_update_osrm_korea.sh >>/home/osrm/log/nightly_update_korea.out 2>&1
+0 20 * * * /usr/bin/flock -n /tmp/nightly_update_osrm_usa.lock /home/osrm/nightly_update_osrm_usa.sh >>/home/osrm/log/nightly_update_usa.out 2>&1
 ```
 
 메모:

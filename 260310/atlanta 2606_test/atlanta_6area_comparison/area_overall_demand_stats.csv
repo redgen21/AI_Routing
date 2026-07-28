@@ -1,0 +1,7 @@
+﻿job_area,total_jobs,requested_slots,dispatch_jobs,dispatch_slots,not_dispatch_jobs,job_fill_rate_pct,requested_slot_completion_pct
+Atlanta_6area Zone 1,357,463,298,373,59,83.4733893557423,80.56155507559394
+Atlanta_6area Zone 2,378,515,309,411,69,81.74603174603175,79.80582524271844
+Atlanta_6area Zone 3,120,152,107,134,13,89.16666666666667,88.1578947368421
+Atlanta_6area Zone 4,233,315,207,276,26,88.8412017167382,87.61904761904762
+Atlanta_6area Zone 5,377,505,299,382,78,79.3103448275862,75.64356435643565
+OUTSIDE_ACTIVE_PLAN,41,48,0,0,41,0.0,0.0

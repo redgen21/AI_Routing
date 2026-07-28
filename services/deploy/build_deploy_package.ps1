@@ -340,10 +340,24 @@ $ServiceRuntimeFiles = @(
     "services/__init__.py",
     "services/api/__init__.py",
     "services/api/common_vrp_config.py",
+    "services/api/region_plan_repository_v2.py",
+    "services/api/region_plan_v2.py",
     "services/api/run_common_vrp_api.py",
     "services/api/sr_vrp_api_server.py"
 )
 foreach ($relativePath in $ServiceRuntimeFiles) {
+    Copy-RequiredFile -SourceRelativePath $relativePath -OutputRelativePath $relativePath
+}
+
+# The Region Plan v2 HTTP adapter lazily imports this pure validation module.
+# Keep the package boundary explicit: no candidate workbook, report, or other
+# offline data tooling is copied with it.
+$RegionPlanWorkflowRuntimeFiles = @(
+    "tools/__init__.py",
+    "tools/data/__init__.py",
+    "tools/data/region_plan_workflow_v2.py"
+)
+foreach ($relativePath in $RegionPlanWorkflowRuntimeFiles) {
     Copy-RequiredFile -SourceRelativePath $relativePath -OutputRelativePath $relativePath
 }
 
@@ -375,10 +389,43 @@ $RequiredArtifactPaths = @(
     "requirements.txt",
     "config/config.template.json",
     "config/data_catalog.json"
-) + @($RuntimeRootFiles) + @($SmartRoutingRuntimeFiles) + @($ServiceRuntimeFiles) + @($SystemdUnitFiles) + @($EnvironmentConfigTemplate)
+) + @($RuntimeRootFiles) + @($SmartRoutingRuntimeFiles) + @($ServiceRuntimeFiles) + @($RegionPlanWorkflowRuntimeFiles) + @($SystemdUnitFiles) + @($EnvironmentConfigTemplate)
 foreach ($relativePath in $RequiredArtifactPaths) {
     if (-not (Test-Path -LiteralPath (Join-Path $StagingDir $relativePath) -PathType Leaf)) {
         throw "Deploy artifact is incomplete; missing $relativePath"
+    }
+}
+
+# Fail closed before manifest/ZIP creation. Runtime packages contain templates
+# only; resolved credentials and ignored local configuration are forbidden.
+$CredentialAssignment = [regex]::new(
+    '(?i)["'']?(?:password|passwd|pwd|secret|token|api[_-]?key)["'']?\s*[:=]\s*["''](?<value>[^"'']*)["'']'
+)
+$ConnectionCredential = [regex]::new('(?i)[a-z][a-z0-9+.-]*://[^\s:/@]+:[^\s@]+@')
+$PrivateKeyMarker = [regex]::new('-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----')
+$ScannableExtensions = @(".py", ".json", ".md", ".sh", ".txt")
+foreach ($file in Get-ChildItem -LiteralPath $StagingDir -Recurse -File) {
+    $relative = (Get-RelativePathFromBase -BasePath $StagingDir -FullName $file.FullName).Replace("\", "/")
+    if ($file.Name -match '(?i)\.local\.json$') {
+        throw "Runtime secret scan rejected local configuration: $relative"
+    }
+    if ($ScannableExtensions -notcontains $file.Extension.ToLowerInvariant()) {
+        continue
+    }
+    $text = [IO.File]::ReadAllText($file.FullName)
+    if ($ConnectionCredential.IsMatch($text) -or $PrivateKeyMarker.IsMatch($text)) {
+        throw "Runtime secret scan rejected credential material: $relative"
+    }
+    foreach ($match in $CredentialAssignment.Matches($text)) {
+        $value = $match.Groups["value"].Value.Trim()
+        $isPlaceholder = (
+            [string]::IsNullOrWhiteSpace($value) -or
+            $value -match '^<[^>]+>$' -or
+            $value -match '^(?i:REPLACE_ME|CHANGE_ME)$'
+        )
+        if (-not $isPlaceholder) {
+            throw "Runtime secret scan rejected a resolved credential: $relative"
+        }
     }
 }
 

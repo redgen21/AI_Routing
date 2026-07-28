@@ -9,6 +9,7 @@ if [ -d /mnt/data/ai-routing/osrm ]; then
   DEFAULT_OSRM_STORAGE_ROOT="/mnt/data/ai-routing/osrm"
 fi
 OSRM_STORAGE_ROOT="${OSRM_STORAGE_ROOT:-${DEFAULT_OSRM_STORAGE_ROOT}}"
+OSRM_IMAGE="${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend:latest}"
 LOG_MAX_SIZE="${OSRM_DOCKER_LOG_MAX_SIZE:-100m}"
 LOG_MAX_FILE="${OSRM_DOCKER_LOG_MAX_FILE:-3}"
 REQUIRED_SUFFIXES=(
@@ -42,6 +43,27 @@ CITY_ENTRIES=(
   "dc_metro|Washington DC|5009|-77.0369,38.9072"
 )
 
+SELECTED_REGIONS=("$@")
+
+matches_selected_region() {
+  local dir_name="$1"
+  local display_name="$2"
+  local selected
+  if [ "${#SELECTED_REGIONS[@]}" -eq 0 ]; then
+    return 0
+  fi
+  for selected in "${SELECTED_REGIONS[@]}"; do
+    selected="$(echo "${selected}" | tr '[:upper:]' '[:lower:]')"
+    if [ "${selected}" = "all" ] || [ "${selected}" = "$(echo "${dir_name}" | tr '[:upper:]' '[:lower:]')" ]; then
+      return 0
+    fi
+    if echo "${display_name}" | tr '[:upper:]' '[:lower:]' | grep -q "${selected}"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 wait_for_osrm() {
   local container_name="$1"
   local healthcheck_url="$2"
@@ -65,6 +87,9 @@ echo "=== USA OSRM server restart ==="
 
 for entry in "${CITY_ENTRIES[@]}"; do
   IFS='|' read -r dir_name display_name host_port _ <<< "${entry}"
+  if ! matches_selected_region "${dir_name}" "${display_name}"; then
+    continue
+  fi
   osrm_base="${OSRM_STORAGE_ROOT}/${dir_name}/${dir_name}-latest.osrm"
   container_name="osrm-${dir_name}"
 
@@ -89,13 +114,16 @@ for entry in "${CITY_ENTRIES[@]}"; do
     --log-opt "max-file=${LOG_MAX_FILE}" \
     -p "${host_port}:5000" \
     -v "${OSRM_STORAGE_ROOT}:/data:ro" \
-    ghcr.io/project-osrm/osrm-backend \
+    "${OSRM_IMAGE}" \
     osrm-routed --algorithm mld \
     "/data/${dir_name}/${dir_name}-latest.osrm"
 done
 
 for entry in "${CITY_ENTRIES[@]}"; do
   IFS='|' read -r dir_name display_name host_port healthcheck_lonlat <<< "${entry}"
+  if ! matches_selected_region "${dir_name}" "${display_name}"; then
+    continue
+  fi
   wait_for_osrm \
     "osrm-${dir_name}" \
     "http://127.0.0.1:${host_port}/nearest/v1/driving/${healthcheck_lonlat}" \
@@ -106,6 +134,9 @@ echo ""
 echo "=== USA OSRM servers are ready ==="
 for entry in "${CITY_ENTRIES[@]}"; do
   IFS='|' read -r dir_name display_name host_port _ <<< "${entry}"
+  if ! matches_selected_region "${dir_name}" "${display_name}"; then
+    continue
+  fi
   echo "${display_name} -> http://20.51.244.68:${host_port}"
 done
 docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}"

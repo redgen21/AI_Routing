@@ -1,0 +1,4 @@
+﻿scenario,no_feasible_route_jobs,no_feasible_route_slots,slot_shortage_jobs,slot_shortage_slots,non_slot_shortage_jobs,non_slot_shortage_slots,shortage_dates,shortage_date_region_groups,other_region_remaining_slots,classification_method
+Atlanta_3area,171,275,170,274,1,1,21,33,171,observed eligible-candidate remaining slots < requested job slots
+Atlanta_6area_new,207,329,202,321,5,8,22,51,250,observed eligible-candidate remaining slots < requested job slots
+Atlanta_6area_overlab,131,219,123,205,8,14,18,50,67,observed eligible-candidate remaining slots < requested job slots

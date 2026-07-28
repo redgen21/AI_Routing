@@ -1,0 +1,13 @@
+﻿scenario,job_slot_count,result_type,jobs,slots
+Existing,1,assigned,999,999
+Existing,1,unassigned,33,33
+Existing,2,assigned,423,846
+Existing,2,unassigned,34,68
+Existing,3,assigned,16,48
+Existing,4,assigned,1,4
+Atlanta_6area,1,assigned,882,882
+Atlanta_6area,1,unassigned,150,150
+Atlanta_6area,2,assigned,321,642
+Atlanta_6area,2,unassigned,136,272
+Atlanta_6area,3,assigned,16,48
+Atlanta_6area,4,assigned,1,4

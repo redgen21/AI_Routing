@@ -1,0 +1,6 @@
+﻿technician_area,dispatched_technician_days,dispatch_jobs,used_slots,total_travel_distance_km,total_travel_distance_miles,total_travel_duration_min,avg_travel_miles_per_dispatched_tech_day
+Atlanta_6area Zone 1,54,298,373,3954.47,2457.19297837,4495.8099999999995,45.503573673518524
+Atlanta_6area Zone 2,62,324,428,3522.7999999999997,2188.9657588,4535.0599999999995,35.30589933548387
+Atlanta_6area Zone 3,20,92,117,1827.97,1135.84754687,2014.91,56.79237734350001
+Atlanta_6area Zone 4,50,207,276,3051.37,1896.03282827,3489.84,37.9206565654
+Atlanta_6area Zone 5,52,299,382,4407.9,2738.9412309,5000.14,52.67194674807692

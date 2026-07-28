@@ -1,0 +1,458 @@
+{
+  "schema": "current-coverage-osrm-result/v2",
+  "generated_at_utc": "2026-07-22T10:01:25.461920+00:00",
+  "computation": {
+    "algorithm_version": "current-coverage-osrm/v2-zero-route-guard-fingerprint",
+    "fingerprint": {
+      "sha256": "141efa82b369a742413a1bfaa7a5eb2406056e1f53f7e89e1067e56735f9dee5",
+      "payload": {
+        "algorithm_version": "current-coverage-osrm/v2-zero-route-guard-fingerprint",
+        "script": {
+          "role": "calculation_script",
+          "path": "tools/operations/june_current_coverage_osrm.py",
+          "exists": true,
+          "size": 50070,
+          "mtime_ns": 1784713936487688000,
+          "sha256": "7d35071f4b7fb4284ba5180bd0c515b7a2068e0492fdcad6089e57cdb712faa3"
+        },
+        "config": {
+          "role": "runtime_config",
+          "path": "config/config.json",
+          "exists": true,
+          "size": 3701,
+          "mtime_ns": 1784706880579381000,
+          "sha256": "f5ede9c50f1f491ff34d052d9faac32c0e117d8fd783872914cd3a7bd305bd9c"
+        },
+        "source": {
+          "role": "service_source",
+          "path": "260310/input/Service_202607071543_normalized_geocoded.csv",
+          "exists": true,
+          "size": 6255457,
+          "mtime_ns": 1783490357953124000,
+          "sha256": "05caa003c56fce18bc283cba856cbfa0214f544916501399abd5048e0ac22249"
+        },
+        "home_dependencies": [
+          {
+            "role": "home_profile",
+            "path": "data/north_america/processed/profile/20260317/Top 10_DMS_DMS2_Profile_20260317_production.xlsx",
+            "exists": true,
+            "size": 1370083,
+            "mtime_ns": 1784104455421709000,
+            "sha256": "83aa2a9376680cf671a0edf8d82d6f6a2b51a56df877f5e021295f14d80e71b6"
+          },
+          {
+            "role": "census_geocode_cache",
+            "path": "data/geocode_cache_us_census.csv",
+            "exists": true,
+            "size": 18454267,
+            "mtime_ns": 1783489745523055000,
+            "sha256": "452cda4e6343e81d5c7e6e06eddd107c062e23398711e5a6804dff2eec1bf97a"
+          },
+          {
+            "role": "google_geocode_cache",
+            "path": "data/geocode_cache_google.csv",
+            "exists": true,
+            "size": 787916,
+            "mtime_ns": 1783490326073028000,
+            "sha256": "e9a7972fa026c672dd0894c7fc6cd7c06528a88f9d3bd2a6f000ca1f15ab2c44"
+          },
+          {
+            "role": "north_america_data_catalog",
+            "path": "config/data_catalog.json",
+            "exists": true,
+            "size": 2193,
+            "mtime_ns": 1784446190197127000,
+            "sha256": "e06eaf4d257fd8c7cb2acf0b89fe66c79719573c3df38278a43c36dfe7c9e0e0"
+          },
+          {
+            "role": "saved_city_home_geocode:Atlanta, GA",
+            "path": "data/north_america/db_input/regions/atlanta_engineer_home_geocoded.csv",
+            "exists": false,
+            "size": null,
+            "mtime_ns": null,
+            "sha256": null
+          },
+          {
+            "role": "saved_city_home_geocode:Los Angeles, CA",
+            "path": "data/north_america/db_input/regions/los_angeles_engineer_home_geocoded.csv",
+            "exists": false,
+            "size": null,
+            "mtime_ns": null,
+            "sha256": null
+          },
+          {
+            "role": "saved_city_home_geocode:North Jersey, NJ",
+            "path": "data/north_america/db_input/regions/north_jersey_engineer_home_geocoded.csv",
+            "exists": false,
+            "size": null,
+            "mtime_ns": null,
+            "sha256": null
+          },
+          {
+            "role": "saved_city_home_geocode:Philadelphia, PA",
+            "path": "data/north_america/db_input/regions/philadelphia_engineer_home_geocoded.csv",
+            "exists": false,
+            "size": null,
+            "mtime_ns": null,
+            "sha256": null
+          },
+          {
+            "role": "saved_city_home_geocode:San Diego, CA",
+            "path": "data/north_america/db_input/regions/san_diego_engineer_home_geocoded.csv",
+            "exists": false,
+            "size": null,
+            "mtime_ns": null,
+            "sha256": null
+          },
+          {
+            "role": "saved_city_home_geocode:Washington, DC",
+            "path": "data/north_america/db_input/regions/washington_engineer_home_geocoded.csv",
+            "exists": false,
+            "size": null,
+            "mtime_ns": null,
+            "sha256": null
+          }
+        ],
+        "endpoints": [
+          {
+            "city": "Atlanta, GA",
+            "route_city_key": "Atlanta, GA",
+            "endpoint_url": "http://20.51.244.68:5002",
+            "endpoint_id": "atlanta_ga",
+            "profile": "driving"
+          },
+          {
+            "city": "Los Angeles, CA",
+            "route_city_key": "Los Angeles, CA",
+            "endpoint_url": "http://20.51.244.68:5001",
+            "endpoint_id": "los_angeles_ca",
+            "profile": "driving"
+          },
+          {
+            "city": "North Jersey, NJ",
+            "route_city_key": "Northeast",
+            "endpoint_url": "http://20.51.244.68:5006",
+            "endpoint_id": "northeast",
+            "profile": "driving"
+          },
+          {
+            "city": "Philadelphia, PA",
+            "route_city_key": "Northeast",
+            "endpoint_url": "http://20.51.244.68:5006",
+            "endpoint_id": "northeast",
+            "profile": "driving"
+          },
+          {
+            "city": "San Diego, CA",
+            "route_city_key": "San Diego, CA",
+            "endpoint_url": "http://20.51.244.68:5008",
+            "endpoint_id": "san_diego_ca",
+            "profile": "driving"
+          },
+          {
+            "city": "Washington, DC",
+            "route_city_key": "Washington, DC",
+            "endpoint_url": "http://20.51.244.68:5009",
+            "endpoint_id": "washington_dc",
+            "profile": "driving"
+          }
+        ],
+        "map_version": "unavailable",
+        "request_options": {
+          "table": {
+            "annotations": "distance,duration"
+          },
+          "route": {
+            "overview": "full",
+            "geometries": "geojson",
+            "steps": false,
+            "alternatives": true
+          },
+          "direct_zero_validation": {
+            "overview": false,
+            "steps": false,
+            "alternatives": false
+          }
+        },
+        "semantics": {
+          "coordinate_order": "longitude,latitude",
+          "distance_unit": "km",
+          "duration_unit": "min",
+          "ordering": "directed OSRM Table distance nearest-neighbor; fixed index 0 when home exists",
+          "return_home": false,
+          "fallback": "none",
+          "single_stop_zero_rule": "0/0 success only for exactly one unique service stop and no home",
+          "date_candidates": [
+            "PROMISE_DATE",
+            "REPAIR_END_DATE_YYYYMMDD",
+            "REPAIR_RECEIPT_DATE_YYYYMMDD",
+            "GERP_INPUT_DATE_YYYYMMDD_ID_LAST"
+          ],
+          "grouping": [
+            "STRATEGIC_CITY_NAME",
+            "service_date_key",
+            "SVC_ENGINEER_CODE"
+          ],
+          "home_lookup_precedence": [
+            "profile_sheet_4_address",
+            "saved_city_home_geocode",
+            "census_then_google_geocode_cache"
+          ]
+        }
+      }
+    },
+    "single_uninterrupted_result_set": true
+  },
+  "source": {
+    "path": "260310\\input\\Service_202607071543_normalized_geocoded.csv",
+    "sha256": "05caa003c56fce18bc283cba856cbfa0214f544916501399abd5048e0ac22249",
+    "row_count_read": 9280,
+    "row_count_after_ui_validity_filters": 9280,
+    "service_date_min": "2026-06-01",
+    "service_date_max": "2026-06-30",
+    "ui_date_column_selected": "PROMISE_DATE"
+  },
+  "scope": {
+    "cities": [
+      "Atlanta, GA",
+      "Los Angeles, CA",
+      "North Jersey, NJ",
+      "Philadelphia, PA",
+      "San Diego, CA",
+      "Washington, DC"
+    ],
+    "scenario": "Current Coverage"
+  },
+  "group_identity": {
+    "detail_key": [
+      "city",
+      "service_date_key",
+      "route_group_id"
+    ],
+    "route_group_id": "lowercase sha256 hex of UTF-8(ui_normalize(city) + U+001F + YYYY-MM-DD + U+001F + ui_normalize(assigned_sm_code))",
+    "ui_normalize": "null to empty; CR/LF to space; collapse all whitespace to one ASCII space; trim; no Unicode normalization or case-folding",
+    "raw_assigned_sm_code_exported": false
+  },
+  "route_semantics": {
+    "coordinate_order": "longitude,latitude",
+    "road_network_backend": "OSRM Route/Table",
+    "distance_unit": "km",
+    "duration_unit": "min",
+    "ordering": "OSRM Table distance matrix followed by OSRMTripClient nearest-neighbor ordering",
+    "home_start": "fixed first coordinate if a UI-priority home lookup succeeds",
+    "return_home": false,
+    "single_service_stop_without_home": "success with 0 km / 0 min and no OSRM request, matching UI client behavior",
+    "zero_route_guard": "0 km / 0 min is rejected unless there is exactly one unique service stop and no home; rejected routes receive null metrics",
+    "zero_route_direct_validation": {
+      "overview": false,
+      "steps": false,
+      "alternatives": false
+    },
+    "snapping": "OSRM Table and Route implicitly snap request coordinates; no snapped coordinates are exported",
+    "fallback": "disabled for this audit; OSRM failure remains failed/null rather than Haversine fallback",
+    "traffic": "No live traffic input is supplied by this OSRM API call; metrics are static graph/profile estimates"
+  },
+  "osrm": {
+    "profile": "driving",
+    "distance_backend_config": "city_osrm_else_haversine",
+    "map_version": "unavailable",
+    "map_version_status": "not_exposed_by_configured_OSRM_HTTP_API",
+    "engine_version": "not_exposed_by_configured_OSRM_HTTP_API",
+    "endpoints": [
+      {
+        "city": "Atlanta, GA",
+        "route_city_key": "Atlanta, GA",
+        "endpoint_id": "atlanta_ga",
+        "url": "http://20.51.244.68:5002",
+        "profile": "driving"
+      },
+      {
+        "city": "Los Angeles, CA",
+        "route_city_key": "Los Angeles, CA",
+        "endpoint_id": "los_angeles_ca",
+        "url": "http://20.51.244.68:5001",
+        "profile": "driving"
+      },
+      {
+        "city": "North Jersey, NJ",
+        "route_city_key": "Northeast",
+        "endpoint_id": "northeast",
+        "url": "http://20.51.244.68:5006",
+        "profile": "driving"
+      },
+      {
+        "city": "Philadelphia, PA",
+        "route_city_key": "Northeast",
+        "endpoint_id": "northeast",
+        "url": "http://20.51.244.68:5006",
+        "profile": "driving"
+      },
+      {
+        "city": "San Diego, CA",
+        "route_city_key": "San Diego, CA",
+        "endpoint_id": "san_diego_ca",
+        "url": "http://20.51.244.68:5008",
+        "profile": "driving"
+      },
+      {
+        "city": "Washington, DC",
+        "route_city_key": "Washington, DC",
+        "endpoint_id": "washington_dc",
+        "url": "http://20.51.244.68:5009",
+        "profile": "driving"
+      }
+    ],
+    "table_options": {
+      "annotations": "distance,duration"
+    },
+    "route_options": {
+      "overview": "full",
+      "geometries": "geojson",
+      "steps": false,
+      "alternatives": true
+    },
+    "timeout_seconds": 20.0,
+    "max_attempts": 3,
+    "workers": 4
+  },
+  "cache": {
+    "cache_file": "data\\cache\\current_coverage_june_2026_osrm_cache.json",
+    "cache_identity_fields": [
+      "algorithm_version",
+      "computation_fingerprint_sha256",
+      "coordinates_lon_lat",
+      "endpoint_url",
+      "map_version",
+      "profile",
+      "table_options",
+      "route_options",
+      "preserve_first",
+      "distance_unit",
+      "duration_unit"
+    ],
+    "reuse_enabled": false,
+    "reuse_blocked_without_immutable_map_version": true
+  },
+  "checkpoint": {
+    "file": "exports/.current_coverage_june_2026_osrm.route_checkpoint.json",
+    "computation_fingerprint_sha256": "141efa82b369a742413a1bfaa7a5eb2406056e1f53f7e89e1067e56735f9dee5",
+    "resumed_group_count": 0,
+    "resume_requires_explicit_flag": "--resume-checkpoint"
+  },
+  "home_lookup": {
+    "profile_file": "data/north_america/processed/profile/20260317/Top 10_DMS_DMS2_Profile_20260317_production.xlsx",
+    "profile_sha256": "83aa2a9376680cf671a0edf8d82d6f6a2b51a56df877f5e021295f14d80e71b6",
+    "home_lookup_precedence": [
+      "profile_sheet_4_address",
+      "saved_city_home_geocode",
+      "census_then_google_geocode_cache"
+    ],
+    "remote_geocoding_called": false,
+    "dependencies": [
+      {
+        "role": "home_profile",
+        "path": "data/north_america/processed/profile/20260317/Top 10_DMS_DMS2_Profile_20260317_production.xlsx",
+        "exists": true,
+        "size": 1370083,
+        "mtime_ns": 1784104455421709000,
+        "sha256": "83aa2a9376680cf671a0edf8d82d6f6a2b51a56df877f5e021295f14d80e71b6"
+      },
+      {
+        "role": "census_geocode_cache",
+        "path": "data/geocode_cache_us_census.csv",
+        "exists": true,
+        "size": 18454267,
+        "mtime_ns": 1783489745523055000,
+        "sha256": "452cda4e6343e81d5c7e6e06eddd107c062e23398711e5a6804dff2eec1bf97a"
+      },
+      {
+        "role": "google_geocode_cache",
+        "path": "data/geocode_cache_google.csv",
+        "exists": true,
+        "size": 787916,
+        "mtime_ns": 1783490326073028000,
+        "sha256": "e9a7972fa026c672dd0894c7fc6cd7c06528a88f9d3bd2a6f000ca1f15ab2c44"
+      },
+      {
+        "role": "north_america_data_catalog",
+        "path": "config/data_catalog.json",
+        "exists": true,
+        "size": 2193,
+        "mtime_ns": 1784446190197127000,
+        "sha256": "e06eaf4d257fd8c7cb2acf0b89fe66c79719573c3df38278a43c36dfe7c9e0e0"
+      },
+      {
+        "role": "saved_city_home_geocode:Atlanta, GA",
+        "path": "data/north_america/db_input/regions/atlanta_engineer_home_geocoded.csv",
+        "exists": false,
+        "size": null,
+        "mtime_ns": null,
+        "sha256": null
+      },
+      {
+        "role": "saved_city_home_geocode:Los Angeles, CA",
+        "path": "data/north_america/db_input/regions/los_angeles_engineer_home_geocoded.csv",
+        "exists": false,
+        "size": null,
+        "mtime_ns": null,
+        "sha256": null
+      },
+      {
+        "role": "saved_city_home_geocode:North Jersey, NJ",
+        "path": "data/north_america/db_input/regions/north_jersey_engineer_home_geocoded.csv",
+        "exists": false,
+        "size": null,
+        "mtime_ns": null,
+        "sha256": null
+      },
+      {
+        "role": "saved_city_home_geocode:Philadelphia, PA",
+        "path": "data/north_america/db_input/regions/philadelphia_engineer_home_geocoded.csv",
+        "exists": false,
+        "size": null,
+        "mtime_ns": null,
+        "sha256": null
+      },
+      {
+        "role": "saved_city_home_geocode:San Diego, CA",
+        "path": "data/north_america/db_input/regions/san_diego_engineer_home_geocoded.csv",
+        "exists": false,
+        "size": null,
+        "mtime_ns": null,
+        "sha256": null
+      },
+      {
+        "role": "saved_city_home_geocode:Washington, DC",
+        "path": "data/north_america/db_input/regions/washington_engineer_home_geocoded.csv",
+        "exists": false,
+        "size": null,
+        "mtime_ns": null,
+        "sha256": null
+      }
+    ]
+  },
+  "counts": {
+    "expected_group_count": 2853,
+    "detail_row_count": 2853,
+    "success_group_count": 2830,
+    "failed_group_count": 23,
+    "cache_hit_group_count": 0,
+    "home_found_group_count": 1288,
+    "failure_reasons": {
+      "zero_route_for_distinct_coordinates": 18,
+      "http_400_noroute": 4,
+      "table_unroutable": 1
+    },
+    "invalid_zero_success_count": 0
+  },
+  "performance": {
+    "wall_clock_seconds": 242.94272349998937,
+    "successful_request_elapsed_ms_sum": 957934.1410015477,
+    "successful_request_attempts_sum": 4614
+  },
+  "files": {
+    "route_detail_privacy_safe": "route_detail_privacy_safe.csv",
+    "city_summary": "city_summary.csv",
+    "city_bucket_summary": "city_bucket_summary.csv"
+  }
+}

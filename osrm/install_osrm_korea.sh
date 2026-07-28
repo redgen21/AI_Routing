@@ -10,6 +10,7 @@ if [ -d /mnt/data/ai-routing/osrm ]; then
   DEFAULT_OSRM_STORAGE_ROOT="/mnt/data/ai-routing/osrm"
 fi
 OSRM_STORAGE_ROOT="${OSRM_STORAGE_ROOT:-${DEFAULT_OSRM_STORAGE_ROOT}}"
+OSRM_IMAGE="${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend:latest}"
 DATA_DIR="${OSRM_STORAGE_ROOT}/south-korea"
 LOG_MAX_SIZE="${OSRM_DOCKER_LOG_MAX_SIZE:-100m}"
 LOG_MAX_FILE="${OSRM_DOCKER_LOG_MAX_FILE:-3}"
@@ -39,7 +40,7 @@ docker run --rm \
   --log-opt "max-file=${LOG_MAX_FILE}" \
   -v "${OSRM_STORAGE_ROOT}:/data" \
   -v "${BASE_DIR}/profiles:/profiles:ro" \
-  ghcr.io/project-osrm/osrm-backend \
+  "${OSRM_IMAGE}" \
   osrm-extract \
   -p "/profiles/custom_car.lua" \
   "/data/south-korea/south-korea-latest.osm.pbf"
@@ -50,7 +51,7 @@ docker run --rm \
   --log-opt "max-size=${LOG_MAX_SIZE}" \
   --log-opt "max-file=${LOG_MAX_FILE}" \
   -v "${OSRM_STORAGE_ROOT}:/data" \
-  ghcr.io/project-osrm/osrm-backend \
+  "${OSRM_IMAGE}" \
   osrm-partition "$OSRM"
 
 echo "=== 3) customize ==="
@@ -59,7 +60,7 @@ docker run --rm \
   --log-opt "max-size=${LOG_MAX_SIZE}" \
   --log-opt "max-file=${LOG_MAX_FILE}" \
   -v "${OSRM_STORAGE_ROOT}:/data" \
-  ghcr.io/project-osrm/osrm-backend \
+  "${OSRM_IMAGE}" \
   osrm-customize "$OSRM"
 
 echo "=== 결과 파일 확인 ==="
@@ -93,5 +94,7 @@ for f in "${required_files[@]}"; do
     exit 1
   fi
 done
+
+docker image inspect "${OSRM_IMAGE}" --format '{{.Id}}' > "${DATA_DIR}/.osrm-image-id"
 
 echo "✅ Korea build 완료"

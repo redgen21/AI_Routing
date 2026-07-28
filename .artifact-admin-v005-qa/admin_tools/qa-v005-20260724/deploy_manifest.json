@@ -1,0 +1,168 @@
+{
+    "package_name":  "ai-routing-admin-tools-qa-v005-20260724",
+    "artifact_type":  "db-admin-tools",
+    "created_at":  "2026-07-24T01:35:41",
+    "source_revision":  "d0cde9826fbb91526644f50be25f0caeb68ad3b9",
+    "source_dirty":  true,
+    "promotable":  false,
+    "target_root":  "/home/csda/AI_Routing/admin_tools/releases/qa-v005-20260724",
+    "contains_secrets":  false,
+    "contains_data":  false,
+    "entrypoints":  [
+                        "admin_tools.db.runners.reset_common_vrp_data",
+                        "admin_tools.db.master_data_backend",
+                        "admin_tools.db.seeds.build_la_bucket_vrp_inputs",
+                        "admin_tools.db.seeds.import_asia_technician_centroids",
+                        "admin_tools.db.region_plan_backend",
+                        "admin_tools.db.technician_profile_backend"
+                    ],
+    "files":  [
+                  {
+                      "path":  "requirements.txt",
+                      "sha256":  "217844ec6680db46d9ae87afc3ce371c40e6ac316e7acce16fc643b989899c16"
+                  },
+                  {
+                      "path":  "admin_tools/__init__.py",
+                      "sha256":  "defa106083c7172208fe7491326247d1fcfc100cbd5ec9873a6fa1503f9e8690"
+                  },
+                  {
+                      "path":  "admin_tools/db/common_vrp.py",
+                      "sha256":  "2d693d08c3445a21e277692ef8f2e525874aefcfc8f3be60e33348dfc938846c"
+                  },
+                  {
+                      "path":  "admin_tools/db/data_catalog.py",
+                      "sha256":  "933b32a9824064d85395102b25fec3257b644050293d31db8dab0232f33af047"
+                  },
+                  {
+                      "path":  "admin_tools/db/guard.py",
+                      "sha256":  "e901cb8c51beaa9a74b6bb4d134f35d210c3fbba3e3c5d8c6a597ca34e4bcd5f"
+                  },
+                  {
+                      "path":  "admin_tools/db/heavy_repair.py",
+                      "sha256":  "b2b951e7b28e511f718623385cc584a79bd4f4ab5ed5b4e56a15ad4ed5318582"
+                  },
+                  {
+                      "path":  "admin_tools/db/master_data_backend.py",
+                      "sha256":  "7605c193297e5f575ef69f9a5e7e1022a678479684cfa52cc71ccfad8c9c5cf4"
+                  },
+                  {
+                      "path":  "admin_tools/db/README.md",
+                      "sha256":  "579db4a3d9e0dc375f276061640e48ac63edde205059b6f1d371ce5ae7e70ba2"
+                  },
+                  {
+                      "path":  "admin_tools/db/region_plan_backend.py",
+                      "sha256":  "4447b82025ea3e76e7f87d94c4b830316ad5d2886ca193a03b265cdd80610c85"
+                  },
+                  {
+                      "path":  "admin_tools/db/release_backend.py",
+                      "sha256":  "07231bb18d2eecd42dff952cda353c03420d9827a541a2881bbe1e63be165349"
+                  },
+                  {
+                      "path":  "admin_tools/db/technician_profile_backend.py",
+                      "sha256":  "a7fc685554ff7dd0d966a07235333ac6c3425453c99996aee908f6c1292627d5"
+                  },
+                  {
+                      "path":  "admin_tools/db/__init__.py",
+                      "sha256":  "046116c5b8b4ab691050734315c6fb24cb43cb26b78b89f2d5165c65e30eb1f8"
+                  },
+                  {
+                      "path":  "admin_tools/db/migrations/manifest.json",
+                      "sha256":  "33c09ed0bfe716b7079310d84446376dc135c563de53b8743ef58afcb624b020"
+                  },
+                  {
+                      "path":  "admin_tools/db/migrations/README.md",
+                      "sha256":  "b1a5147037f6b198dad4c3bd0d6e5a8dbd019f8400a9daef44082371492d3aaa"
+                  },
+                  {
+                      "path":  "admin_tools/db/migrations/V001__atlanta_6area_region_plan.manifest.json",
+                      "sha256":  "74d1417a94ddc0c7e45606aeb47b310ef6c6b98af9c4b43dac0a853a04dd9bf7"
+                  },
+                  {
+                      "path":  "admin_tools/db/migrations/V001__atlanta_6area_region_plan.sql",
+                      "sha256":  "177aa2c008430ac11c91c27ce7612e1a948f3d83a9801b4d63d0b5a30dc9805e"
+                  },
+                  {
+                      "path":  "admin_tools/db/migrations/V002__region_plan_unbounded_region_seq.sql",
+                      "sha256":  "cbf219e4cc66830c2bd79fefdde5ea15c227ca174f145d358deda69c065a7323"
+                  },
+                  {
+                      "path":  "admin_tools/db/migrations/V003__region_plan_technician_source_id.sql",
+                      "sha256":  "bb2489979500538511d301e4fcb41584f17c975287c5580c7bfa073a55ba7ecb"
+                  },
+                  {
+                      "path":  "admin_tools/db/migrations/V004__region_plan_area_type_region_soft.sql",
+                      "sha256":  "d10bf6da0c29ae9fb2e1385f78dfd424c46abf89bbdaf0e98a4efce27fd6c982"
+                  },
+                  {
+                      "path":  "admin_tools/db/migrations/V005__region_plan_workflow_grants.sql",
+                      "sha256":  "cdfba03a636da0a5e7da9c462794837fa570c04af4ad2e7eec46069367ae2c87"
+                  },
+                  {
+                      "path":  "admin_tools/db/migrations/__init__.py",
+                      "sha256":  "266b2d8990cd71d78e0abf46c18f4b491ac0a3d2f709cb925769b3beb2222cd6"
+                  },
+                  {
+                      "path":  "admin_tools/db/runners/reset_common_vrp_data.py",
+                      "sha256":  "1afb60da3d9605278e317c3317ab4550c49aafeae204e5138154fd542108fac2"
+                  },
+                  {
+                      "path":  "admin_tools/db/runners/__init__.py",
+                      "sha256":  "b06da9d25093adfca26e163beb74ea7cef50efa292746f860c133a386edb7206"
+                  },
+                  {
+                      "path":  "admin_tools/db/seeds/build_la_bucket_vrp_inputs.py",
+                      "sha256":  "e1b24dc1cecffcc7b8e078e562b0a5d73907d70d0f650899665087b622999778"
+                  },
+                  {
+                      "path":  "admin_tools/db/seeds/import_asia_technician_centroids.py",
+                      "sha256":  "7e19712d3c9151a9b9da9a6bee4c16dcfd20b1624a83ed761d7401106080daa6"
+                  },
+                  {
+                      "path":  "admin_tools/db/seeds/__init__.py",
+                      "sha256":  "e74b8c770234b7ee8942a6f0d2c24af343b1ffe1084c90a179b6d6e8efee5e6c"
+                  },
+                  {
+                      "path":  "config/common_vrp.dev.template.json",
+                      "sha256":  "822e228254a624c1f9d480e1d680191a5a7bc708609e017b7fc15e2f6f9019c2"
+                  },
+                  {
+                      "path":  "config/common_vrp.prod.template.json",
+                      "sha256":  "c3a9699de8676ef77e5280b973c4366a17932ead7a6ff09b975b1510cf17a579"
+                  },
+                  {
+                      "path":  "config/config.template.json",
+                      "sha256":  "5e12496428485148ac58111085dad6b0ce8fa94d6bfbc1922ed99534611a3e81"
+                  },
+                  {
+                      "path":  "config/data_catalog.admin.template.json",
+                      "sha256":  "e2529cc672d780adf326c001abdde8326d81847eb39723eacc2f3821c6a0c057"
+                  },
+                  {
+                      "path":  "config/data_catalog.json",
+                      "sha256":  "21cc446cba1b508dd0bd317d1dd3a3bcb9e87f29c892d025b7421a44f72d69e4"
+                  },
+                  {
+                      "path":  "tools/__init__.py",
+                      "sha256":  "ce572bff452808a2e13e81c42a2bbd1c1a44f333f4a605d5b9f65c0740420760"
+                  },
+                  {
+                      "path":  "tools/data/atlanta_6area_plan.py",
+                      "sha256":  "9a1869b8e0c3c363580274a9090dd663061fcdb6b5389cf9422c61da3a95e512"
+                  },
+                  {
+                      "path":  "tools/data/technician_profile_data.py",
+                      "sha256":  "02a88bbe8ae517d37e5535546625b580f6f5873d3eb5e942bcbe92964c22b8ff"
+                  },
+                  {
+                      "path":  "tools/data/__init__.py",
+                      "sha256":  "551c3bd0efff50c0a92bdf8d02471cd7da44d785a7f1b09dcb7b50b0eef6d2ee"
+                  }
+              ],
+    "notes":  [
+                  "No database command is executed by this build.",
+                  "Dirty-source artifacts are development verification only and are not promotable.",
+                  "Supply an explicit development or production config path when running a command.",
+                  "Production writes require a backup, approval, and --confirm-production.",
+                  "Install as a versioned read-only admin release; do not merge into the application runtime artifact."
+              ]
+}

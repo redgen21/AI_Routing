@@ -11,10 +11,11 @@ from .common_vrp_db import (
     delete_technician_master,
     get_routing_config,
     init_schema,
+    load_common_config,
     list_routing_request_dates,
     list_capabilities,
     list_avoid_areas,
-    list_contexts,
+    region_plan_operation,
     list_engineers,
     list_jobs,
     list_request_technicians,
@@ -28,10 +29,12 @@ from .common_vrp_db import (
 from .common_vrp_runtime import (
     build_payload_from_inputs,
     get_latest_routing_snapshot,
+    list_runtime_contexts,
     refresh_routing_result,
     submit_routing_from_payload,
     submit_routing_from_inputs,
 )
+from services.api.region_plan_v2 import handle as region_plan_v2_handle
 
 
 def _build_payload_debug(payload: dict) -> dict:
@@ -195,12 +198,158 @@ def _query_value(parsed, key: str, default: str = "") -> str:
     return str(values[0]).strip() if values else default
 
 
+_REGION_PLAN_READ_OPERATIONS = {"list", "get", "active", "validate", "activation-preview"}
+_REGION_PLAN_WRITE_OPERATIONS = {"candidate", "import", "resolution", "review", "activate"}
+
+
+def _region_plan_write_allowed() -> bool:
+    cfg = load_common_config()
+    environment = str(
+        cfg.get("environment", cfg.get("runtime_environment", (cfg.get("deployment") or {}).get("environment", "")))
+    ).strip().lower()
+    return environment in {"development", "dev"}
+
+
+def _region_plan_request(operation: str, payload: dict) -> tuple[int, dict]:
+    if operation not in _REGION_PLAN_READ_OPERATIONS | _REGION_PLAN_WRITE_OPERATIONS:
+        return HTTPStatus.NOT_FOUND, {"error": "NOT_FOUND"}
+    if operation in _REGION_PLAN_WRITE_OPERATIONS and not _region_plan_write_allowed():
+        return HTTPStatus.FORBIDDEN, {"error": "REGION_PLAN_WRITES_DEVELOPMENT_ONLY"}
+    if operation in {"import", "activate"} and not str(payload.get("idempotency_key", "")).strip():
+        return HTTPStatus.BAD_REQUEST, {"error": "IDEMPOTENCY_KEY_REQUIRED"}
+    if operation == "activate":
+        required = ("expected_activation_revision", "preview_digest", "preview_id", "plan_id", "checksum")
+        missing = [key for key in required if not str(payload.get(key, "")).strip()]
+        if missing:
+            return HTTPStatus.BAD_REQUEST, {"error": "ACTIVATION_GUARD_REQUIRED", "missing": missing}
+    try:
+        return HTTPStatus.OK, region_plan_operation(operation.replace("-", "_"), payload)
+    except RuntimeError as exc:
+        return HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)}
+    except ValueError as exc:
+        return HTTPStatus.BAD_REQUEST, {"error": "INVALID_REGION_PLAN_REQUEST", "message": str(exc)}
+
+
+def _region_plan_route(path: str, payload: dict) -> tuple[str, dict] | None:
+    """Normalize the UI REST contract and retain the original operation aliases."""
+    for prefix in ("/region-plans", "/api/v1/common/region-plans"):
+        if path == prefix:
+            return "list", payload
+        if not path.startswith(prefix + "/"):
+            continue
+        suffix = path[len(prefix) + 1:].strip("/")
+        aliases = {
+            "active": "active",
+            "candidates/import": "import",
+            "validate": "validate",
+            "review": "review",
+            "activation-preview": "activation-preview",
+            "activate": "activate",
+            "candidate": "candidate",
+            "import": "import",
+            "resolution": "resolution",
+            "list": "list",
+            "get": "get",
+        }
+        if suffix in aliases:
+            return aliases[suffix], payload
+        chunks = suffix.split("/")
+        if len(chunks) == 2 and chunks[1] == "ambiguity-resolutions" and chunks[0]:
+            normalized = dict(payload)
+            normalized.setdefault("plan_id", chunks[0])
+            return "resolution", normalized
+        if len(chunks) == 1 and chunks[0]:
+            normalized = dict(payload)
+            normalized.setdefault("plan_id", chunks[0])
+            return "get", normalized
+    return None
+
+
+def _region_plan_v2_route(path: str, payload: dict) -> tuple[str, dict] | None:
+    """Versioned public contract; legacy region-plan routes stay untouched."""
+    prefix = "/api/region-plans/v2"
+    if not path.startswith(prefix):
+        return None
+    suffix = path[len(prefix):].strip("/")
+    if suffix in {"adopt", "active", "cities", "imports"}:
+        return suffix, payload
+    if suffix == "plans/list":
+        return "list", payload
+    chunks = suffix.split("/") if suffix else []
+    if len(chunks) == 2 and chunks[0] == "plans" and chunks[1]:
+        item = dict(payload); item.setdefault("plan_id", chunks[1]); return "get", item
+    if len(chunks) == 3 and chunks[0] == "plans" and chunks[2] in {"review", "activation-preview", "activate"}:
+        item = dict(payload); item.setdefault("plan_id", chunks[1]); return chunks[2], item
+    if len(chunks) == 3 and chunks[0] == "cities" and chunks[2] == "active":
+        item = dict(payload); item.setdefault("target_city_id", chunks[1]); return "active", item
+    if len(chunks) == 3 and chunks[0] == "cities" and chunks[2] == "rollback":
+        item = dict(payload); item.setdefault("target_city_id", chunks[1]); return "rollback", item
+    return "not-found", payload
+
+
+def _region_plan_v2_headers(handler: BaseHTTPRequestHandler, payload: dict) -> dict:
+    """Bind server-owned identity and HTTP preconditions to the JSON request.
+
+    Region Plan v2 mutations are accepted only from the deployment console on
+    loopback.  A caller supplied identity header is deliberately ignored.
+    """
+    normalized = dict(payload)
+    normalized.pop("principal", None)
+    normalized.pop("idempotency_key", None)
+    normalized.pop("plan_revision", None)
+    normalized["principal"] = "deployment-console"
+    idempotency_key = str(handler.headers.get("Idempotency-Key", "")).strip()
+    if idempotency_key:
+        normalized["idempotency_key"] = idempotency_key
+    if_match = str(handler.headers.get("If-Match", "")).strip().strip('"')
+    if if_match:
+        normalized["plan_revision"] = int(if_match)
+    return normalized
+
+
+_REGION_PLAN_V2_MUTATIONS = {"imports", "adopt", "review", "activate", "rollback"}
+
+
+def _region_plan_v2_mutation_allowed(handler: BaseHTTPRequestHandler, operation: str) -> bool:
+    if operation not in _REGION_PLAN_V2_MUTATIONS:
+        return True
+    client = str((getattr(handler, "client_address", None) or ("",))[0]).strip()
+    if client not in {"127.0.0.1", "::1"}:
+        return False
+    cfg = load_common_config()
+    environment = str(
+        cfg.get("environment", cfg.get("runtime_environment", (cfg.get("deployment") or {}).get("environment", "")))
+    ).strip().lower()
+    dbname = str((cfg.get("database") or {}).get("dbname", "")).strip()
+    return environment in {"development", "dev"} and dbname == "vrp_db_dev"
+
+
 class CommonVRPRequestHandler(BaseHTTPRequestHandler):
     server_version = "CommonVRPServer/1.0"
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         try:
+            v2_route = _region_plan_v2_route(parsed.path, {})
+            if v2_route is not None:
+                payload = _region_plan_v2_headers(self, _read_json_request(self))
+                operation, payload = _region_plan_v2_route(parsed.path, payload) or ("not-found", payload)
+                if not _region_plan_v2_mutation_allowed(self, operation):
+                    _json_response(self, HTTPStatus.FORBIDDEN, {"error": "REGION_PLAN_V2_MUTATION_FORBIDDEN"})
+                    return
+                status, result = region_plan_v2_handle(operation, payload)
+                _json_response(self, status, result)
+                return
+            route = _region_plan_route(parsed.path, {})
+            if route is not None:
+                operation, _ = route
+                payload = _read_json_request(self)
+                route = _region_plan_route(parsed.path, payload)
+                assert route is not None
+                operation, payload = route
+                status, result = _region_plan_request(operation, payload)
+                _json_response(self, status, result)
+                return
             if parsed.path == "/api/v1/common/jobs/bulk_upsert":
                 payload = _read_json_request(self)
                 saved = upsert_jobs(list(payload.get("rows", [])))
@@ -308,7 +457,20 @@ class CommonVRPRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         try:
             if parsed.path == "/api/v1/common/contexts":
-                _json_response(self, HTTPStatus.OK, list_contexts())
+                _json_response(self, HTTPStatus.OK, list_runtime_contexts())
+                return
+            payload = {key: values[0] for key, values in parse_qs(parsed.query).items() if values}
+            v2_route = _region_plan_v2_route(parsed.path, payload)
+            if v2_route is not None:
+                operation, payload = v2_route
+                status, result = region_plan_v2_handle(operation, payload)
+                _json_response(self, status, result)
+                return
+            route = _region_plan_route(parsed.path, payload)
+            if route is not None:
+                operation, payload = route
+                status, result = _region_plan_request(operation, payload)
+                _json_response(self, status, result)
                 return
             if parsed.path == "/api/v1/common/engineers":
                 subsidiary_name = _query_value(parsed, "subsidiary_name")
@@ -373,6 +535,20 @@ class CommonVRPRequestHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args) -> None:  # noqa: A003
         return
+
+    def do_PATCH(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        try:
+            payload = _read_json_request(self)
+            route = _region_plan_route(parsed.path, payload)
+            if route is None:
+                _json_response(self, HTTPStatus.NOT_FOUND, {"error": "NOT_FOUND"})
+                return
+            operation, payload = route
+            status, result = _region_plan_request(operation, payload)
+            _json_response(self, status, result)
+        except Exception as exc:
+            _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "INVALID_REQUEST", "message": str(exc)})
 
 
 def run_server(host: str = "0.0.0.0", port: int = 8065) -> None:

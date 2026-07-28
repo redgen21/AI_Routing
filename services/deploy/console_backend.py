@@ -8,6 +8,8 @@ never connects to SFTP/SSH or a database.
 from __future__ import annotations
 
 import contextlib
+from concurrent.futures import ThreadPoolExecutor
+import base64
 import errno
 import hashlib
 import io
@@ -26,6 +28,9 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Iterator, Mapping
+from urllib.parse import urlparse
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from admin_tools.db.release_backend import MigrationSpec
 
@@ -54,6 +59,10 @@ MANAGED_DATA_ROOT = (
 _HISTORY_LOCK = threading.Lock()
 _BUILD_LOCK = threading.Lock()
 _MANAGED_DATA_LOCK = threading.Lock()
+_MANAGED_DATA_JOBS_LOCK = threading.Lock()
+_MANAGED_DATA_JOBS: dict[str, dict[str, Any]] = {}
+_MANAGED_DATA_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="managed-data")
+_MANAGED_DATA_VALIDATION_CACHE: dict[tuple[str, str, str], dict[str, Any]] = {}
 
 _BUILD_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _BUILD_SCRIPT = PROJECT_ROOT / "services" / "deploy" / "build_deploy_package.ps1"
@@ -64,7 +73,11 @@ _BUILD_TIMEOUT_SECONDS = 600
 _BUILD_OUTPUT_LIMIT = 4000
 
 ARTIFACT_TYPES = {"runtime", "server-data", "admin-tools"}
-HISTORY_KINDS = ARTIFACT_TYPES | {"development-secure-config", "managed-data"}
+HISTORY_KINDS = ARTIFACT_TYPES | {
+    "development-secure-config",
+    "production-secure-config",
+    "managed-data",
+}
 ENVIRONMENTS = {"development", "production"}
 FORBIDDEN_ARTIFACT_NAMES = {
     "server_ftp.local.json",
@@ -81,10 +94,36 @@ DEVELOPMENT_SECURE_CONFIG_TARGETS = (
     ),
     ("config.json", "/home/csda/AI_Routing/development/config/config.json"),
 )
+PRODUCTION_SECURE_CONFIG_TARGETS = (
+    (
+        "common_vrp.prod.json",
+        "/home/csda/AI_Routing/production/config_common_vrp.json",
+    ),
+    ("config.json", "/home/csda/AI_Routing/production/config/config.json"),
+)
+_SECURE_CONFIG_COMMON_SOURCES = {
+    "development": "common_vrp.dev.json",
+    "production": "common_vrp.prod.json",
+}
+_SECURE_CONFIG_TARGETS = {
+    "development": DEVELOPMENT_SECURE_CONFIG_TARGETS,
+    "production": PRODUCTION_SECURE_CONFIG_TARGETS,
+}
+_SECURE_CONFIG_TARGET_DIRECTORIES = {
+    "development": "/home/csda/AI_Routing/development/config",
+    "production": "/home/csda/AI_Routing/production/config",
+}
 DEVELOPMENT_COMMON_JOB_ARCHIVE_ROOT = (
     "/home/csda/AI_Routing/state/development/common_vrp_jobs"
 )
+PRODUCTION_COMMON_JOB_ARCHIVE_ROOT = (
+    "/home/csda/AI_Routing/state/production/common_vrp_jobs"
+)
 NORTH_AMERICA_SHARED_ROOT = "/home/csda/AI_Routing/shared/north_america"
+PRODUCTION_REMOTE_DATA_CATALOG = (
+    "/home/csda/AI_Routing/shared/config/data_catalog.production.json"
+)
+_REMOTE_DATA_CATALOG_MAX_BYTES = 1024 * 1024
 _SECURE_CONFIG_MODE = 0o600
 _SECURE_CONFIG_MODE_TEXT = "0600"
 _MASTER_ADMIN_PROFILE_PATH = CONFIG_ROOT / "server_deploy.local.json"
@@ -119,6 +158,41 @@ _MASTER_ADMIN_CONFIG_NAMES = {
 _MASTER_ADMIN_COMMANDS = frozenset(
     {"overview", "list-specs", "preview", "apply", "receipt"}
 )
+_REGION_PLAN_ADMIN_MODULE = "admin_tools.db.region_plan_backend"
+_REGION_PLAN_SCHEMA_ADMIN_MODULE = "admin_tools.db.region_plan_schema_backend"
+_REGION_PLAN_SCHEMA_CONTRACT_VERSION = "region-plan-schema/v2"
+_REGION_PLAN_SCHEMA_ID = "common_region_plan_schema_v2"
+_REGION_PLAN_SCHEMA_CONFIRMATION = (
+    "RECONCILE COMMON REGION PLAN SCHEMA V2 TO DEVELOPMENT vrp_db_dev"
+)
+_REGION_PLAN_ADMIN_COMMAND = "stage-candidate"
+_FIXED_REGION_PLAN_BUNDLE_DATASET = "fixed_region_plan_bundle"
+_FIXED_REGION_PLAN_BUNDLE_SCOPE = "development"
+_FIXED_REGION_PLAN_BUNDLE_COMMANDS = frozenset(
+    {"stage-bundle", "status-bundle", "import-bundle"}
+)
+_FIXED_REGION_PLAN_BUNDLE_CONTRACT_VERSION = "region-plan-bundle-import/v1"
+_REGION_PLAN_CONTRACT_VERSION = "region-plan/v1"
+_REGION_PLAN_MIGRATION_CONTRACT_VERSION = "region-plan-migration/v1"
+_REGION_PLAN_WORKFLOW_CONTRACT_VERSION = "region-plan-workflow/v1"
+_REGION_PLAN_WORKFLOW_COMMANDS = frozenset(
+    {"resolve", "review", "activation-preview", "activate"}
+)
+_REGION_PLAN_ADMIN_COMMANDS = frozenset(
+    {_REGION_PLAN_ADMIN_COMMAND, "migration-preview", "install-schema"}
+    | _REGION_PLAN_WORKFLOW_COMMANDS
+)
+_REGION_PLAN_PLAN_ID = re.compile(r"^[a-z][a-z0-9._-]{0,159}$")
+_REGION_PLAN_V2_API_ORIGIN = "http://127.0.0.1:8066"
+_REGION_PLAN_V2_API_ENV = "REGION_PLAN_V2_API_ORIGIN"
+_REGION_PLAN_V2_TIMEOUT_SECONDS = 30
+_REGION_PLAN_V2_PRINCIPAL_ENV = "REGION_PLAN_V2_PRINCIPAL"
+_REGION_PLAN_V2_MAX_WORKBOOK_BYTES = 24 * 1024 * 1024
+_REGION_PLAN_FIXED_ID = "atlanta_6area_new_atl_buckets_20260721_v1"
+_REGION_PLAN_VERSIONED_ID = re.compile(
+    r"^atlanta_6area_v[12]_[0-9a-f]{64}$"
+)
+_REGION_PLAN_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MASTER_PREVIEW_CONFIRMATION_TTL = timedelta(minutes=30)
 _MASTER_PREVIEW_CONFIRMATIONS: dict[str, tuple[str, str, str, str, datetime]] = {}
 _MASTER_PREVIEW_CONFIRMATION_LOCK = threading.Lock()
@@ -134,6 +208,32 @@ _MANAGED_DATA_DB_PREVIEWS: dict[
 _MANAGED_DATA_DB_PREVIEW_LOCK = threading.Lock()
 _MANAGED_DATA_DB_DATASET = "heavy_repair_rules"
 _MANAGED_DATA_DB_TABLE = "common_heavy_repair_rule_master"
+_TECHNICIAN_PROFILE_DATASET = "technician_data_workbook"
+_TECHNICIAN_PROFILE_SCOPE = "development"
+_TECHNICIAN_PROFILE_ADMIN_MODULE = "admin_tools.db.technician_profile_backend"
+_TECHNICIAN_PROFILE_CONTRACT_VERSION = "technician-profile/v1"
+_TECHNICIAN_PROFILE_ADMIN_COMMANDS = frozenset({"preview", "apply"})
+_TECHNICIAN_PROFILE_PREVIEWS: dict[
+    str, tuple[str, str, str, str, str, str, datetime, str | None]
+] = {}
+_TECHNICIAN_PROFILE_PREVIEW_LOCK = threading.Lock()
+_MANAGED_DATA_CANDIDATE_DATASET = "territory_plan_workbook"
+_MANAGED_DATA_CANDIDATE_SCOPE = "development"
+_FIXED_REGION_PLAN_BUNDLE_REQUEST_ROOT = "region_plan_bundle_requests"
+_REGION_PLAN_REQUEST_ROOT = "region_plan_requests"
+_REGION_PLAN_REQUEST_MAX_BYTES = 1024 * 1024
+_REGION_PLAN_SCHEMA_CONFIRMATIONS: dict[str, tuple[str, str, str, str, datetime]] = {}
+_REGION_PLAN_SCHEMA_CONFIRMATION_LOCK = threading.Lock()
+_REGION_PLAN_ACTIVATION_PREVIEWS: dict[
+    str, tuple[str, str, int, str, str, datetime]
+] = {}
+_REGION_PLAN_ACTIVATION_PREVIEW_LOCK = threading.Lock()
+_REGION_PLAN_RESOLUTION_DOWNLOADS: dict[
+    str, tuple[str, dict[str, dict[str, Any]], str, str | None, datetime]
+] = {}
+_REGION_PLAN_RESOLUTION_DOWNLOAD_LOCK = threading.Lock()
+_REGION_PLAN_FINAL_BINDINGS: dict[str, tuple[str, str, str, datetime]] = {}
+_REGION_PLAN_FINAL_BINDING_LOCK = threading.Lock()
 _REMOTE_SHA256_OUTPUT = re.compile(r"^(?P<sha256>[0-9a-fA-F]{64})[ \t]+[^\r\n]+$")
 _PLACEHOLDER_VALUE = re.compile(
     r"(?i)(?:<[^>]*(?:replace|placeholder|change)[^>]*>|"
@@ -1009,6 +1109,9 @@ def _load_remote_profile(config_path: str | Path) -> dict[str, Any]:
         "allow_development_secure_config_upload": (
             policy.get("allow_development_secure_config_upload") is True
         ),
+        "allow_production_secure_config_upload": (
+            policy.get("allow_production_secure_config_upload") is True
+        ),
         "allow_service_control": policy.get("allow_service_control") is True,
         # The local profile pins the immutable Admin Tools release used by the
         # database console.  The development verification pin is intentionally
@@ -1511,6 +1614,9 @@ def get_connection_settings() -> dict[str, Any]:
             "allow_development_secure_config_upload": (
                 profile.get("allow_development_secure_config_upload") is True
             ),
+            "allow_production_secure_config_upload": (
+                profile.get("allow_production_secure_config_upload") is True
+            ),
             "allow_service_control": profile.get("allow_service_control") is True,
             "admin_tools_release_version": (
                 pinned_admin_tools_version if admin_tools_release_configured else ""
@@ -1843,6 +1949,30 @@ class ParamikoRemote:
                 return False
             raise
 
+    def read_bytes(self, path: str, *, maximum_bytes: int) -> bytes:
+        """Read one bounded, allowlisted remote control file safely."""
+
+        if maximum_bytes < 1:
+            raise ValueError("maximum_bytes must be positive.")
+        safe_path = self._allowlisted_remote_path(path)
+        try:
+            leaf = self.sftp.lstat(safe_path)
+        except OSError as exc:
+            if _is_remote_not_found(exc):
+                raise FileNotFoundError("Required remote control file is missing.") from exc
+            raise
+        if stat.S_ISLNK(int(leaf.st_mode)):
+            raise ValueError("Remote control file must not be a symlink.")
+        metadata = self.sftp.stat(safe_path)
+        if int(metadata.st_size) > maximum_bytes:
+            raise ValueError("Remote control file exceeds the allowed size.")
+        canonical_path = self._canonical_remote_path(safe_path, target_must_exist=True)
+        with self.sftp.open(canonical_path, "rb") as stream:
+            payload = stream.read(maximum_bytes + 1)
+        if len(payload) > maximum_bytes:
+            raise ValueError("Remote control file exceeds the allowed size.")
+        return bytes(payload)
+
     def sha256(self, path: str) -> str | None:
         """Return one remote SHA-256 without transferring the file over SFTP.
 
@@ -2127,6 +2257,332 @@ class ParamikoRemote:
             raw_stderr = str(stderr_bytes)
         return code, raw_stdout, _redact(raw_stderr)
 
+    def execute_technician_profile_json(
+        self, command: str, timeout: int = 45
+    ) -> tuple[int, str, str]:
+        """Execute only the fixed development technician-profile workflow.
+
+        This is intentionally separate from the generic master-table executor:
+        the source is an immutable managed workbook, not a staged caller CSV,
+        and the composite backend owns its fixed master/capability/region
+        mappings.  No table name, source path, or environment is caller
+        selectable at this transport boundary.
+        """
+
+        if not isinstance(command, str) or any(ord(char) < 32 for char in command):
+            raise ValueError("Remote technician-profile command is invalid.")
+        try:
+            tokens = shlex.split(command, posix=True)
+        except ValueError as exc:
+            raise ValueError("Remote technician-profile command is invalid.") from exc
+        operation = tokens[10] if len(tokens) > 10 else ""
+        if (
+            len(tokens) < 13
+            or tokens[0:2] != ["cd", "--"]
+            or tokens[3:5] != ["&&", "exec"]
+            or tokens[6:10]
+            != ["-B", "-m", _TECHNICIAN_PROFILE_ADMIN_MODULE, "--json"]
+            or operation not in _TECHNICIAN_PROFILE_ADMIN_COMMANDS
+            or tokens[11] != "--config"
+        ):
+            raise ValueError(
+                "Remote command is not an allowlisted technician-profile JSON command."
+            )
+        root = PurePosixPath(str(self.profile.get("remote_root", "")).strip())
+        expected_release_parent = root / "admin_tools" / "releases"
+        expected_python = root / "development" / ".venv" / "bin" / "python"
+        expected_config = root / "development" / "config_common_vrp.dev.json"
+        if (
+            not root.is_absolute()
+            or ".." in root.parts
+            or PurePosixPath(tokens[2]).parent != expected_release_parent
+            or not _MASTER_ADMIN_RELEASE_VERSION.fullmatch(PurePosixPath(tokens[2]).name)
+            or tokens[5] != expected_python.as_posix()
+            or tokens[12] != expected_config.as_posix()
+        ):
+            raise ValueError("Remote technician-profile command arguments are invalid.")
+        trailing = tokens[13:]
+        if operation == "preview":
+            if (
+                len(trailing) != 8
+                or tuple(trailing[0::2])
+                != (
+                    "--source",
+                    "--source-sha256",
+                    "--managed-version",
+                    "--environment",
+                )
+            ):
+                raise ValueError(
+                    "Remote technician-profile preview arguments are not allowlisted."
+                )
+            version = trailing[3]
+            expected_source = (
+                root
+                / "state"
+                / _TECHNICIAN_PROFILE_SCOPE
+                / "managed_data"
+                / _TECHNICIAN_PROFILE_DATASET
+                / version
+                / "payload.xlsx"
+            )
+            if (
+                not _MANAGED_DATA_VERSION.fullmatch(version)
+                or trailing[1] != expected_source.as_posix()
+                or trailing[5] != version
+                or trailing[7] != _TECHNICIAN_PROFILE_SCOPE
+            ):
+                raise ValueError("Remote technician-profile source binding is invalid.")
+        else:
+            if (
+                len(trailing) != 10
+                or tuple(trailing[0::2])
+                != (
+                    "--preview-id",
+                    "--preview-digest",
+                    "--idempotency-key",
+                    "--confirmation",
+                    "--environment",
+                )
+            ):
+                raise ValueError(
+                    "Remote technician-profile apply arguments are not allowlisted."
+                )
+            try:
+                uuid.UUID(trailing[5])
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise ValueError("Remote technician-profile idempotency key is invalid.") from exc
+            if (
+                not _MASTER_ADMIN_PREVIEW_ID.fullmatch(trailing[1])
+                or not _MASTER_ADMIN_DIGEST.fullmatch(trailing[3])
+                or not trailing[7]
+                or len(trailing[7]) > 512
+                or any(ord(char) < 32 for char in trailing[7])
+                or trailing[9] != _TECHNICIAN_PROFILE_SCOPE
+            ):
+                raise ValueError("Remote technician-profile apply binding is invalid.")
+        canonical = f"cd -- {shlex.quote(tokens[2])} && exec " + " ".join(
+            shlex.quote(token) for token in tokens[5:]
+        )
+        if command != canonical:
+            raise ValueError(
+                "Remote technician-profile command is not canonically shell-quoted."
+            )
+        _, stdout, stderr = self.client.exec_command(command, timeout=timeout)
+        stdout_bytes = stdout.read(_MASTER_ADMIN_MAX_JSON_BYTES + 1)
+        if not isinstance(stdout_bytes, bytes):
+            stdout_bytes = str(stdout_bytes).encode("utf-8", errors="replace")
+        if len(stdout_bytes) > _MASTER_ADMIN_MAX_JSON_BYTES:
+            with contextlib.suppress(Exception):
+                stdout.channel.close()
+            raise RuntimeError("Remote technician-profile result exceeds the safe response limit.")
+        stderr_bytes = stderr.read(_BUILD_OUTPUT_LIMIT + 1)
+        code = stdout.channel.recv_exit_status()
+        try:
+            raw_stdout = stdout_bytes.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise RuntimeError(
+                "Remote technician-profile result is not valid UTF-8 JSON."
+            ) from exc
+        if isinstance(stderr_bytes, bytes):
+            raw_stderr = stderr_bytes.decode("utf-8", errors="replace")
+        else:
+            raw_stderr = str(stderr_bytes)
+        return code, raw_stdout, _redact(raw_stderr)
+
+    def execute_region_plan_json(self, command: str, timeout: int = 45) -> tuple[int, str, str]:
+        """Execute one exact development-only region-plan Admin Tools command."""
+
+        if not isinstance(command, str) or any(ord(char) < 32 for char in command):
+            raise ValueError("Remote region-plan command is invalid.")
+        try:
+            tokens = shlex.split(command, posix=True)
+        except ValueError as exc:
+            raise ValueError("Remote region-plan command is invalid.") from exc
+        operation = tokens[10] if len(tokens) > 10 else ""
+        module = tokens[8] if len(tokens) > 8 else ""
+        allowed_operation = (
+            operation in (_REGION_PLAN_ADMIN_COMMANDS | _FIXED_REGION_PLAN_BUNDLE_COMMANDS)
+            if module == _REGION_PLAN_ADMIN_MODULE
+            else operation in {"preview", "reconcile"}
+            if module == _REGION_PLAN_SCHEMA_ADMIN_MODULE
+            else False
+        )
+        if (
+            len(tokens) < 13
+            or tokens[0:2] != ["cd", "--"]
+            or tokens[3:5] != ["&&", "exec"]
+            or tokens[6:8] != ["-B", "-m"]
+            or tokens[9] != "--json"
+            or not allowed_operation
+            or tokens[11] != "--config"
+        ):
+            raise ValueError("Remote command is not an allowlisted region-plan JSON command.")
+        root = PurePosixPath(str(self.profile.get("remote_root", "")).strip())
+        expected_release_parent = root / "admin_tools" / "releases"
+        expected_python = root / "development" / ".venv" / "bin" / "python"
+        expected_config = root / "development" / "config_common_vrp.dev.json"
+        if (
+            not root.is_absolute()
+            or ".." in root.parts
+            or PurePosixPath(tokens[2]).parent != expected_release_parent
+            or not _MASTER_ADMIN_RELEASE_VERSION.fullmatch(PurePosixPath(tokens[2]).name)
+            or tokens[5] != expected_python.as_posix()
+            or tokens[12] != expected_config.as_posix()
+        ):
+            raise ValueError("Remote region-plan command arguments are invalid.")
+        trailing = tokens[13:]
+        if module == _REGION_PLAN_SCHEMA_ADMIN_MODULE:
+            if operation == "preview" and trailing:
+                raise ValueError("Remote region-plan schema preview arguments are invalid.")
+            if operation == "reconcile" and trailing != [
+                "--confirmation", _REGION_PLAN_SCHEMA_CONFIRMATION
+            ]:
+                raise ValueError("Remote region-plan schema reconcile arguments are invalid.")
+        elif operation in _FIXED_REGION_PLAN_BUNDLE_COMMANDS:
+            if operation == "stage-bundle":
+                if (
+                    len(trailing) != 6
+                    or tuple(trailing[0::2])
+                    != ("--source", "--bundle-sha256", "--managed-version")
+                ):
+                    raise ValueError(
+                        "Remote fixed Region Data bundle arguments are not allowlisted."
+                    )
+                bundle_sha256 = trailing[3]
+                expected_bundle = (
+                    root
+                    / "state"
+                    / _FIXED_REGION_PLAN_BUNDLE_SCOPE
+                    / "managed_data"
+                    / _FIXED_REGION_PLAN_BUNDLE_DATASET
+                    / bundle_sha256
+                    / "payload.zip"
+                )
+                if (
+                    not _MANAGED_DATA_VERSION.fullmatch(bundle_sha256)
+                    or trailing[5] != bundle_sha256
+                    or trailing[1] != expected_bundle.as_posix()
+                ):
+                    raise ValueError(
+                        "Remote fixed Region Data bundle binding is invalid."
+                    )
+            elif operation == "status-bundle":
+                if (
+                    len(trailing) != 4
+                    or tuple(trailing[0::2])
+                    != ("--bundle-sha256", "--managed-version")
+                    or not _MANAGED_DATA_VERSION.fullmatch(trailing[1])
+                    or trailing[3] != trailing[1]
+                ):
+                    raise ValueError(
+                        "Remote fixed Region Data status arguments are not allowlisted."
+                    )
+            else:
+                if (
+                    len(trailing) != 4
+                    or tuple(trailing[0::2]) != ("--request", "--request-sha256")
+                ):
+                    raise ValueError(
+                        "Remote fixed Region Data import arguments are not allowlisted."
+                    )
+                request_sha256 = trailing[3]
+                expected_request = (
+                    root
+                    / "state"
+                    / _FIXED_REGION_PLAN_BUNDLE_SCOPE
+                    / _FIXED_REGION_PLAN_BUNDLE_REQUEST_ROOT
+                    / f"{request_sha256}.json"
+                )
+                if (
+                    not _MANAGED_DATA_VERSION.fullmatch(request_sha256)
+                    or trailing[1] != expected_request.as_posix()
+                ):
+                    raise ValueError(
+                        "Remote fixed Region Data import request binding is invalid."
+                    )
+        elif operation == _REGION_PLAN_ADMIN_COMMAND:
+            if (
+                len(trailing) != 6
+                or tuple(trailing[0::2])
+                != ("--source", "--source-sha256", "--managed-version")
+            ):
+                raise ValueError("Remote region-plan candidate command arguments are not allowlisted.")
+            source_sha256 = trailing[3]
+            expected_source = (
+                root
+                / "state"
+                / "development"
+                / "managed_data"
+                / _MANAGED_DATA_CANDIDATE_DATASET
+                / source_sha256
+                / "payload.xlsx"
+            )
+            if (
+                not _MANAGED_DATA_VERSION.fullmatch(source_sha256)
+                or trailing[5] != source_sha256
+                or trailing[1] != expected_source.as_posix()
+            ):
+                raise ValueError("Remote region-plan candidate source binding is invalid.")
+        elif operation == "migration-preview":
+            if len(trailing) != 2 or trailing[0] != "--migration-id":
+                raise ValueError("Remote region-plan migration preview arguments are not allowlisted.")
+            _region_plan_migration_spec(trailing[1])
+        elif operation == "install-schema":
+            if (
+                len(trailing) != 4
+                or tuple(trailing[0::2]) != ("--migration-id", "--confirmation")
+            ):
+                raise ValueError("Remote region-plan schema install arguments are not allowlisted.")
+            _region_plan_migration_spec(trailing[1])
+            confirmation = trailing[3]
+            if (
+                not confirmation
+                or len(confirmation) > 512
+                or any(ord(char) < 32 for char in confirmation)
+            ):
+                raise ValueError("Remote region-plan schema confirmation is invalid.")
+        else:
+            if (
+                len(trailing) != 4
+                or tuple(trailing[0::2]) != ("--request", "--request-sha256")
+            ):
+                raise ValueError("Remote region-plan workflow arguments are not allowlisted.")
+            request_sha256 = trailing[3]
+            expected_request = (
+                root / "state" / "development" / _REGION_PLAN_REQUEST_ROOT
+                / f"{request_sha256}.json"
+            )
+            if (
+                not _MANAGED_DATA_VERSION.fullmatch(request_sha256)
+                or trailing[1] != expected_request.as_posix()
+            ):
+                raise ValueError("Remote region-plan workflow request binding is invalid.")
+        canonical = f"cd -- {shlex.quote(tokens[2])} && exec " + " ".join(
+            shlex.quote(token) for token in tokens[5:]
+        )
+        if command != canonical:
+            raise ValueError("Remote region-plan command is not canonically shell-quoted.")
+        _, stdout, stderr = self.client.exec_command(command, timeout=timeout)
+        stdout_bytes = stdout.read(_MASTER_ADMIN_MAX_JSON_BYTES + 1)
+        if not isinstance(stdout_bytes, bytes):
+            stdout_bytes = str(stdout_bytes).encode("utf-8", errors="replace")
+        if len(stdout_bytes) > _MASTER_ADMIN_MAX_JSON_BYTES:
+            with contextlib.suppress(Exception):
+                stdout.channel.close()
+            raise RuntimeError("Remote region-plan result exceeds the safe response limit.")
+        stderr_bytes = stderr.read(_BUILD_OUTPUT_LIMIT + 1)
+        code = stdout.channel.recv_exit_status()
+        try:
+            raw_stdout = stdout_bytes.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise RuntimeError("Remote region-plan result is not valid UTF-8 JSON.") from exc
+        if isinstance(stderr_bytes, bytes):
+            raw_stderr = stderr_bytes.decode("utf-8", errors="replace")
+        else:
+            raw_stderr = str(stderr_bytes)
+        return code, raw_stdout, _redact(raw_stderr)
+
     def inventory_files(self, directory: str) -> list[str]:
         """Return the exact non-directory inventory below one safe release root."""
 
@@ -2320,12 +2776,21 @@ def deployment_policy(*, environment: str, config_path: str) -> dict[str, Any]:
         result["allow_development_secure_config_upload"] = (
             profile["allow_development_secure_config_upload"] is True
         )
+    if "allow_production_secure_config_upload" in profile:
+        result["allow_production_secure_config_upload"] = (
+            profile["allow_production_secure_config_upload"] is True
+        )
     return result
 
 
 def _require_development_secure_config_environment(environment: str) -> None:
     if _require_environment(environment) != "development":
         raise PermissionError("Secure configuration upload is development-only.")
+
+
+def _require_production_secure_config_environment(environment: str) -> None:
+    if _require_environment(environment) != "production":
+        raise PermissionError("Secure configuration upload is production-only.")
 
 
 def _reject_placeholder_values(value: Any, *, source_name: str, pointer: str = "$") -> None:
@@ -2367,6 +2832,49 @@ def _catalog_relative_path(catalog: Mapping[str, Any], active_key: str) -> str:
     return relative.as_posix()
 
 
+def _production_server_catalog_relative_path(
+    catalog: Mapping[str, Any], active_key: str
+) -> str:
+    """Resolve a production server catalog role beneath the shared data root."""
+
+    if catalog.get("schema") != "north-america-routing-data-catalog/v1":
+        raise ValueError("Production server data catalog has an unsupported schema.")
+    raw_data_root = str(catalog.get("data_root", "")).replace("\\", "/").rstrip("/")
+    if raw_data_root != NORTH_AMERICA_SHARED_ROOT:
+        raise ValueError("Production server data catalog has an unexpected data root.")
+    raw_state_root = str(catalog.get("state_root", "")).replace("\\", "/").rstrip("/")
+    if raw_state_root != "/home/csda/AI_Routing/state/production":
+        raise ValueError("Production server data catalog has an unexpected state root.")
+    active = catalog.get("active")
+    if not isinstance(active, Mapping):
+        raise ValueError("Production server data catalog has no active artifacts.")
+    raw_value = str(active.get(active_key, "")).replace("\\", "/")
+    value = raw_value.strip("/")
+    relative = PurePosixPath(value)
+    if raw_value.startswith("/") or not value or ".." in relative.parts:
+        raise ValueError("Production server data catalog contains an unsafe active path.")
+    return (PurePosixPath("data") / "north_america" / relative).as_posix()
+
+
+def _load_production_remote_data_catalog(remote: Any) -> tuple[dict[str, Any], str]:
+    """Read and validate the fixed server-data catalog used by production units."""
+
+    payload = remote.read_bytes(
+        PRODUCTION_REMOTE_DATA_CATALOG, maximum_bytes=_REMOTE_DATA_CATALOG_MAX_BYTES
+    )
+    checksum = hashlib.sha256(payload).hexdigest()
+    try:
+        catalog = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Production server data catalog is not valid UTF-8 JSON.") from exc
+    if not isinstance(catalog, dict):
+        raise ValueError("Production server data catalog must be a JSON object.")
+    # Resolve all roles used by this uploader now, before preparing any payload.
+    for role in ("service_geocoded", "profile_production", "zcta_geometry"):
+        _production_server_catalog_relative_path(catalog, role)
+    return catalog, checksum
+
+
 def _shared_north_america_path(relative: str) -> str:
     path = PurePosixPath(relative)
     expected_prefix = ("data", "north_america")
@@ -2395,7 +2903,103 @@ def _validate_common_development_config(payload: dict[str, Any]) -> dict[str, An
     return payload
 
 
-def _rewrite_north_america_config_paths(payload: dict[str, Any]) -> dict[str, Any]:
+def _validate_http_origin(value: Any, *, name: str) -> None:
+    """Require a credential-free HTTP(S) origin without exposing its value."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} is required.")
+    parsed = urlparse(value.strip())
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise ValueError(f"{name} must be a credential-free HTTP(S) origin.")
+    try:
+        parsed.port
+    except ValueError as exc:
+        raise ValueError(f"{name} contains an invalid port.") from exc
+
+
+def _validate_common_production_config(payload: dict[str, Any]) -> dict[str, Any]:
+    """Validate the production Common VRP contract before any remote session.
+
+    Keep this aligned with the runtime loader: production secure-config upload
+    must never install a configuration the production API would reject at
+    startup.  The runtime loader validates the routing API URL and its port
+    relationship in addition to the explicit environment/database checks.
+    """
+
+    _reject_placeholder_values(payload, source_name="common_vrp.prod.json")
+    if payload.get("environment") != "production":
+        raise ValueError("common_vrp.prod.json environment must be production.")
+    api = _required_mapping(payload.get("api"), name="common_vrp.prod.json api")
+    if api.get("port") != 8065:
+        raise ValueError("common_vrp.prod.json API port must be 8065.")
+    database = _required_mapping(
+        payload.get("database"), name="common_vrp.prod.json database"
+    )
+    missing_database_keys = [
+        key for key in ("host", "port", "user", "password")
+        if not str(database.get(key, "")).strip()
+    ]
+    if missing_database_keys:
+        raise ValueError(
+            "common_vrp.prod.json missing required database settings: "
+            + ", ".join(missing_database_keys)
+        )
+    if database.get("dbname") != "vrp_db":
+        raise ValueError("common_vrp.prod.json database must be vrp_db.")
+    password = database.get("password")
+    if not isinstance(password, str) or not password.strip() or _PLACEHOLDER_VALUE.search(password):
+        raise ValueError(
+            "common_vrp.prod.json database password is required and cannot be a placeholder."
+        )
+    try:
+        database_port = int(database["port"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("common_vrp.prod.json database.port must be an integer.") from exc
+    if not 1 <= database_port <= 65535:
+        raise ValueError("common_vrp.prod.json database.port must be between 1 and 65535.")
+    _validate_http_origin(
+        payload.get("routing_api_url"), name="common_vrp.prod.json routing_api_url"
+    )
+    routing_url = urlparse(str(payload["routing_api_url"]).strip())
+    if (routing_url.port or (443 if routing_url.scheme == "https" else 80)) != 8065:
+        raise ValueError(
+            "common_vrp.prod.json routing_api_url port must match API port 8065."
+        )
+    storage = _required_mapping(payload.get("storage"), name="common_vrp.prod.json storage")
+    storage["job_archive_root"] = PRODUCTION_COMMON_JOB_ARCHIVE_ROOT
+    return payload
+
+
+def _validate_production_routing_config(payload: dict[str, Any]) -> None:
+    """Verify the routing configuration shape without changing routing policy."""
+
+    routing = _required_mapping(payload.get("routing"), name="config.json routing")
+    for key in ("distance_backend", "assignment_distance_backend", "osrm_profile"):
+        if not isinstance(routing.get(key), str) or not routing[key].strip():
+            raise ValueError(f"config.json routing.{key} is required.")
+    _validate_http_origin(routing.get("osrm_url"), name="config.json routing.osrm_url")
+    city_urls = routing.get("city_osrm_urls")
+    if not isinstance(city_urls, Mapping):
+        raise ValueError("config.json routing.city_osrm_urls must be an object.")
+    for city, city_url in city_urls.items():
+        if not isinstance(city, str) or not city.strip():
+            raise ValueError("config.json routing.city_osrm_urls has an invalid city key.")
+        _validate_http_origin(
+            city_url, name="config.json routing.city_osrm_urls entry"
+        )
+
+
+def _rewrite_north_america_config_paths(
+    payload: dict[str, Any], *, production_server_catalog: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     """Translate the catalog-authoritative North America files for the server."""
 
     _reject_placeholder_values(payload, source_name="config.json")
@@ -2403,9 +3007,31 @@ def _rewrite_north_america_config_paths(payload: dict[str, Any]) -> dict[str, An
     service_local = _catalog_relative_path(catalog, "service_geocoded")
     profile_local = _catalog_relative_path(catalog, "profile_production")
     zcta_local = _catalog_relative_path(catalog, "zcta_geometry")
+    server_paths = {
+        "service_file": service_local,
+        "profile_file": profile_local,
+        "zcta_zip_file": zcta_local,
+    }
+    if production_server_catalog is not None:
+        remote_paths = {
+            "service_file": _production_server_catalog_relative_path(
+                production_server_catalog, "service_geocoded"
+            ),
+            "profile_file": _production_server_catalog_relative_path(
+                production_server_catalog, "profile_production"
+            ),
+            "zcta_zip_file": _production_server_catalog_relative_path(
+                production_server_catalog, "zcta_geometry"
+            ),
+        }
+        if remote_paths != server_paths:
+            raise ValueError(
+                "Local North America data catalog does not match the approved production server catalog."
+            )
+        server_paths = remote_paths
     replacements = {
-        "service_file": (service_local, _shared_north_america_path(service_local)),
-        "profile_file": (profile_local, _shared_north_america_path(profile_local)),
+        "service_file": (service_local, _shared_north_america_path(server_paths["service_file"])),
+        "profile_file": (profile_local, _shared_north_america_path(server_paths["profile_file"])),
     }
     for section_name in ("area_map_usa", "area_map"):
         section = _required_mapping(payload.get(section_name), name=f"config.json {section_name}")
@@ -2420,7 +3046,7 @@ def _rewrite_north_america_config_paths(payload: dict[str, Any]) -> dict[str, An
         raise ValueError(
             "config.json area_map_usa.zcta_zip_file must match config/data_catalog.json."
         )
-    usa["zcta_zip_file"] = _shared_north_america_path(zcta_local)
+    usa["zcta_zip_file"] = _shared_north_america_path(server_paths["zcta_zip_file"])
     return payload
 
 
@@ -2428,19 +3054,34 @@ def _json_payload_bytes(payload: Mapping[str, Any]) -> bytes:
     return (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
-def _prepare_development_secure_config_payloads() -> list[dict[str, Any]]:
-    """Build the two server-ready payloads without writing secret temp files."""
+def _prepare_secure_config_payloads(
+    environment: str,
+    *,
+    production_server_catalog: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Build one environment's fixed server-ready config pair in memory only."""
 
-    common_source = CONFIG_ROOT / "common_vrp.dev.json"
+    normalized_environment = _require_environment(environment)
+    common_filename = _SECURE_CONFIG_COMMON_SOURCES[normalized_environment]
+    common_source = CONFIG_ROOT / common_filename
     general_source = CONFIG_ROOT / "config.json"
-    common = _validate_common_development_config(_read_json(common_source))
-    general = _rewrite_north_america_config_paths(_read_json(general_source))
+    common_payload = _read_json(common_source)
+    if normalized_environment == "development":
+        common = _validate_common_development_config(common_payload)
+    else:
+        common = _validate_common_production_config(common_payload)
+    general_payload = _read_json(general_source)
+    if normalized_environment == "production":
+        _validate_production_routing_config(general_payload)
+    general = _rewrite_north_america_config_paths(
+        general_payload, production_server_catalog=production_server_catalog
+    )
     prepared = {
-        "common_vrp.dev.json": _json_payload_bytes(common),
+        common_filename: _json_payload_bytes(common),
         "config.json": _json_payload_bytes(general),
     }
     result: list[dict[str, Any]] = []
-    for filename, target in DEVELOPMENT_SECURE_CONFIG_TARGETS:
+    for filename, target in _SECURE_CONFIG_TARGETS[normalized_environment]:
         payload = prepared[filename]
         result.append(
             {
@@ -2452,6 +3093,18 @@ def _prepare_development_secure_config_payloads() -> list[dict[str, Any]]:
             }
         )
     return result
+
+
+def _prepare_development_secure_config_payloads() -> list[dict[str, Any]]:
+    """Backward-compatible development-only payload preparation helper."""
+
+    return _prepare_secure_config_payloads("development")
+
+
+def _prepare_production_secure_config_payloads() -> list[dict[str, Any]]:
+    """Build the fixed production config pair without writing secret temp files."""
+
+    return _prepare_secure_config_payloads("production")
 
 
 def _secure_config_rows(prepared: Iterable[Mapping[str, Any]], remote: Any | None) -> list[dict[str, Any]]:
@@ -2489,8 +3142,11 @@ def _secure_config_rows(prepared: Iterable[Mapping[str, Any]], remote: Any | Non
     return rows
 
 
-def _secure_config_fingerprint(rows: Iterable[Mapping[str, Any]]) -> str:
-    public_state = [
+def _secure_config_fingerprint(
+    rows: Iterable[Mapping[str, Any]], *, production_catalog_sha256: str | None = None
+) -> str:
+    public_state: dict[str, Any] = {
+        "files": [
         {
             "filename": str(row["filename"]),
             "target": str(row["target"]),
@@ -2502,16 +3158,28 @@ def _secure_config_fingerprint(rows: Iterable[Mapping[str, Any]]) -> str:
             "status": str(row["status"]),
         }
         for row in rows
-    ]
+        ]
+    }
+    if production_catalog_sha256 is not None:
+        if not re.fullmatch(r"[0-9a-f]{64}", production_catalog_sha256):
+            raise ValueError("Production server data catalog checksum is invalid.")
+        public_state["production_catalog_sha256"] = production_catalog_sha256
     return hashlib.sha256(
         json.dumps(public_state, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
 
 
 def _secure_config_preview_payload(
-    rows: list[dict[str, Any]], *, upload_allowed: bool
+    rows: list[dict[str, Any]],
+    *,
+    environment: str,
+    upload_allowed: bool,
+    production_catalog_sha256: str | None = None,
 ) -> dict[str, Any]:
-    fingerprint = _secure_config_fingerprint(rows)
+    normalized_environment = _require_environment(environment)
+    fingerprint = _secure_config_fingerprint(
+        rows, production_catalog_sha256=production_catalog_sha256
+    )
     public_rows = [
         {key: value for key, value in row.items() if key != "_remote_mode"}
         for row in rows
@@ -2524,16 +3192,54 @@ def _secure_config_preview_payload(
         ),
         "upload_allowed": upload_allowed,
         "mutation_required": mutation_required,
-        "target_upload_path": "/home/csda/AI_Routing/development/config",
+        "target_upload_path": _SECURE_CONFIG_TARGET_DIRECTORIES[normalized_environment],
         "files": public_rows,
         "fingerprint": fingerprint,
     }
 
 
-def _secure_config_upload_allowed(profile: Mapping[str, Any]) -> bool:
+def _secure_config_upload_allowed(profile: Mapping[str, Any], *, environment: str) -> bool:
+    normalized_environment = _require_environment(environment)
     return (
         profile.get("allow_upload") is True
-        and profile.get("allow_development_secure_config_upload") is True
+        and profile.get(
+            f"allow_{normalized_environment}_secure_config_upload"
+        )
+        is True
+    )
+
+
+def _preview_secure_config_upload(
+    *, environment: str, config_path: str
+) -> dict[str, Any]:
+    """Preview redacted metadata for one fixed environment config pair."""
+
+    normalized_environment = _require_environment(environment)
+    profile = _load_remote_profile(config_path)
+    prepared = _prepare_secure_config_payloads(normalized_environment)
+    allowed = _secure_config_upload_allowed(profile, environment=normalized_environment)
+    if not allowed:
+        return _secure_config_preview_payload(
+            _secure_config_rows(prepared, None),
+            environment=normalized_environment,
+            upload_allowed=False,
+        )
+    with _remote_session_factory(profile) as remote:
+        production_catalog_sha256: str | None = None
+        if normalized_environment == "production":
+            production_catalog, production_catalog_sha256 = (
+                _load_production_remote_data_catalog(remote)
+            )
+            prepared = _prepare_secure_config_payloads(
+                normalized_environment,
+                production_server_catalog=production_catalog,
+            )
+        rows = _secure_config_rows(prepared, remote)
+    return _secure_config_preview_payload(
+        rows,
+        environment=normalized_environment,
+        upload_allowed=True,
+        production_catalog_sha256=production_catalog_sha256,
     )
 
 
@@ -2543,37 +3249,40 @@ def preview_development_secure_config_upload(
     """Preview only redacted metadata for the fixed development config pair."""
 
     _require_development_secure_config_environment(environment)
-    profile = _load_remote_profile(config_path)
-    prepared = _prepare_development_secure_config_payloads()
-    allowed = _secure_config_upload_allowed(profile)
-    if not allowed:
-        return _secure_config_preview_payload(
-            _secure_config_rows(prepared, None), upload_allowed=False
-        )
-    with _remote_session_factory(profile) as remote:
-        rows = _secure_config_rows(prepared, remote)
-    return _secure_config_preview_payload(rows, upload_allowed=True)
+    return _preview_secure_config_upload(environment="development", config_path=config_path)
+
+
+def preview_production_secure_config_upload(
+    *, environment: str, config_path: str
+) -> dict[str, Any]:
+    """Preview only redacted metadata for the fixed production config pair."""
+
+    _require_production_secure_config_environment(environment)
+    return _preview_secure_config_upload(environment="production", config_path=config_path)
 
 
 def _secure_config_history(
     *,
+    environment: str,
     deployment_id: str,
     profile: Mapping[str, Any],
     fingerprint: str,
     status: str,
     changes: Iterable[Mapping[str, Any]],
     compensated: bool | None = None,
+    production_catalog_sha256: str | None = None,
 ) -> dict[str, Any]:
+    normalized_environment = _require_environment(environment)
     entry: dict[str, Any] = {
         "id": deployment_id,
         "release_id": deployment_id,
         "version": f"secure-config-{fingerprint[:12]}",
-        "environment": "development",
-        "kind": "development-secure-config",
+        "environment": normalized_environment,
+        "kind": f"{normalized_environment}-secure-config",
         "created_at": _now(),
         "status": status,
         "sha256": fingerprint,
-        "target_id": _target_id(profile, "development"),
+        "target_id": _target_id(profile, normalized_environment),
         "service_eligible": False,
         "restart_performed": False,
         "restart_required": True,
@@ -2582,52 +3291,71 @@ def _secure_config_history(
     }
     if compensated is not None:
         entry["compensated"] = compensated
+    if production_catalog_sha256 is not None:
+        if not re.fullmatch(r"[0-9a-f]{64}", production_catalog_sha256):
+            raise ValueError("Production server data catalog checksum is invalid.")
+        entry["production_catalog_sha256"] = production_catalog_sha256
     return entry
 
 
-def upload_development_secure_config(
+def _upload_secure_config(
     *,
     environment: str,
     config_path: str,
     expected_fingerprint: str,
     dry_run: bool = True,
 ) -> dict[str, Any]:
-    """Upload the fixed development configs with checksum/mode compensation.
+    """Upload one fixed config pair with checksum/mode compensation.
 
-    No user supplied paths, files, or confirmations are accepted.  Production
-    has no target in this API and is rejected before any local or remote action.
+    No user supplied paths, files, or confirmations are accepted.  Environment
+    wrappers below are the only public entrypoints and reject cross-environment
+    use before this function can open a remote session.
     """
 
-    _require_development_secure_config_environment(environment)
+    normalized_environment = _require_environment(environment)
     profile = _load_remote_profile(config_path)
-    prepared = _prepare_development_secure_config_payloads()
     expected_fingerprint = str(expected_fingerprint).strip().lower()
     if not re.fullmatch(r"[0-9a-f]{64}", expected_fingerprint):
         raise ValueError("A secure-config preview fingerprint is required.")
-    if not _secure_config_upload_allowed(profile):
-        raise PermissionError("Development secure-config upload is disabled in the local deployment profile.")
+    if not _secure_config_upload_allowed(profile, environment=normalized_environment):
+        raise PermissionError(
+            f"{normalized_environment.capitalize()} secure-config upload is disabled "
+            "in the local deployment profile."
+        )
     if dry_run:
         return {
             "status": "dry_run",
-            "environment": "development",
-            "kind": "development-secure-config",
+            "environment": normalized_environment,
+            "kind": f"{normalized_environment}-secure-config",
             "restart_performed": False,
             "restart_required": True,
         }
 
-    deployment_id = f"development-secure-config-{uuid.uuid4().hex[:12]}"
+    deployment_id = f"{normalized_environment}-secure-config-{uuid.uuid4().hex[:12]}"
     attempted: list[dict[str, Any]] = []
     changes: list[dict[str, Any]] = []
     compensated = False
     fingerprint_for_history = expected_fingerprint
+    production_catalog_sha256: str | None = None
     try:
         with _remote_session_factory(profile) as remote:
             with remote.deployment_lock(str(profile["remote_root"]), deployment_id):
                 # Re-read sources inside the lock so both local edits and remote
                 # drift invalidate the preview before any target is touched.
-                prepared = _prepare_development_secure_config_payloads()
+                if normalized_environment == "production":
+                    production_catalog, production_catalog_sha256 = (
+                        _load_production_remote_data_catalog(remote)
+                    )
+                    prepared = _prepare_secure_config_payloads(
+                        normalized_environment,
+                        production_server_catalog=production_catalog,
+                    )
+                else:
+                    prepared = _prepare_secure_config_payloads(normalized_environment)
                 rows = _secure_config_rows(prepared, remote)
-                current_fingerprint = _secure_config_fingerprint(rows)
+                current_fingerprint = _secure_config_fingerprint(
+                    rows, production_catalog_sha256=production_catalog_sha256
+                )
                 fingerprint_for_history = current_fingerprint
                 if current_fingerprint != expected_fingerprint:
                     raise RuntimeError("Secure-config preview is stale; refresh and review it again.")
@@ -2646,6 +3374,14 @@ def upload_development_secure_config(
                     for row in rows:
                         if not row["changed"]:
                             continue
+                        if (
+                            normalized_environment == "production"
+                            and remote.sha256(PRODUCTION_REMOTE_DATA_CATALOG)
+                            != production_catalog_sha256
+                        ):
+                            raise RuntimeError(
+                                "Production server data catalog changed during secure-config upload."
+                            )
                         target = str(row["target"])
                         item = prepared_by_target[target]
                         existed = remote.exists(target)
@@ -2684,6 +3420,14 @@ def upload_development_secure_config(
                                 raise RuntimeError("Secure-config backup verification failed.")
                             change["backup_sha256"] = previous_checksum
                         changes.append(change)
+                    if (
+                        normalized_environment == "production"
+                        and remote.sha256(PRODUCTION_REMOTE_DATA_CATALOG)
+                        != production_catalog_sha256
+                    ):
+                        raise RuntimeError(
+                            "Production server data catalog changed during secure-config upload."
+                        )
                 except Exception as upload_error:
                     compensation_errors: list[str] = []
                     for change in reversed(attempted):
@@ -2726,34 +3470,74 @@ def upload_development_secure_config(
         with contextlib.suppress(Exception):
             _append_history(
                 _secure_config_history(
+                    environment=normalized_environment,
                     deployment_id=deployment_id,
                     profile=profile,
                     fingerprint=fingerprint_for_history,
                     status="upload_failed",
                     changes=attempted,
                     compensated=compensated,
+                    production_catalog_sha256=production_catalog_sha256,
                 )
             )
         raise
 
     _append_history(
         _secure_config_history(
+            environment=normalized_environment,
             deployment_id=deployment_id,
             profile=profile,
             fingerprint=fingerprint_for_history,
             status="uploaded",
             changes=changes,
+            production_catalog_sha256=production_catalog_sha256,
         )
     )
     return {
         "status": "uploaded",
         "release_id": deployment_id,
-        "environment": "development",
-        "kind": "development-secure-config",
+        "environment": normalized_environment,
+        "kind": f"{normalized_environment}-secure-config",
         "fingerprint": fingerprint_for_history,
         "restart_performed": False,
         "restart_required": True,
     }
+
+
+def upload_development_secure_config(
+    *,
+    environment: str,
+    config_path: str,
+    expected_fingerprint: str,
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    """Upload the fixed development config pair with compensation safeguards."""
+
+    _require_development_secure_config_environment(environment)
+    return _upload_secure_config(
+        environment="development",
+        config_path=config_path,
+        expected_fingerprint=expected_fingerprint,
+        dry_run=dry_run,
+    )
+
+
+def upload_production_secure_config(
+    *,
+    environment: str,
+    config_path: str,
+    expected_fingerprint: str,
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    """Upload the fixed production config pair with compensation safeguards."""
+
+    _require_production_secure_config_environment(environment)
+    return _upload_secure_config(
+        environment="production",
+        config_path=config_path,
+        expected_fingerprint=expected_fingerprint,
+        dry_run=dry_run,
+    )
 
 
 def _load_history() -> list[dict[str, Any]]:
@@ -2840,6 +3624,9 @@ def _managed_data_public_spec(raw: Any, *, scope: str) -> dict[str, Any]:
         raise RuntimeError("Managed-data registry file size limit is invalid.")
     label = str(value.get("label") or dataset_id).strip()[:160]
     description = str(value.get("description") or "").strip()[:500]
+    data_domain = str(value.get("data_domain") or "").strip()[:80]
+    if data_domain and any(ord(char) < 32 for char in data_domain):
+        raise RuntimeError("Managed-data registry data domain is invalid.")
     enabled = value.get("enabled") is True
     raw_targets = value.get("allowed_targets", ())
     if isinstance(raw_targets, str):
@@ -2851,21 +3638,64 @@ def _managed_data_public_spec(raw: Any, *, scope: str) -> dict[str, Any]:
             if str(item) in {"file_upload", "preview", "db_preview", "db_apply"}
         }
     )
+    lifecycle_stage = str(value.get("lifecycle_stage") or "source_upload").strip()
+    if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", lifecycle_stage):
+        raise RuntimeError("Managed-data registry lifecycle stage is invalid.")
+    candidate_workflow_supported = (
+        dataset_id == _MANAGED_DATA_CANDIDATE_DATASET
+        and scope == _MANAGED_DATA_CANDIDATE_SCOPE
+        and lifecycle_stage == "candidate_plan"
+        and enabled
+        and value.get("promotion_required") is True
+        and value.get("direct_db_upsert") is False
+    )
+    fixed_region_bundle_supported = (
+        dataset_id == _FIXED_REGION_PLAN_BUNDLE_DATASET
+        and scope == _FIXED_REGION_PLAN_BUNDLE_SCOPE
+        and lifecycle_stage == "candidate_plan"
+        and enabled
+        and value.get("promotion_required") is True
+        and value.get("direct_db_upsert") is False
+        and sorted(set(extensions)) == [".zip"]
+    )
+    if candidate_workflow_supported or fixed_region_bundle_supported:
+        # A territory workbook can only enter the reviewed-plan lifecycle.
+        # Never expose a caller-selectable database target for it.
+        allowed_targets = [
+            item for item in allowed_targets if item in {"file_upload", "preview"}
+        ]
     return {
         "dataset_id": dataset_id,
         "label": label,
         "description": description,
+        "data_domain": data_domain,
+        "primary_section": value.get("primary_section") is True,
+        "ui_hidden": value.get("ui_hidden") is True,
         "enabled": enabled,
         "contains_pii": value.get("contains_pii") is True,
         "allowed_scopes": scopes,
         "allowed_file_types": sorted(set(extensions)),
         "max_bytes": maximum,
         "allowed_targets": allowed_targets,
+        "lifecycle_stage": lifecycle_stage,
+        "promotion_required": (
+            candidate_workflow_supported or fixed_region_bundle_supported
+        ),
+        "candidate_workflow_supported": candidate_workflow_supported,
+        "fixed_region_bundle_supported": fixed_region_bundle_supported,
         "db_sync_supported": (
-            dataset_id == _MANAGED_DATA_DB_DATASET
-            and enabled
-            and isinstance(value.get("db_profile"), Mapping)
-            and value["db_profile"].get("table") == _MANAGED_DATA_DB_TABLE
+            (
+                dataset_id == _MANAGED_DATA_DB_DATASET
+                and enabled
+                and isinstance(value.get("db_profile"), Mapping)
+                and value["db_profile"].get("table") == _MANAGED_DATA_DB_TABLE
+            )
+            or (
+                dataset_id == _TECHNICIAN_PROFILE_DATASET
+                and scope == _TECHNICIAN_PROFILE_SCOPE
+                and enabled
+                and lifecycle_stage == "db_candidate"
+            )
         ),
     }
 
@@ -2926,6 +3756,12 @@ def _managed_data_validation(
         raise ValueError("Managed-data upload requires a non-empty file.")
     if len(file_bytes) > int(spec["max_bytes"]):
         raise ValueError("Managed-data file exceeds the registered size limit.")
+    digest = hashlib.sha256(file_bytes).hexdigest()
+    cache_key = (scope, str(dataset_id), digest)
+    with _MANAGED_DATA_JOBS_LOCK:
+        cached = _MANAGED_DATA_VALIDATION_CACHE.get(cache_key)
+    if cached is not None:
+        return spec, payload_name, dict(cached)
     registry = _managed_data_registry_module()
     validator = getattr(registry, "validate_managed_data_file", None)
     if not callable(validator):
@@ -2967,7 +3803,12 @@ def _managed_data_validation(
     )
     if len(rendered.encode("utf-8")) > _MASTER_ADMIN_MAX_JSON_BYTES:
         raise RuntimeError("Managed-data preview metadata exceeds the safe response limit.")
-    return spec, payload_name, {"summary": safe_summary, "sample": safe_sample}
+    result = {"summary": safe_summary, "sample": safe_sample}
+    with _MANAGED_DATA_JOBS_LOCK:
+        if len(_MANAGED_DATA_VALIDATION_CACHE) >= 32:
+            _MANAGED_DATA_VALIDATION_CACHE.pop(next(iter(_MANAGED_DATA_VALIDATION_CACHE)))
+        _MANAGED_DATA_VALIDATION_CACHE[cache_key] = dict(result)
+    return spec, payload_name, result
 
 
 def _managed_data_version_root(scope: str, dataset_id: str, version: str) -> Path:
@@ -3026,6 +3867,20 @@ def _load_managed_data_version(
         or payload_name not in {f"payload{item}" for item in spec["allowed_file_types"]}
     ):
         raise RuntimeError("Managed-data version metadata is invalid.")
+    if metadata.get("lifecycle_stage") != spec["lifecycle_stage"]:
+        raise RuntimeError("Managed-data version lifecycle metadata is invalid.")
+    if metadata.get("promotion_required") is not spec["promotion_required"]:
+        raise RuntimeError("Managed-data version promotion metadata is invalid.")
+    workflow = metadata.get("candidate_workflow")
+    if spec["candidate_workflow_supported"]:
+        if not isinstance(workflow, Mapping):
+            raise RuntimeError("Managed-data candidate workflow metadata is missing.")
+        if workflow.get("contract_version") != _REGION_PLAN_CONTRACT_VERSION:
+            raise RuntimeError("Managed-data candidate workflow contract is invalid.")
+        if workflow.get("source_sha256") != version:
+            raise RuntimeError("Managed-data candidate workflow source binding is invalid.")
+    elif workflow is not None:
+        raise RuntimeError("Managed-data version has unexpected candidate workflow metadata.")
     payload_path = _within(root / payload_name, root)
     if not payload_path.is_file():
         raise RuntimeError("Managed-data version payload is missing.")
@@ -3041,14 +3896,22 @@ def _load_managed_data_version(
 
 
 def _managed_data_version_public(metadata: Mapping[str, Any], spec: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    result = {
         "version": str(metadata["version"]),
         "sha256": str(metadata["version"]),
         "size_bytes": int(metadata["size_bytes"]),
         "file_type": Path(str(metadata["payload_name"])).suffix.lower(),
         "created_at": str(metadata["created_at"]),
         "db_sync_supported": spec["db_sync_supported"] is True,
+        "lifecycle_stage": spec["lifecycle_stage"],
+        "promotion_required": spec["promotion_required"] is True,
     }
+    workflow = metadata.get("candidate_workflow")
+    if isinstance(workflow, Mapping):
+        result["candidate_workflow"] = _safe_region_plan_candidate_result(
+            workflow, version=str(metadata["version"])
+        )
+    return result
 
 
 def list_managed_data_sets(*, scope: str) -> dict[str, Any]:
@@ -3077,6 +3940,10 @@ def preview_managed_data_upload(
         "version": version,
         "summary": validated["summary"],
         "sample": validated["sample"],
+        "lifecycle_stage": spec["lifecycle_stage"],
+        "promotion_required": spec["promotion_required"] is True,
+        "candidate_workflow_supported": spec["candidate_workflow_supported"] is True,
+        "fixed_region_bundle_supported": spec.get("fixed_region_bundle_supported") is True,
         "required_confirmation": True,
     }
 
@@ -3089,6 +3956,7 @@ def _finalize_managed_data_local_version(
     payload_name: str,
     payload: bytes,
     created_at: str,
+    candidate_workflow: Mapping[str, Any] | None = None,
 ) -> None:
     final_root = _managed_data_version_root(scope, str(spec["dataset_id"]), version)
     if final_root.exists():
@@ -3114,7 +3982,17 @@ def _finalize_managed_data_local_version(
             "payload_name": payload_name,
             "size_bytes": len(payload),
             "created_at": created_at,
+            "lifecycle_stage": spec["lifecycle_stage"],
+            "promotion_required": spec["promotion_required"] is True,
         }
+        if spec["candidate_workflow_supported"]:
+            if not isinstance(candidate_workflow, Mapping):
+                raise RuntimeError("Managed-data candidate workflow did not complete.")
+            metadata["candidate_workflow"] = _safe_region_plan_candidate_result(
+                candidate_workflow, version=version
+            )
+        elif candidate_workflow is not None:
+            raise RuntimeError("Unexpected candidate workflow result for managed data.")
         _write_private_bytes(
             staging / _MANAGED_DATA_METADATA_NAME, _json_payload_bytes(metadata)
         )
@@ -3157,8 +4035,19 @@ def upload_managed_data_file(
     remote_target = (remote_root / payload_name).as_posix()
     created_at = _now()
     status = "uploaded"
+    candidate_workflow: dict[str, Any] | None = None
+    fixed_region_bundle_capability_verified = False
     with _MANAGED_DATA_LOCK:
         with _remote_session_factory(profile) as remote:
+            if spec.get("fixed_region_bundle_supported") is True:
+                # Do this immutable pinned-release inspection before the first
+                # remote write.  A missing/old Admin Tools release must never
+                # leave an otherwise unusable bundle on the server.
+                _verify_fixed_region_plan_bundle_admin_release(
+                    remote,
+                    _master_admin_context(profile, _FIXED_REGION_PLAN_BUNDLE_SCOPE),
+                )
+                fixed_region_bundle_capability_verified = True
             with remote.deployment_lock(str(profile["remote_root"]), release_id):
                 if remote.exists(remote_target):
                     remote_checksum = remote.sha256(remote_target)
@@ -3175,6 +4064,18 @@ def upload_managed_data_file(
                     or remote.mode(remote_target) != _SECURE_CONFIG_MODE
                 ):
                     raise RuntimeError("Managed-data remote checksum or mode verification failed.")
+                if spec["candidate_workflow_supported"]:
+                    # The source remains an immutable managed-data version;
+                    # candidate construction is delegated to the single
+                    # packaged Admin Tools bridge.  It has no production mode,
+                    # table argument, arbitrary destination, or direct DB
+                    # apply path.
+                    candidate_workflow = _run_region_plan_candidate_command(
+                        remote,
+                        profile=profile,
+                        source_path=remote_target,
+                        version=version,
+                    )
         _finalize_managed_data_local_version(
             scope=scope,
             spec=spec,
@@ -3182,6 +4083,7 @@ def upload_managed_data_file(
             payload_name=payload_name,
             payload=file_bytes,
             created_at=created_at,
+            candidate_workflow=candidate_workflow,
         )
     receipt = {
         "id": release_id,
@@ -3198,10 +4100,16 @@ def upload_managed_data_file(
         "target_id": _managed_data_target_id(profile, scope),
         "remote_verified": True,
         "mode": _SECURE_CONFIG_MODE_TEXT,
+        "lifecycle_stage": spec["lifecycle_stage"],
+        "promotion_required": spec["promotion_required"] is True,
         "operator": os.environ.get("USERNAME") or os.environ.get("USER") or "local-console",
     }
+    if fixed_region_bundle_capability_verified:
+        receipt["admin_tools_capability_verified"] = True
+    if candidate_workflow is not None:
+        receipt["candidate_workflow"] = candidate_workflow
     _append_history(receipt)
-    return {
+    response = {
         "status": status,
         "scope": scope,
         "dataset_id": spec["dataset_id"],
@@ -3209,7 +4117,54 @@ def upload_managed_data_file(
         "sha256": version,
         "size_bytes": len(file_bytes),
         "remote_verified": True,
+        "lifecycle_stage": spec["lifecycle_stage"],
+        "promotion_required": spec["promotion_required"] is True,
     }
+    if fixed_region_bundle_capability_verified:
+        response["admin_tools_capability_verified"] = True
+    if candidate_workflow is not None:
+        response["candidate_workflow"] = candidate_workflow
+    return response
+
+
+def start_managed_data_upload_job(*, scope: str, dataset_id: str, file_name: str,
+                                  file_bytes: bytes, expected_sha256: str,
+                                  config_path: str) -> dict[str, Any]:
+    """Queue remote upload/candidate generation and return without blocking the UI."""
+    scope = _require_managed_data_scope(scope)
+    digest = hashlib.sha256(file_bytes).hexdigest()
+    if str(expected_sha256).strip().lower() != digest:
+        raise ValueError("Managed-data upload checksum is stale or invalid.")
+    job_id = str(uuid.uuid4())
+    with _MANAGED_DATA_JOBS_LOCK:
+        _MANAGED_DATA_JOBS[job_id] = {"job_id": job_id, "status": "queued", "sha256": digest, "created_at": _now()}
+
+    def run() -> None:
+        with _MANAGED_DATA_JOBS_LOCK:
+            _MANAGED_DATA_JOBS[job_id]["status"] = "running"
+        try:
+            result = upload_managed_data_file(scope=scope, dataset_id=dataset_id, file_name=file_name,
+                                              file_bytes=file_bytes, expected_sha256=digest,
+                                              confirm=True, config_path=config_path)
+            with _MANAGED_DATA_JOBS_LOCK:
+                _MANAGED_DATA_JOBS[job_id].update({"status": "completed", "result": result, "completed_at": _now()})
+        except Exception as exc:
+            with _MANAGED_DATA_JOBS_LOCK:
+                _MANAGED_DATA_JOBS[job_id].update({"status": "failed", "error": _safe_backend_error(exc), "completed_at": _now()})
+    _MANAGED_DATA_EXECUTOR.submit(run)
+    return {"status": "queued", "job_id": job_id, "sha256": digest}
+
+
+def get_managed_data_upload_job(*, job_id: str) -> dict[str, Any]:
+    try:
+        uuid.UUID(str(job_id))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError("job_id is invalid.") from exc
+    with _MANAGED_DATA_JOBS_LOCK:
+        job = _MANAGED_DATA_JOBS.get(str(job_id))
+        if job is None:
+            raise KeyError("Managed-data upload job was not found.")
+        return dict(job)
 
 
 def list_managed_data_versions(*, scope: str, dataset_id: str) -> dict[str, Any]:
@@ -3340,12 +4295,494 @@ def _managed_data_heavy_db_payload(
     return canonical, _redact_master_payload(accounting)
 
 
+def _technician_profile_source_path(profile: Mapping[str, Any], version: str) -> str:
+    """Return the one immutable development workbook path for a version."""
+
+    normalized_version = str(version).strip().lower()
+    if not _MANAGED_DATA_VERSION.fullmatch(normalized_version):
+        raise ValueError("version must be a SHA-256 digest.")
+    return (
+        _managed_data_remote_root(
+            profile,
+            _TECHNICIAN_PROFILE_SCOPE,
+            _TECHNICIAN_PROFILE_DATASET,
+            normalized_version,
+        )
+        / "payload.xlsx"
+    ).as_posix()
+
+
+def _technician_profile_admin_command(
+    context: Mapping[str, str], command: str, arguments: Iterable[str] = ()
+) -> str:
+    """Construct one fixed composite technician-profile Admin Tools command."""
+
+    if context.get("environment") != _TECHNICIAN_PROFILE_SCOPE:
+        raise PermissionError("Technician-profile operations are development-only.")
+    if command not in _TECHNICIAN_PROFILE_ADMIN_COMMANDS:
+        raise ValueError("Technician-profile operation is not allowlisted.")
+    argv = [
+        context["python_path"],
+        "-B",
+        "-m",
+        _TECHNICIAN_PROFILE_ADMIN_MODULE,
+        "--json",
+        command,
+        "--config",
+        context["config_path"],
+        *[str(item) for item in arguments],
+    ]
+    return f"cd -- {shlex.quote(context['release_root'])} && exec " + " ".join(
+        shlex.quote(item) for item in argv
+    )
+
+
+def _technician_profile_preview_command(
+    context: Mapping[str, str], *, source_path: str, version: str
+) -> str:
+    normalized_version = str(version).strip().lower()
+    source = PurePosixPath(str(source_path))
+    if (
+        not _MANAGED_DATA_VERSION.fullmatch(normalized_version)
+        or not source.is_absolute()
+        or ".." in source.parts
+    ):
+        raise ValueError("Technician-profile source binding is invalid.")
+    # ``execute_technician_profile_json`` independently derives the source
+    # path from its connection profile.  Retain a local path shape check here
+    # so direct helper callers cannot construct an unrelated workbook command.
+    expected_suffix = (
+        "state",
+        _TECHNICIAN_PROFILE_SCOPE,
+        "managed_data",
+        _TECHNICIAN_PROFILE_DATASET,
+        normalized_version,
+        "payload.xlsx",
+    )
+    if tuple(source.parts[-len(expected_suffix) :]) != expected_suffix:
+        raise ValueError("Technician-profile source binding is invalid.")
+    return _technician_profile_admin_command(
+        context,
+        "preview",
+        (
+            "--source",
+            source.as_posix(),
+            "--source-sha256",
+            normalized_version,
+            "--managed-version",
+            normalized_version,
+            "--environment",
+            _TECHNICIAN_PROFILE_SCOPE,
+        ),
+    )
+
+
+def _verify_technician_profile_admin_release(
+    remote: Any, context: Mapping[str, str]
+) -> None:
+    """Require the composite workflow module in the exact pinned release."""
+
+    _verify_master_admin_release(remote, context)
+    inspection = inspect_artifact(
+        path=str(
+            _artifact_root(_TECHNICIAN_PROFILE_SCOPE, "admin-tools")
+            / context["release_version"]
+        ),
+        kind="admin-tools",
+        environment=_TECHNICIAN_PROFILE_SCOPE,
+    )
+    if (
+        "admin_tools/db/technician_profile_backend.py"
+        not in _release_file_map(inspection)
+    ):
+        raise PermissionError(
+            "Pinned Admin Tools release does not provide technician-profile sync."
+        )
+
+
+def _parse_technician_profile_json(
+    stdout: str,
+    *,
+    context: Mapping[str, str],
+    command: str,
+    version: str,
+    preview_id: str | None = None,
+    preview_digest: str | None = None,
+) -> dict[str, Any]:
+    """Validate the narrow PII-free composite workflow result envelope."""
+
+    raw = str(stdout or "").strip()
+    if not raw:
+        raise RuntimeError("Remote technician-profile command returned no JSON result.")
+    if len(raw.encode("utf-8")) > _MASTER_ADMIN_MAX_JSON_BYTES:
+        raise RuntimeError("Remote technician-profile result exceeds the safe response limit.")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Remote technician-profile command returned invalid JSON.") from exc
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("Remote technician-profile command returned a non-object JSON result.")
+    if payload.get("contract_version") != _TECHNICIAN_PROFILE_CONTRACT_VERSION:
+        raise RuntimeError("Remote technician-profile contract version mismatch.")
+    if (
+        payload.get("environment") != context["environment"]
+        or payload.get("dbname") != context["dbname"]
+        or payload.get("target_id") != context["target_id"]
+    ):
+        raise RuntimeError(
+            "Remote technician-profile result target does not match development."
+        )
+    normalized_version = str(version).strip().lower()
+    if payload.get("managed_version") != normalized_version:
+        raise RuntimeError(
+            "Remote technician-profile result does not match the immutable workbook version."
+        )
+    status = payload.get("status")
+    if command == "preview":
+        if status != "ready":
+            raise RuntimeError("Remote technician-profile preview was not ready.")
+        if payload.get("source_sha256") != normalized_version:
+            raise RuntimeError(
+                "Remote technician-profile preview source does not match the immutable workbook version."
+            )
+        issued_preview_id, issued_preview_digest = _require_preview_token(
+            str(payload.get("preview_id", "")), str(payload.get("preview_digest", ""))
+        )
+        confirmation = payload.get("confirmation_token")
+        if (
+            not isinstance(confirmation, str)
+            or not confirmation
+            or len(confirmation) > 512
+            or any(ord(char) < 32 for char in confirmation)
+        ):
+            raise RuntimeError(
+                "Remote technician-profile preview confirmation token is invalid."
+            )
+        result = dict(payload)
+        result["preview_id"] = issued_preview_id
+        result["preview_digest"] = issued_preview_digest
+        result["_private_confirmation_token"] = confirmation
+        return result
+    if status not in {"applied", "already_applied"}:
+        raise RuntimeError("Remote technician-profile apply was not accepted.")
+    if (
+        preview_id is None
+        or preview_digest is None
+        or payload.get("preview_id") != preview_id
+        or payload.get("preview_digest") != preview_digest
+    ):
+        raise RuntimeError("Remote technician-profile apply result preview binding is invalid.")
+    return dict(payload)
+
+
+def _safe_technician_profile_result(
+    result: Mapping[str, Any],
+    *,
+    version: str,
+    target_environment: str,
+) -> dict[str, Any]:
+    """Expose only bounded counters and codes from a potentially sensitive workbook."""
+
+    safe: dict[str, Any] = {}
+    for key in (
+        "status",
+        "preview_id",
+        "preview_digest",
+        "expires_at",
+        "operation_id",
+        "created_at",
+        "completed_at",
+        "plan_id",
+        "region_mapping_source",
+    ):
+        value = result.get(key)
+        if isinstance(value, str) and value and len(value) <= 255:
+            safe[key] = _redact(value)
+    for key in (
+        "technician_create_count",
+        "technician_update_count",
+        "technician_unchanged_count",
+        "technician_applied_count",
+        "capability_create_count",
+        "capability_update_count",
+        "capability_unchanged_count",
+        "capability_delete_count",
+        "capability_applied_count",
+        "region_mapping_create_count",
+        "region_mapping_update_count",
+        "region_mapping_unchanged_count",
+        "region_mapping_verified_count",
+        "rejected_count",
+        "error_count",
+    ):
+        value = result.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10_000_000:
+            safe[key] = value
+    errors = result.get("errors")
+    if errors is not None:
+        if not isinstance(errors, list) or len(errors) > 100:
+            raise RuntimeError("Remote technician-profile errors are invalid.")
+        safe_errors: list[dict[str, Any]] = []
+        for item in errors:
+            if not isinstance(item, Mapping):
+                raise RuntimeError("Remote technician-profile errors are invalid.")
+            code = item.get("code")
+            count = item.get("count")
+            if (
+                not isinstance(code, str)
+                or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", code)
+                or isinstance(count, bool)
+                or not isinstance(count, int)
+                or not 0 <= count <= 10_000_000
+            ):
+                raise RuntimeError("Remote technician-profile errors are invalid.")
+            safe_errors.append({"code": code, "count": count})
+        safe["errors"] = safe_errors
+    return {
+        **safe,
+        "dataset_id": _TECHNICIAN_PROFILE_DATASET,
+        "version": version,
+        "target_environment": target_environment,
+    }
+
+
+def _run_technician_profile_admin_command(
+    remote: Any,
+    *,
+    context: Mapping[str, str],
+    command: str,
+    arguments: Iterable[str] = (),
+    version: str,
+    preview_id: str | None = None,
+    preview_digest: str | None = None,
+) -> dict[str, Any]:
+    _verify_technician_profile_admin_release(remote, context)
+    code, stdout, stderr = remote.execute_technician_profile_json(
+        _technician_profile_admin_command(context, command, arguments),
+        timeout=_MASTER_ADMIN_TIMEOUT_SECONDS,
+    )
+    if code != 0:
+        if str(stdout or "").strip():
+            with contextlib.suppress(RuntimeError):
+                return _parse_technician_profile_json(
+                    stdout,
+                    context=context,
+                    command=command,
+                    version=version,
+                    preview_id=preview_id,
+                    preview_digest=preview_digest,
+                )
+        detail = _redact(stderr).strip()
+        suffix = f" ({detail[:240]})" if detail else ""
+        raise RuntimeError(f"Remote technician-profile {command} command failed{suffix}")
+    return _parse_technician_profile_json(
+        stdout,
+        context=context,
+        command=command,
+        version=version,
+        preview_id=preview_id,
+        preview_digest=preview_digest,
+    )
+
+
+def _verify_technician_profile_remote_source(
+    remote: Any, *, profile: Mapping[str, Any], version: str
+) -> str:
+    source_path = _technician_profile_source_path(profile, version)
+    if (
+        not remote.exists(source_path)
+        or remote.sha256(source_path) != version
+        or remote.mode(source_path) != _SECURE_CONFIG_MODE
+    ):
+        raise PermissionError(
+            "Technician-profile managed workbook is unavailable or no longer immutable."
+        )
+    return source_path
+
+
+def preview_managed_technician_profile_sync(
+    *, version: str, target_environment: str
+) -> dict[str, Any]:
+    """Preview one immutable development technician workbook composite update."""
+
+    target_environment = _require_environment(target_environment)
+    if target_environment != _TECHNICIAN_PROFILE_SCOPE:
+        raise PermissionError(
+            "Production technician-profile DB sync is disabled by policy."
+        )
+    version = str(version).strip().lower()
+    metadata, payload = _load_managed_data_version(
+        scope=_TECHNICIAN_PROFILE_SCOPE,
+        dataset_id=_TECHNICIAN_PROFILE_DATASET,
+        version=version,
+    )
+    spec, payload_name, _ = _managed_data_validation(
+        scope=_TECHNICIAN_PROFILE_SCOPE,
+        dataset_id=_TECHNICIAN_PROFILE_DATASET,
+        file_name=str(metadata["payload_name"]),
+        file_bytes=payload,
+    )
+    if (
+        spec["db_sync_supported"] is not True
+        or payload_name != "payload.xlsx"
+        or str(metadata.get("payload_name")) != "payload.xlsx"
+    ):
+        raise PermissionError("This managed dataset does not support technician-profile sync.")
+    profile = _master_admin_profile()
+    context = _master_admin_context(profile, _TECHNICIAN_PROFILE_SCOPE)
+    with _remote_session_factory(profile) as remote:
+        source_path = _verify_technician_profile_remote_source(
+            remote, profile=profile, version=version
+        )
+        result = _run_technician_profile_admin_command(
+            remote,
+            context=context,
+            command="preview",
+            arguments=(
+                "--source",
+                source_path,
+                "--source-sha256",
+                version,
+                "--managed-version",
+                version,
+                "--environment",
+                _TECHNICIAN_PROFILE_SCOPE,
+            ),
+            version=version,
+        )
+    preview_id, preview_digest = _require_preview_token(
+        str(result.get("preview_id", "")), str(result.get("preview_digest", ""))
+    )
+    confirmation = result.get("_private_confirmation_token")
+    if not isinstance(confirmation, str):
+        raise RuntimeError("Technician-profile preview confirmation is unavailable.")
+    now = datetime.now(timezone.utc)
+    with _TECHNICIAN_PROFILE_PREVIEW_LOCK:
+        expired = [
+            identifier
+            for identifier, (*_, issued_at, _idempotency) in _TECHNICIAN_PROFILE_PREVIEWS.items()
+            if now - issued_at > _MANAGED_DATA_DB_PREVIEW_TTL
+        ]
+        for identifier in expired:
+            _TECHNICIAN_PROFILE_PREVIEWS.pop(identifier, None)
+        _TECHNICIAN_PROFILE_PREVIEWS[preview_id] = (
+            preview_digest,
+            version,
+            target_environment,
+            context["target_id"],
+            context["remote_target_id"],
+            confirmation,
+            now,
+            None,
+        )
+    return _safe_technician_profile_result(
+        result, version=version, target_environment=target_environment
+    )
+
+
+def apply_managed_technician_profile_sync(
+    *,
+    preview_id: str,
+    preview_digest: str,
+    idempotency_key: str,
+    target_environment: str,
+    confirm: bool,
+) -> dict[str, Any]:
+    """Apply only the local-process-bound development workbook preview."""
+
+    target_environment = _require_environment(target_environment)
+    if target_environment != _TECHNICIAN_PROFILE_SCOPE:
+        raise PermissionError(
+            "Production technician-profile DB sync is disabled by policy."
+        )
+    if confirm is not True:
+        raise PermissionError("Technician-profile DB sync requires explicit confirmation.")
+    preview_id, preview_digest = _require_preview_token(preview_id, preview_digest)
+    try:
+        idempotency = str(uuid.UUID(str(idempotency_key)))
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise ValueError("idempotency_key must be a UUID.") from exc
+    now = datetime.now(timezone.utc)
+    with _TECHNICIAN_PROFILE_PREVIEW_LOCK:
+        binding = _TECHNICIAN_PROFILE_PREVIEWS.get(preview_id)
+        if binding is None:
+            raise PermissionError("Technician-profile preview binding is unavailable.")
+        (
+            digest,
+            version,
+            environment,
+            target_id,
+            remote_target_id,
+            confirmation,
+            issued_at,
+            bound_idempotency,
+        ) = binding
+        if now - issued_at > _MANAGED_DATA_DB_PREVIEW_TTL:
+            _TECHNICIAN_PROFILE_PREVIEWS.pop(preview_id, None)
+            raise PermissionError("Technician-profile preview binding has expired.")
+        if digest != preview_digest or environment != target_environment:
+            raise PermissionError(
+                "Technician-profile preview binding does not match the request."
+            )
+        if bound_idempotency not in {None, idempotency}:
+            raise PermissionError(
+                "Technician-profile preview is already bound to another idempotency key."
+            )
+        _TECHNICIAN_PROFILE_PREVIEWS[preview_id] = (*binding[:-1], idempotency)
+    # The immutable local version and remote source are checked again before a
+    # remote apply.  A process restart intentionally discards the preview
+    # token, while source corruption/target drift fail closed here.
+    metadata, _payload = _load_managed_data_version(
+        scope=_TECHNICIAN_PROFILE_SCOPE,
+        dataset_id=_TECHNICIAN_PROFILE_DATASET,
+        version=version,
+    )
+    if metadata.get("payload_name") != "payload.xlsx":
+        raise RuntimeError("Technician-profile managed workbook metadata is invalid.")
+    profile = _master_admin_profile()
+    context = _master_admin_context(profile, _TECHNICIAN_PROFILE_SCOPE)
+    if (
+        context["target_id"] != target_id
+        or context["remote_target_id"] != remote_target_id
+    ):
+        raise PermissionError("Technician-profile preview binding target has changed.")
+    with _remote_session_factory(profile) as remote:
+        _verify_technician_profile_remote_source(remote, profile=profile, version=version)
+        result = _run_technician_profile_admin_command(
+            remote,
+            context=context,
+            command="apply",
+            arguments=(
+                "--preview-id",
+                preview_id,
+                "--preview-digest",
+                preview_digest,
+                "--idempotency-key",
+                idempotency,
+                "--confirmation",
+                confirmation,
+                "--environment",
+                _TECHNICIAN_PROFILE_SCOPE,
+            ),
+            version=version,
+            preview_id=preview_id,
+            preview_digest=preview_digest,
+        )
+    return _safe_technician_profile_result(
+        result, version=version, target_environment=target_environment
+    )
+
+
 def preview_managed_data_db_sync(
     *, dataset_id: str, version: str, target_environment: str
 ) -> dict[str, Any]:
     target_environment = _require_environment(target_environment)
     if target_environment == "production":
         raise PermissionError("Production managed-data DB sync is disabled by policy.")
+    if str(dataset_id).strip() == _TECHNICIAN_PROFILE_DATASET:
+        return preview_managed_technician_profile_sync(
+            version=version, target_environment=target_environment
+        )
     if str(dataset_id).strip() != _MANAGED_DATA_DB_DATASET:
         raise ValueError("This managed dataset does not support DB sync.")
     version = str(version).strip().lower()
@@ -3401,6 +4838,16 @@ def apply_managed_data_db_sync(
     if confirm is not True:
         raise PermissionError("Managed-data DB sync requires explicit confirmation.")
     preview_id, preview_digest = _require_preview_token(preview_id, preview_digest)
+    with _TECHNICIAN_PROFILE_PREVIEW_LOCK:
+        technician_preview = preview_id in _TECHNICIAN_PROFILE_PREVIEWS
+    if technician_preview:
+        return apply_managed_technician_profile_sync(
+            preview_id=preview_id,
+            preview_digest=preview_digest,
+            idempotency_key=idempotency_key,
+            target_environment=target_environment,
+            confirm=confirm,
+        )
     now = datetime.now(timezone.utc)
     with _MANAGED_DATA_DB_PREVIEW_LOCK:
         binding = _MANAGED_DATA_DB_PREVIEWS.get(preview_id)
@@ -3995,10 +5442,1591 @@ def _run_master_admin_command(
     )
 
 
+def _region_plan_cli_command(
+    context: Mapping[str, str], command: str, arguments: Iterable[str] = ()
+) -> str:
+    """Construct only a fixed development region-plan Admin Tools invocation."""
+
+    if context.get("environment") != _MANAGED_DATA_CANDIDATE_SCOPE:
+        raise PermissionError("Region-plan operations are development-only.")
+    if command not in _REGION_PLAN_ADMIN_COMMANDS:
+        raise ValueError("Region-plan operation is not allowlisted.")
+    argv = [
+        context["python_path"],
+        "-B",
+        "-m",
+        _REGION_PLAN_ADMIN_MODULE,
+        "--json",
+        command,
+        "--config",
+        context["config_path"],
+        *[str(item) for item in arguments],
+    ]
+    return f"cd -- {shlex.quote(context['release_root'])} && exec " + " ".join(
+        shlex.quote(item) for item in argv
+    )
+
+
+def _region_plan_schema_cli_command(
+    context: Mapping[str, str], command: str, arguments: Iterable[str] = ()
+) -> str:
+    if context.get("environment") != _MANAGED_DATA_CANDIDATE_SCOPE:
+        raise PermissionError("Region-plan schema operations are development-only.")
+    if command not in {"preview", "reconcile"}:
+        raise ValueError("Region-plan schema operation is not allowlisted.")
+    argv = [
+        context["python_path"], "-B", "-m", _REGION_PLAN_SCHEMA_ADMIN_MODULE,
+        "--json", command, "--config", context["config_path"],
+        *[str(item) for item in arguments],
+    ]
+    return f"cd -- {shlex.quote(context['release_root'])} && exec " + " ".join(
+        shlex.quote(item) for item in argv
+    )
+
+
+def _region_plan_admin_command(
+    context: Mapping[str, str], *, source_path: str, version: str
+) -> str:
+    """Construct the immutable workbook candidate-staging invocation."""
+
+    normalized_version = str(version).strip().lower()
+    source = PurePosixPath(str(source_path))
+    if (
+        not _MANAGED_DATA_VERSION.fullmatch(normalized_version)
+        or not source.is_absolute()
+        or ".." in source.parts
+    ):
+        raise ValueError("Region-plan candidate source binding is invalid.")
+    return _region_plan_cli_command(
+        context,
+        _REGION_PLAN_ADMIN_COMMAND,
+        (
+        "--source",
+        source.as_posix(),
+        "--source-sha256",
+        normalized_version,
+        "--managed-version",
+        normalized_version,
+        ),
+    )
+
+
+def _safe_region_plan_candidate_result(
+    result: Mapping[str, Any], *, version: str
+) -> dict[str, Any]:
+    """Return only bounded candidate lifecycle metadata to callers/history."""
+
+    safe: dict[str, Any] = {
+        "contract_version": _REGION_PLAN_CONTRACT_VERSION,
+        "source_sha256": version,
+        "managed_version": version,
+    }
+    for key in (
+        "status",
+        "error_code",
+        "plan_id",
+        "lifecycle_stage",
+        "approval_status",
+        "candidate_version",
+        "artifact_sha256",
+        "created_at",
+    ):
+        value = result.get(key)
+        if isinstance(value, str) and value and len(value) <= 255:
+            safe[key] = _redact(value)
+    for key in (
+        "promotable",
+        "promotion_required",
+        "direct_db_upsert",
+    ):
+        if isinstance(result.get(key), bool):
+            safe[key] = result[key]
+    for key in (
+        "membership_input_rows",
+        "membership_accepted_rows",
+        "membership_rejected_rows",
+        "unique_postal_count",
+        "ambiguous_postal_count",
+        "technician_input_rows",
+        "technician_accepted_rows",
+        "technician_rejected_rows",
+        "artifact_count",
+    ):
+        value = result.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10_000_000:
+            safe[key] = value
+    return safe
+
+
+def _parse_region_plan_candidate_json(
+    stdout: str, *, context: Mapping[str, str], version: str
+) -> dict[str, Any]:
+    raw = str(stdout or "").strip()
+    if not raw:
+        raise RuntimeError("Remote region-plan command returned no JSON result.")
+    if len(raw.encode("utf-8")) > _MASTER_ADMIN_MAX_JSON_BYTES:
+        raise RuntimeError("Remote region-plan result exceeds the safe response limit.")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Remote region-plan command returned invalid JSON.") from exc
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("Remote region-plan command returned a non-object JSON result.")
+    if payload.get("contract_version") != _REGION_PLAN_CONTRACT_VERSION:
+        raise RuntimeError("Remote region-plan contract version mismatch.")
+    if payload.get("environment") != _MANAGED_DATA_CANDIDATE_SCOPE:
+        raise RuntimeError("Remote region-plan result environment does not match development.")
+    normalized_version = str(version).strip().lower()
+    if (
+        payload.get("source_sha256") != normalized_version
+        or payload.get("managed_version") != normalized_version
+    ):
+        raise RuntimeError("Remote region-plan result source does not match the managed version.")
+    status = payload.get("status")
+    if status not in {"candidate_staged", "already_staged"}:
+        code = payload.get("error_code")
+        if isinstance(code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", code):
+            raise RuntimeError(f"Remote region-plan candidate staging was rejected ({code}).")
+        raise RuntimeError("Remote region-plan candidate staging was rejected.")
+    plan_id = payload.get("plan_id")
+    if plan_id is not None:
+        try:
+            _require_region_plan_final_id(plan_id)
+        except ValueError as exc:
+            raise RuntimeError("Remote region-plan result plan id is invalid.") from exc
+    if payload.get("lifecycle_stage") != "candidate_plan":
+        raise RuntimeError("Remote region-plan result is not a candidate workflow artifact.")
+    if payload.get("promotion_required") is not True or payload.get("direct_db_upsert") is not False:
+        raise RuntimeError("Remote region-plan result permits an unsafe direct activation.")
+    if not isinstance(payload.get("promotable"), bool):
+        raise RuntimeError("Remote region-plan result promotable flag is invalid.")
+    if not isinstance(payload.get("approval_status"), str):
+        raise RuntimeError("Remote region-plan result approval status is invalid.")
+    return _safe_region_plan_candidate_result(payload, version=normalized_version)
+
+
+def _run_region_plan_candidate_command(
+    remote: Any, *, profile: Mapping[str, Any], source_path: str, version: str
+) -> dict[str, Any]:
+    """Stage exactly one development territory-plan candidate through Admin Tools."""
+
+    context = _master_admin_context(profile, _MANAGED_DATA_CANDIDATE_SCOPE)
+    _verify_master_admin_release(remote, context)
+    inspection = inspect_artifact(
+        path=str(_artifact_root(_MANAGED_DATA_CANDIDATE_SCOPE, "admin-tools") / context["release_version"]),
+        kind="admin-tools",
+        environment=_MANAGED_DATA_CANDIDATE_SCOPE,
+    )
+    if "admin_tools/db/region_plan_backend.py" not in _release_file_map(inspection):
+        raise PermissionError("Pinned Admin Tools release does not provide candidate-plan staging.")
+    code, stdout, stderr = remote.execute_region_plan_json(
+        _region_plan_admin_command(context, source_path=source_path, version=version),
+        timeout=_MASTER_ADMIN_TIMEOUT_SECONDS,
+    )
+    if code != 0:
+        if str(stdout or "").strip():
+            with contextlib.suppress(RuntimeError):
+                return _parse_region_plan_candidate_json(
+                    stdout, context=context, version=version
+                )
+        detail = _redact(stderr).strip()
+        suffix = f" ({detail[:240]})" if detail else ""
+        raise RuntimeError(f"Remote region-plan candidate command failed{suffix}")
+    return _parse_region_plan_candidate_json(stdout, context=context, version=version)
+
+
+def _verify_region_plan_admin_release(remote: Any, context: Mapping[str, str]) -> None:
+    """Require the fixed workflow CLI to be in the verified Admin Tools release."""
+
+    _verify_master_admin_release(remote, context)
+    inspection = inspect_artifact(
+        path=str(
+            _artifact_root(_MANAGED_DATA_CANDIDATE_SCOPE, "admin-tools")
+            / context["release_version"]
+        ),
+        kind="admin-tools",
+        environment=_MANAGED_DATA_CANDIDATE_SCOPE,
+    )
+    if "admin_tools/db/region_plan_backend.py" not in _release_file_map(inspection):
+        raise PermissionError("Pinned Admin Tools release does not provide region-plan workflow commands.")
+
+
+def _verify_fixed_region_plan_bundle_admin_release(
+    remote: Any, context: Mapping[str, str]
+) -> None:
+    """Preflight the pinned capability before a bundle or request is written.
+
+    The exact manifest/inventory/hash verification is inherited from the
+    generic Admin Tools release verifier.  The additional module presence is
+    deliberately the public capability boundary: callers never supply a
+    Python module, working directory, command, or remote bundle path.
+    """
+
+    if context.get("environment") != _FIXED_REGION_PLAN_BUNDLE_SCOPE:
+        raise PermissionError("Fixed Region Data imports are development-only.")
+    _verify_master_admin_release(remote, context)
+    inspection = inspect_artifact(
+        path=str(
+            _artifact_root(_FIXED_REGION_PLAN_BUNDLE_SCOPE, "admin-tools")
+            / context["release_version"]
+        ),
+        kind="admin-tools",
+        environment=_FIXED_REGION_PLAN_BUNDLE_SCOPE,
+    )
+    capability_relative = "admin_tools/db/region_plan_backend.py"
+    if capability_relative not in _release_file_map(inspection):
+        # Do not expose an artifact path, manifest selection, or server
+        # inventory detail to the browser/history boundary.
+        raise PermissionError(
+            "Pinned Admin Tools release does not support fixed Region Data imports."
+        )
+    try:
+        capability_source = (
+            _within(Path(inspection.path) / capability_relative, Path(inspection.path))
+            .read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError) as exc:
+        raise PermissionError(
+            "Pinned Admin Tools release does not support fixed Region Data imports."
+        ) from exc
+    if not all(
+        marker in capability_source
+        for marker in (
+            "stage-bundle", "status-bundle", "import-bundle",
+            "region-plan-bundle-import/v1",
+        )
+    ):
+        raise PermissionError(
+            "Pinned Admin Tools release does not support fixed Region Data imports."
+        )
+
+
+def _fixed_region_plan_bundle_cli_command(
+    context: Mapping[str, str], command: str, arguments: Iterable[str] = ()
+) -> str:
+    """Construct one fixed bundle-import command from trusted bindings only."""
+
+    if context.get("environment") != _FIXED_REGION_PLAN_BUNDLE_SCOPE:
+        raise PermissionError("Fixed Region Data imports are development-only.")
+    if command not in _FIXED_REGION_PLAN_BUNDLE_COMMANDS:
+        raise ValueError("Fixed Region Data operation is not allowlisted.")
+    argv = [
+        context["python_path"],
+        "-B",
+        "-m",
+        _REGION_PLAN_ADMIN_MODULE,
+        "--json",
+        command,
+        "--config",
+        context["config_path"],
+        *[str(item) for item in arguments],
+    ]
+    return f"cd -- {shlex.quote(context['release_root'])} && exec " + " ".join(
+        shlex.quote(item) for item in argv
+    )
+
+
+def _fixed_region_plan_bundle_remote_path(
+    profile: Mapping[str, Any], version: str
+) -> str:
+    """Return the sole managed ZIP path accepted by the remote transport."""
+
+    version = _require_region_plan_digest(version, field="version")
+    return (
+        _managed_data_remote_root(
+            profile,
+            _FIXED_REGION_PLAN_BUNDLE_SCOPE,
+            _FIXED_REGION_PLAN_BUNDLE_DATASET,
+            version,
+        )
+        / "payload.zip"
+    ).as_posix()
+
+
+def _fixed_region_plan_bundle_request_path(
+    profile: Mapping[str, Any], request_sha256: str
+) -> str:
+    request_sha256 = _require_region_plan_digest(
+        request_sha256, field="request_sha256"
+    )
+    root = PurePosixPath(str(profile.get("remote_root", "")).strip())
+    if not root.is_absolute() or ".." in root.parts:
+        raise ValueError("Deployment profile remote_root is invalid.")
+    return (
+        root
+        / "state"
+        / _FIXED_REGION_PLAN_BUNDLE_SCOPE
+        / _FIXED_REGION_PLAN_BUNDLE_REQUEST_ROOT
+        / f"{request_sha256}.json"
+    ).as_posix()
+
+
+def _fixed_region_plan_bundle_import_request(
+    *, version: str, imported_by: object, idempotency_key: object
+) -> dict[str, str]:
+    """Create the exact, path-free request accepted by ``import-bundle``."""
+
+    version = _require_region_plan_digest(version, field="version")
+    return {
+        "schema": "region-plan-bundle-import-request/v1",
+        "managed_version": version,
+        "bundle_sha256": version,
+        "imported_by": _require_region_plan_token(imported_by, field="imported_by"),
+        "idempotency_key": _require_region_plan_idempotency_key(idempotency_key),
+    }
+
+
+def _stage_fixed_region_plan_bundle_request(
+    remote: Any,
+    *,
+    profile: Mapping[str, Any],
+    request_bytes: bytes,
+    request_sha256: str,
+) -> str:
+    """Stage one checksum-bound import request below its dedicated fixed root."""
+
+    target = _fixed_region_plan_bundle_request_path(profile, request_sha256)
+    if remote.exists(target):
+        if remote.sha256(target) != request_sha256:
+            raise RuntimeError("Fixed Region Data import request version collision.")
+        if remote.mode(target) != _SECURE_CONFIG_MODE:
+            raise RuntimeError("Fixed Region Data import request has an unsafe remote mode.")
+        return target
+    remote.upload_bytes_atomic(request_bytes, target, backup=None)
+    if remote.sha256(target) != request_sha256 or remote.mode(target) != _SECURE_CONFIG_MODE:
+        raise RuntimeError("Fixed Region Data import request checksum verification failed.")
+    return target
+
+
+def _safe_fixed_region_plan_bundle_result(
+    payload: Mapping[str, Any], *, command: str, version: str
+) -> dict[str, Any]:
+    """Validate and redact the narrow public Admin Tools result contract."""
+
+    if payload.get("contract_version") != _FIXED_REGION_PLAN_BUNDLE_CONTRACT_VERSION:
+        raise RuntimeError("Fixed Region Data import contract version mismatch.")
+    if payload.get("environment") != _FIXED_REGION_PLAN_BUNDLE_SCOPE:
+        raise RuntimeError("Fixed Region Data import result environment is invalid.")
+    if payload.get("managed_version") != version:
+        raise RuntimeError("Fixed Region Data import result version is invalid.")
+    if command == "stage-bundle":
+        if (
+            payload.get("status") != "ready"
+            or payload.get("write_allowed") is not False
+            or payload.get("target_environment") != _FIXED_REGION_PLAN_BUNDLE_SCOPE
+            or payload.get("lifecycle_stage") != "resolved_candidate"
+            or payload.get("verification_only") is not True
+            or payload.get("promotable") is not False
+            or payload.get("bundle_sha256") != version
+        ):
+            raise RuntimeError("Fixed Region Data import preview result is invalid.")
+        result: dict[str, Any] = {
+            "status": "ready",
+            "environment": _FIXED_REGION_PLAN_BUNDLE_SCOPE,
+            "managed_version": version,
+            "bundle_sha256": version,
+            "write_allowed": False,
+            "lifecycle_stage": "resolved_candidate",
+            "verification_only": True,
+            "promotable": False,
+        }
+        for key in (
+            "plan_id",
+            "source_sha256",
+            "manifest_sha256",
+            "fixed_region_sha256",
+            "boundary_policy_sha256",
+            "technician_policy_sha256",
+        ):
+            value = payload.get(key)
+            if isinstance(value, str) and _MANAGED_DATA_VERSION.fullmatch(value.lower()):
+                result[key] = value.lower()
+        for key in (
+            "region_count",
+            "postal_count",
+            "technician_count",
+            "ambiguous_postal_count",
+        ):
+            value = payload.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10_000_000:
+                result[key] = value
+        plan_id = payload.get("plan_id")
+        if plan_id is not None:
+            try:
+                result["plan_id"] = _require_region_plan_final_id(plan_id)
+            except ValueError as exc:
+                raise RuntimeError("Fixed Region Data import preview plan id is invalid.") from exc
+            result["resolution_digest"] = _region_plan_versioned_digest(
+                result["plan_id"]
+            )
+        return result
+    if command == "status-bundle":
+        status = str(payload.get("status", "")).strip().lower()
+        lifecycle_stage = str(payload.get("lifecycle_stage", "")).strip().lower()
+        expected_lifecycle = "resolved_candidate" if status == "not_imported" else status
+        if (
+            status not in {"not_imported", "candidate", "reviewed", "active", "superseded"}
+            or lifecycle_stage != expected_lifecycle
+            or payload.get("verification_only") is not True
+            or payload.get("promotable") is not False
+            or payload.get("bundle_sha256") != version
+        ):
+            raise RuntimeError("Fixed Region Data status result is invalid.")
+        try:
+            plan_id = _require_region_plan_final_id(payload.get("plan_id"))
+        except ValueError as exc:
+            raise RuntimeError("Fixed Region Data status plan id is invalid.") from exc
+        result = {
+            "status": status,
+            "environment": _FIXED_REGION_PLAN_BUNDLE_SCOPE,
+            "managed_version": version,
+            "bundle_sha256": version,
+            "plan_id": plan_id,
+            "resolution_digest": _region_plan_versioned_digest(plan_id),
+            "lifecycle_stage": lifecycle_stage,
+            "verification_only": True,
+            "promotable": False,
+        }
+        if status != "not_imported":
+            try:
+                result["revision"] = _require_region_plan_revision(
+                    payload.get("revision"), field="revision"
+                )
+                result["checksum"] = _require_region_plan_digest(
+                    payload.get("checksum"), field="checksum"
+                )
+            except ValueError as exc:
+                raise RuntimeError("Fixed Region Data status binding is invalid.") from exc
+            if result["checksum"] != version:
+                raise RuntimeError("Fixed Region Data status checksum is invalid.")
+        return result
+    if command != "import-bundle":
+        raise ValueError("Fixed Region Data operation is not allowlisted.")
+    if (
+        payload.get("status") not in {"candidate_imported", "already_imported"}
+        or payload.get("lifecycle_stage") != "candidate"
+        or payload.get("verification_only") is not True
+        or payload.get("promotable") is not False
+    ):
+        raise RuntimeError("Fixed Region Data import result is invalid.")
+    try:
+        plan_id = _require_region_plan_final_id(payload.get("plan_id"))
+        checksum = _require_region_plan_digest(payload.get("checksum"), field="checksum")
+        revision = _require_region_plan_revision(payload.get("revision"), field="revision")
+    except ValueError as exc:
+        raise RuntimeError("Fixed Region Data import result binding is invalid.") from exc
+    if checksum != version:
+        raise RuntimeError("Fixed Region Data import checksum is invalid.")
+    return {
+        "status": str(payload["status"]),
+        "environment": _FIXED_REGION_PLAN_BUNDLE_SCOPE,
+        "managed_version": version,
+        "bundle_sha256": version,
+        "plan_id": plan_id,
+        "resolution_digest": _region_plan_versioned_digest(plan_id),
+        "revision": revision,
+        "checksum": checksum,
+        "lifecycle_stage": "candidate",
+        "verification_only": True,
+        "promotable": False,
+    }
+
+
+def _run_fixed_region_plan_bundle_command(
+    remote: Any,
+    *,
+    context: Mapping[str, str],
+    command: str,
+    arguments: Iterable[str],
+    version: str,
+) -> dict[str, Any]:
+    """Execute only a preflighted fixed bundle-import operation."""
+
+    _verify_fixed_region_plan_bundle_admin_release(remote, context)
+    code, stdout, _stderr = remote.execute_region_plan_json(
+        _fixed_region_plan_bundle_cli_command(context, command, arguments),
+        timeout=_MASTER_ADMIN_TIMEOUT_SECONDS,
+    )
+    if code != 0:
+        # Structured Admin Tools failure codes are intentionally not relayed:
+        # they can disclose server state while offering no UI recovery path.
+        raise RuntimeError("Fixed Region Data import operation was rejected.")
+    raw = str(stdout or "").strip()
+    if not raw or len(raw.encode("utf-8")) > _MASTER_ADMIN_MAX_JSON_BYTES:
+        raise RuntimeError("Fixed Region Data import returned an invalid result.")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Fixed Region Data import returned an invalid result.") from exc
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("Fixed Region Data import returned an invalid result.")
+    return _safe_fixed_region_plan_bundle_result(payload, command=command, version=version)
+
+
+def _parse_region_plan_json(
+    stdout: str, *, contract_version: str
+) -> dict[str, Any]:
+    raw = str(stdout or "").strip()
+    if not raw:
+        raise RuntimeError("Remote region-plan command returned no JSON result.")
+    if len(raw.encode("utf-8")) > _MASTER_ADMIN_MAX_JSON_BYTES:
+        raise RuntimeError("Remote region-plan result exceeds the safe response limit.")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Remote region-plan command returned invalid JSON.") from exc
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("Remote region-plan command returned a non-object JSON result.")
+    if payload.get("contract_version") != contract_version:
+        raise RuntimeError("Remote region-plan contract version mismatch.")
+    if payload.get("environment") != _MANAGED_DATA_CANDIDATE_SCOPE:
+        raise RuntimeError("Remote region-plan result environment does not match development.")
+    if payload.get("status") == "rejected":
+        code = payload.get("error_code")
+        if isinstance(code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", code):
+            raise RuntimeError(f"Remote region-plan command was rejected ({code}).")
+        raise RuntimeError("Remote region-plan command was rejected.")
+    return dict(payload)
+
+
+def _run_region_plan_admin_command(
+    remote: Any,
+    *,
+    context: Mapping[str, str],
+    command: str,
+    arguments: Iterable[str] = (),
+    contract_version: str,
+) -> dict[str, Any]:
+    """Run one already allowlisted region-plan command through the trusted release."""
+
+    if command not in _REGION_PLAN_ADMIN_COMMANDS:
+        raise ValueError("Region-plan operation is not allowlisted.")
+    _verify_region_plan_admin_release(remote, context)
+    code, stdout, stderr = remote.execute_region_plan_json(
+        _region_plan_cli_command(context, command, arguments),
+        timeout=_MASTER_ADMIN_TIMEOUT_SECONDS,
+    )
+    if code != 0:
+        if str(stdout or "").strip():
+            with contextlib.suppress(RuntimeError):
+                return _parse_region_plan_json(stdout, contract_version=contract_version)
+        detail = _redact(stderr).strip()
+        suffix = f" ({detail[:240]})" if detail else ""
+        raise RuntimeError(f"Remote region-plan {command} command failed{suffix}")
+    return _parse_region_plan_json(stdout, contract_version=contract_version)
+
+
 def _master_admin_profile() -> dict[str, Any]:
     """Load the one local ignored profile used by all master-data operations."""
 
     return _load_remote_profile(_MASTER_ADMIN_PROFILE_PATH)
+
+
+def _region_plan_development_context(
+    environment: str,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Fail closed before any profile/remote access for production requests."""
+
+    if _require_environment(environment) != _MANAGED_DATA_CANDIDATE_SCOPE:
+        raise PermissionError("Region-plan workflow is development-only.")
+    profile = _master_admin_profile()
+    return profile, _master_admin_context(profile, _MANAGED_DATA_CANDIDATE_SCOPE)
+
+
+def _fixed_region_plan_bundle_development_context(
+    environment: str,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Resolve the fixed bundle-import target without caller-selected paths."""
+
+    if _require_environment(environment) != _FIXED_REGION_PLAN_BUNDLE_SCOPE:
+        raise PermissionError("Fixed Region Data imports are development-only.")
+    profile = _master_admin_profile()
+    return profile, _master_admin_context(profile, _FIXED_REGION_PLAN_BUNDLE_SCOPE)
+
+
+def _load_fixed_region_plan_bundle(version: object) -> str:
+    """Prove the selected local version is the immutable managed ZIP.
+
+    This only verifies the stored ZIP hash and metadata; it deliberately does
+    not open a workbook, parse raw territory data, or rebuild a bundle.
+    """
+
+    normalized = _require_region_plan_digest(version, field="version")
+    metadata, _payload = _load_managed_data_version(
+        scope=_FIXED_REGION_PLAN_BUNDLE_SCOPE,
+        dataset_id=_FIXED_REGION_PLAN_BUNDLE_DATASET,
+        version=normalized,
+    )
+    if metadata.get("payload_name") != "payload.zip":
+        raise RuntimeError("Fixed Region Data bundle version is invalid.")
+    return normalized
+
+
+def preview_fixed_region_plan_bundle_import(
+    *, environment: str, version: str
+) -> dict[str, Any]:
+    """Ask pinned Admin Tools to inspect one immutable managed Region Data ZIP."""
+
+    profile, context = _fixed_region_plan_bundle_development_context(environment)
+    version = _load_fixed_region_plan_bundle(version)
+    source = _fixed_region_plan_bundle_remote_path(profile, version)
+    with _remote_session_factory(profile) as remote:
+        return _run_fixed_region_plan_bundle_command(
+            remote,
+            context=context,
+            command="stage-bundle",
+            arguments=(
+                "--source",
+                source,
+                "--bundle-sha256",
+                version,
+                "--managed-version",
+                version,
+            ),
+            version=version,
+        )
+
+
+def get_fixed_region_plan_bundle_status(
+    *, environment: str, version: str
+) -> dict[str, Any]:
+    """Rehydrate the DB lifecycle state for one immutable managed bundle."""
+
+    profile, context = _fixed_region_plan_bundle_development_context(environment)
+    version = _load_fixed_region_plan_bundle(version)
+    with _remote_session_factory(profile) as remote:
+        result = _run_fixed_region_plan_bundle_command(
+            remote,
+            context=context,
+            command="status-bundle",
+            arguments=(
+                "--bundle-sha256",
+                version,
+                "--managed-version",
+                version,
+            ),
+            version=version,
+        )
+    if result.get("status") in {"candidate", "reviewed", "active"}:
+        _remember_region_plan_final_binding(
+            result=result, source_version=version, context=context
+        )
+    return result
+
+
+def apply_fixed_region_plan_bundle_import(
+    *,
+    environment: str,
+    version: str,
+    imported_by: str,
+    idempotency_key: str,
+    confirm: bool = False,
+) -> dict[str, Any]:
+    """Import a previously uploaded immutable Region Data ZIP in development.
+
+    The server receives a canonical request containing only version/hash and
+    operator/idempotency metadata.  It derives the managed bundle path itself;
+    the browser never controls a source/destination/database argument.
+    """
+
+    profile, context = _fixed_region_plan_bundle_development_context(environment)
+    if confirm is not True:
+        raise PermissionError("Fixed Region Data import requires explicit confirmation.")
+    version = _load_fixed_region_plan_bundle(version)
+    request = _fixed_region_plan_bundle_import_request(
+        version=version,
+        imported_by=imported_by,
+        idempotency_key=idempotency_key,
+    )
+    request_sha256, request_bytes = _region_plan_request_bytes(request)
+    release_id = f"fixed-region-plan-import-{request_sha256[:12]}"
+    with _remote_session_factory(profile) as remote:
+        with remote.deployment_lock(str(profile["remote_root"]), release_id):
+            # This verification precedes the request upload, so an unsupported
+            # pin cannot produce remote state.
+            _verify_fixed_region_plan_bundle_admin_release(remote, context)
+            request_path = _stage_fixed_region_plan_bundle_request(
+                remote,
+                profile=profile,
+                request_bytes=request_bytes,
+                request_sha256=request_sha256,
+            )
+            result = _run_fixed_region_plan_bundle_command(
+                remote,
+                context=context,
+                command="import-bundle",
+                arguments=(
+                    "--request",
+                    request_path,
+                    "--request-sha256",
+                    request_sha256,
+                ),
+                version=version,
+            )
+    _remember_region_plan_final_binding(
+        result=result, source_version=version, context=context
+    )
+    return {**result, "request_sha256": request_sha256}
+
+
+def _require_region_plan_token(value: object, *, field: str) -> str:
+    token = str(value).strip()
+    if not _REGION_PLAN_TOKEN.fullmatch(token):
+        raise ValueError(f"{field} is invalid.")
+    return token
+
+
+def _require_region_plan_idempotency_key(value: object) -> str:
+    try:
+        return str(uuid.UUID(str(value)))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError("idempotency_key must be a UUID.") from exc
+
+
+def _require_region_plan_revision(value: object, *, field: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{field} is invalid.")
+    try:
+        revision = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} is invalid.") from exc
+    if not 0 <= revision <= 2_147_483_647:
+        raise ValueError(f"{field} is invalid.")
+    return revision
+
+
+def _require_region_plan_digest(value: object, *, field: str) -> str:
+    digest = str(value).strip().lower()
+    if not _MANAGED_DATA_VERSION.fullmatch(digest):
+        raise ValueError(f"{field} must be a SHA-256 digest.")
+    return digest
+
+
+def _require_region_plan_final_id(value: object) -> str:
+    """Accept only the legacy plan or a backend-derived decision digest ID."""
+
+    plan_id = str(value).strip()
+    if plan_id == _REGION_PLAN_FIXED_ID or _REGION_PLAN_VERSIONED_ID.fullmatch(plan_id):
+        return plan_id
+    raise ValueError("plan_id is not an allowlisted immutable region-plan id.")
+
+
+def _region_plan_versioned_digest(value: object) -> str:
+    plan_id = _require_region_plan_final_id(value)
+    if plan_id == _REGION_PLAN_FIXED_ID:
+        raise ValueError("Legacy fixed region-plan ids do not contain a decision digest.")
+    return _require_region_plan_digest(plan_id.rsplit("_", 1)[-1], field="resolution_digest")
+
+
+def _region_plan_remote_request_path(profile: Mapping[str, Any], digest: str) -> str:
+    root = PurePosixPath(str(profile.get("remote_root", "")).strip())
+    if not root.is_absolute() or ".." in root.parts:
+        raise ValueError("Deployment profile remote_root is invalid.")
+    return (
+        root / "state" / "development" / _REGION_PLAN_REQUEST_ROOT / f"{digest}.json"
+    ).as_posix()
+
+
+def _region_plan_managed_source_path(profile: Mapping[str, Any], version: str) -> str:
+    root = PurePosixPath(str(profile.get("remote_root", "")).strip())
+    if not root.is_absolute() or ".." in root.parts:
+        raise ValueError("Deployment profile remote_root is invalid.")
+    return (
+        root
+        / "state"
+        / "development"
+        / "managed_data"
+        / _MANAGED_DATA_CANDIDATE_DATASET
+        / version
+        / "payload.xlsx"
+    ).as_posix()
+
+
+def _region_plan_request_bytes(payload: Mapping[str, Any]) -> tuple[str, bytes]:
+    """Canonicalize one fixed workflow request without retaining user text locally."""
+
+    try:
+        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode(
+            "utf-8"
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Region-plan workflow request is not JSON-serializable.") from exc
+    if not raw or len(raw) > _REGION_PLAN_REQUEST_MAX_BYTES:
+        raise ValueError("Region-plan workflow request exceeds the safety limit.")
+    return hashlib.sha256(raw).hexdigest(), raw
+
+
+def _stage_region_plan_request(
+    remote: Any, *, profile: Mapping[str, Any], request_bytes: bytes, request_sha256: str
+) -> str:
+    """Write exactly one immutable 0600 workflow request under the fixed root."""
+
+    target = _region_plan_remote_request_path(profile, request_sha256)
+    if remote.exists(target):
+        if remote.sha256(target) != request_sha256:
+            raise RuntimeError("Region-plan immutable request version collision.")
+        if remote.mode(target) != _SECURE_CONFIG_MODE:
+            raise RuntimeError("Region-plan request has an unsafe remote mode.")
+        return target
+    remote.upload_bytes_atomic(request_bytes, target, backup=None)
+    if remote.sha256(target) != request_sha256 or remote.mode(target) != _SECURE_CONFIG_MODE:
+        raise RuntimeError("Region-plan request checksum or mode verification failed.")
+    return target
+
+
+def _region_plan_migration_spec(migration_id: str) -> MigrationSpec:
+    """Return one manifest-registered migration, preserving manifest order as policy."""
+
+    if not isinstance(migration_id, str):
+        raise ValueError("Region-plan migration id is invalid.")
+    specs = _load_migration_specs()
+    matches = [spec for spec in specs if spec.migration_id == migration_id]
+    if len(matches) != 1:
+        raise ValueError("Region-plan migration is not registered.")
+    return matches[0]
+
+
+def list_region_plan_schema_migrations(*, environment: str) -> list[dict[str, Any]]:
+    """Expose the ordered, local registry; no remote or database access occurs."""
+
+    _region_plan_development_context(environment)
+    return [
+        {
+            "migration_id": spec.migration_id,
+            "description": spec.description,
+            "checksum_sha256": spec.checksum_sha256,
+            "rollback_instructions": spec.rollback_instructions,
+            "reversible": spec.reversible,
+        }
+        for spec in _load_migration_specs()
+    ]
+
+
+def _safe_region_plan_migration_result(
+    payload: Mapping[str, Any], *, preview: bool, migration: MigrationSpec
+) -> tuple[dict[str, Any], str | None]:
+    if payload.get("migration_id") != migration.migration_id:
+        raise RuntimeError("Remote region-plan migration id is invalid.")
+    checksum = _require_region_plan_digest(payload.get("checksum_sha256"), field="checksum")
+    if checksum != migration.checksum_sha256:
+        raise RuntimeError("Remote region-plan migration checksum differs from the registry.")
+    status = payload.get("status")
+    expected = {"ready"} if preview else {"applied", "already_applied"}
+    if status not in expected:
+        raise RuntimeError("Remote region-plan migration status is invalid.")
+    count = _require_region_plan_revision(payload.get("statement_count"), field="statement_count")
+    result = {
+        "status": status,
+        "migration_id": migration.migration_id,
+        "checksum_sha256": checksum,
+        "statement_count": count,
+        "environment": _MANAGED_DATA_CANDIDATE_SCOPE,
+    }
+    confirmation: str | None = None
+    if preview:
+        raw_confirmation = payload.get("required_confirmation")
+        if (
+            not isinstance(raw_confirmation, str)
+            or not raw_confirmation.strip()
+            or len(raw_confirmation) > 512
+            or any(ord(char) < 32 for char in raw_confirmation)
+        ):
+            raise RuntimeError("Remote region-plan migration preview confirmation is invalid.")
+        confirmation = raw_confirmation.strip()
+        types = payload.get("statement_types")
+        if not isinstance(types, list) or not all(
+            isinstance(item, str) and re.fullmatch(r"[A-Z ]{1,80}", item)
+            for item in types
+        ):
+            raise RuntimeError("Remote region-plan migration statement types are invalid.")
+        result["statement_types"] = list(types)
+        rollback = payload.get("rollback_instructions")
+        if isinstance(rollback, str) and len(rollback) <= 1000:
+            result["rollback_instructions"] = _redact(rollback)
+    return result, confirmation
+
+
+def _safe_region_plan_workflow_result(
+    payload: Mapping[str, Any], *, command: str, expected_plan_id: str | None
+) -> dict[str, Any]:
+    try:
+        plan_id = _require_region_plan_final_id(payload.get("plan_id"))
+    except ValueError as exc:
+        raise RuntimeError("Remote region-plan workflow plan id is invalid.") from exc
+    if expected_plan_id is not None and plan_id != expected_plan_id:
+        raise RuntimeError("Remote region-plan workflow plan id is invalid.")
+    status = payload.get("status")
+    result: dict[str, Any] = {
+        "status": status,
+        "plan_id": plan_id,
+        "environment": _MANAGED_DATA_CANDIDATE_SCOPE,
+    }
+    if command == "resolve":
+        if status != "candidate_imported" or payload.get("lifecycle_stage") != "candidate_resolved":
+            raise RuntimeError("Remote region-plan resolution status is invalid.")
+        raw_resolution_digest = payload.get("resolution_digest")
+        if raw_resolution_digest is None:
+            raise RuntimeError("Remote region-plan resolution digest is missing.")
+        resolution_digest = _require_region_plan_digest(
+            raw_resolution_digest, field="resolution_digest"
+        )
+        if (
+            plan_id == _REGION_PLAN_FIXED_ID
+            or _region_plan_versioned_digest(plan_id) != resolution_digest
+        ):
+            raise RuntimeError("Remote region-plan resolution plan binding is invalid.")
+        result["revision"] = _require_region_plan_revision(
+            payload.get("revision"), field="revision"
+        )
+        result["checksum"] = _require_region_plan_digest(payload.get("checksum"), field="checksum")
+        result["resolution_digest"] = resolution_digest
+        result["lifecycle_stage"] = "candidate_resolved"
+    elif command == "review":
+        if status != "reviewed":
+            raise RuntimeError("Remote region-plan review status is invalid.")
+        result["revision"] = _require_region_plan_revision(
+            payload.get("revision"), field="revision"
+        )
+        result["lifecycle_stage"] = "reviewed"
+    elif command == "activation-preview":
+        if status != "ready":
+            raise RuntimeError("Remote region-plan activation preview status is invalid.")
+        preview_id = _require_region_plan_digest(payload.get("preview_id"), field="preview_id")
+        preview_digest = _require_region_plan_digest(
+            payload.get("preview_digest"), field="preview_digest"
+        )
+        if preview_id != preview_digest:
+            raise RuntimeError("Remote region-plan activation preview binding is invalid.")
+        result.update(
+            {
+                "preview_id": preview_id,
+                "preview_digest": preview_digest,
+                "checksum": _require_region_plan_digest(payload.get("checksum"), field="checksum"),
+                "plan_revision": _require_region_plan_revision(
+                    payload.get("plan_revision"), field="plan_revision"
+                ),
+                "expected_activation_revision": _require_region_plan_revision(
+                    payload.get("expected_activation_revision"),
+                    field="expected_activation_revision",
+                ),
+                "region_count": _require_region_plan_revision(payload.get("region_count"), field="region_count"),
+                "postal_count": _require_region_plan_revision(payload.get("postal_count"), field="postal_count"),
+                "technician_count": _require_region_plan_revision(payload.get("technician_count"), field="technician_count"),
+                "boundary_resolution_count": _require_region_plan_revision(
+                    payload.get("boundary_resolution_count"), field="boundary_resolution_count"
+                ),
+            }
+        )
+    elif command == "activate":
+        if status not in {"activated", "already_active"}:
+            raise RuntimeError("Remote region-plan activation status is invalid.")
+        result["activation_revision"] = _require_region_plan_revision(
+            payload.get("activation_revision"), field="activation_revision"
+        )
+        result["preview_digest"] = _require_region_plan_digest(
+            payload.get("preview_digest"), field="preview_digest"
+        )
+        result["lifecycle_stage"] = "active"
+    else:
+        raise ValueError("Region-plan workflow command is not allowlisted.")
+    return result
+
+
+def _region_plan_boundary_resolutions(value: object) -> dict[str, dict[str, Any]]:
+    """Validate the four fixed Atlanta boundary decisions before request staging."""
+
+    if not isinstance(value, Mapping):
+        raise ValueError("boundary_resolutions must be an object.")
+    expected = ("30028", "30040", "30041", "30107")
+    if set(str(key) for key in value) != set(expected):
+        raise ValueError("boundary_resolutions must contain the four approved boundary ZIPs.")
+    result: dict[str, dict[str, Any]] = {}
+    for postal in expected:
+        raw = value.get(postal)
+        if not isinstance(raw, Mapping):
+            raise ValueError("boundary resolution is invalid.")
+        primary = str(raw.get("primary_region", "")).strip()
+        allow_overflow = raw.get("allow_overflow")
+        rationale = raw.get("rationale", "")
+        if (
+            primary not in {"Zone 2", "Zone 3"}
+            or not isinstance(allow_overflow, bool)
+            or not isinstance(rationale, str)
+            or len(rationale) > 500
+            or any(ord(char) < 32 for char in rationale)
+        ):
+            raise ValueError("boundary resolution is invalid.")
+        result[postal] = {
+            "primary_region": primary,
+            "allow_overflow": allow_overflow,
+            "rationale": " ".join(rationale.split()),
+        }
+    return result
+
+
+def _run_region_plan_workflow_request(
+    *,
+    profile: Mapping[str, Any],
+    context: Mapping[str, str],
+    command: str,
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    plan_id = request.get("plan_id")
+    if command == "resolve":
+        if plan_id is not None:
+            raise ValueError("Region-plan resolution request must not select a plan id.")
+        expected_plan_id: str | None = None
+    else:
+        expected_plan_id = _require_region_plan_final_id(plan_id)
+    request_sha256, request_bytes = _region_plan_request_bytes(request)
+    release_id = f"region-plan-{command}-{request_sha256[:12]}"
+    with _remote_session_factory(profile) as remote:
+        with remote.deployment_lock(str(profile["remote_root"]), release_id):
+            request_path = _stage_region_plan_request(
+                remote,
+                profile=profile,
+                request_bytes=request_bytes,
+                request_sha256=request_sha256,
+            )
+            raw = _run_region_plan_admin_command(
+                remote,
+                context=context,
+                command=command,
+                arguments=("--request", request_path, "--request-sha256", request_sha256),
+                contract_version=_REGION_PLAN_WORKFLOW_CONTRACT_VERSION,
+            )
+    return _safe_region_plan_workflow_result(
+        raw, command=command, expected_plan_id=expected_plan_id
+    )
+
+
+def _safe_region_plan_schema_v2_result(payload: Mapping[str, Any]) -> dict[str, Any]:
+    status = str(payload.get("status", ""))
+    if (
+        payload.get("contract_version") != _REGION_PLAN_SCHEMA_CONTRACT_VERSION
+        or status not in {"ready", "reconciled"}
+        or payload.get("environment") != "development"
+        or payload.get("dbname") != "vrp_db_dev"
+        or payload.get("target_id") != "development:vrp_db_dev"
+        or payload.get("schema_id") != _REGION_PLAN_SCHEMA_ID
+    ):
+        raise RuntimeError("Remote Region Plan schema v2 result is invalid.")
+    checksum = _require_region_plan_digest(payload.get("checksum_sha256"), field="checksum")
+    confirmation = str(payload.get("requires_confirmation", ""))
+    if confirmation != _REGION_PLAN_SCHEMA_CONFIRMATION:
+        raise RuntimeError("Remote Region Plan schema v2 confirmation is invalid.")
+    return {
+        "contract_version": _REGION_PLAN_SCHEMA_CONTRACT_VERSION,
+        "status": status,
+        "environment": "development",
+        "dbname": "vrp_db_dev",
+        "target_id": "development:vrp_db_dev",
+        "schema_id": _REGION_PLAN_SCHEMA_ID,
+        "checksum_sha256": checksum,
+    }
+
+
+def _run_region_plan_schema_v2(
+    remote: Any, *, context: Mapping[str, str], command: str,
+    arguments: Iterable[str] = (),
+) -> dict[str, Any]:
+    _verify_region_plan_admin_release(remote, context)
+    code, stdout, stderr = remote.execute_region_plan_json(
+        _region_plan_schema_cli_command(context, command, arguments),
+        timeout=_MASTER_ADMIN_TIMEOUT_SECONDS,
+    )
+    if code != 0:
+        detail = _redact(stderr).strip()
+        suffix = f" ({detail[:240]})" if detail else ""
+        raise RuntimeError(f"Remote Region Plan schema v2 {command} failed{suffix}")
+    try:
+        payload = json.loads(str(stdout or ""))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Remote Region Plan schema v2 returned invalid JSON.") from exc
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("Remote Region Plan schema v2 returned an invalid result.")
+    return _safe_region_plan_schema_v2_result(payload)
+
+
+def preview_region_plan_schema(*, environment: str) -> dict[str, Any]:
+    """Preview the single common Region Plan Schema v2 reconciler."""
+    profile, context = _region_plan_development_context(environment)
+    with _remote_session_factory(profile) as remote:
+        result = _run_region_plan_schema_v2(
+            remote, context=context, command="preview"
+        )
+    now = datetime.now(timezone.utc)
+    with _REGION_PLAN_SCHEMA_CONFIRMATION_LOCK:
+        expired = [
+            target
+            for target, (_, _, _, _, issued_at) in _REGION_PLAN_SCHEMA_CONFIRMATIONS.items()
+            if now - issued_at > _MASTER_PREVIEW_CONFIRMATION_TTL
+        ]
+        for target in expired:
+            _REGION_PLAN_SCHEMA_CONFIRMATIONS.pop(target, None)
+        _REGION_PLAN_SCHEMA_CONFIRMATIONS[context["remote_target_id"]] = (
+            _REGION_PLAN_SCHEMA_CONFIRMATION,
+            _REGION_PLAN_SCHEMA_ID,
+            result["checksum_sha256"],
+            context["release_version"],
+            now,
+        )
+    return result
+
+
+def install_region_plan_schema(*, environment: str, confirm: bool = False) -> dict[str, Any]:
+    """Reconcile the single common Region Plan Schema v2 checksum."""
+    profile, context = _region_plan_development_context(environment)
+    if confirm is not True:
+        raise PermissionError("Region-plan schema preparation requires explicit confirmation.")
+    now = datetime.now(timezone.utc)
+    with _REGION_PLAN_SCHEMA_CONFIRMATION_LOCK:
+        item = _REGION_PLAN_SCHEMA_CONFIRMATIONS.get(context["remote_target_id"])
+        if item is None:
+            raise PermissionError("Region-plan schema confirmation is unavailable; preview the migration first.")
+        confirmation, preview_schema_id, preview_checksum, release_version, issued_at = item
+        if now - issued_at > _MASTER_PREVIEW_CONFIRMATION_TTL:
+            _REGION_PLAN_SCHEMA_CONFIRMATIONS.pop(context["remote_target_id"], None)
+            raise PermissionError("Region-plan schema confirmation has expired; preview the migration again.")
+        if release_version != context["release_version"]:
+            raise PermissionError("Region-plan schema confirmation does not match the pinned release.")
+        if preview_schema_id != _REGION_PLAN_SCHEMA_ID:
+            raise PermissionError("Region-plan schema confirmation does not match Schema v2.")
+    with _remote_session_factory(profile) as remote:
+        with remote.deployment_lock(
+            str(profile["remote_root"]), f"region-plan-schema-{preview_checksum[:12]}"
+        ):
+            result = _run_region_plan_schema_v2(
+                remote, context=context, command="reconcile",
+                arguments=("--confirmation", confirmation),
+            )
+    if result["checksum_sha256"] != preview_checksum:
+        raise RuntimeError("Region-plan schema reconcile checksum differs from the preview.")
+    return result
+
+
+def _region_plan_resolution_request(
+    *,
+    profile: Mapping[str, Any],
+    source_version: str,
+    boundary_resolutions: Mapping[str, Any],
+    imported_by: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    version = _require_region_plan_digest(source_version, field="source_version")
+    # Revalidate the local immutable upload record before using its fixed remote
+    # path. This prevents a caller from promoting an arbitrary remote workbook.
+    _load_managed_data_version(
+        scope=_MANAGED_DATA_CANDIDATE_SCOPE,
+        dataset_id=_MANAGED_DATA_CANDIDATE_DATASET,
+        version=version,
+    )
+    return {
+        "schema": "region-plan-resolution-request/v1",
+        "source": _region_plan_managed_source_path(profile, version),
+        "source_sha256": version,
+        "managed_version": version,
+        "boundary_resolutions": _region_plan_boundary_resolutions(boundary_resolutions),
+        "imported_by": _require_region_plan_token(imported_by, field="imported_by"),
+        "idempotency_key": _require_region_plan_idempotency_key(idempotency_key),
+    }
+
+
+def _remember_region_plan_resolution_download(
+    *,
+    request_sha256: str,
+    request: Mapping[str, Any],
+    context: Mapping[str, str],
+) -> None:
+    resolutions = request.get("boundary_resolutions")
+    if not isinstance(resolutions, Mapping):
+        raise RuntimeError("Region-plan resolution request is invalid.")
+    normalized = _region_plan_boundary_resolutions(resolutions)
+    source_version = _require_region_plan_digest(
+        request.get("source_sha256"), field="source_version"
+    )
+    now = datetime.now(timezone.utc)
+    with _REGION_PLAN_RESOLUTION_DOWNLOAD_LOCK:
+        expired = [
+            digest
+            for digest, (_, _, _, _, issued_at) in _REGION_PLAN_RESOLUTION_DOWNLOADS.items()
+            if now - issued_at > _MASTER_PREVIEW_CONFIRMATION_TTL
+        ]
+        for digest in expired:
+            _REGION_PLAN_RESOLUTION_DOWNLOADS.pop(digest, None)
+        _REGION_PLAN_RESOLUTION_DOWNLOADS[request_sha256] = (
+            source_version,
+            normalized,
+            f"{context['remote_target_id']}:{context['release_version']}",
+            None,
+            now,
+        )
+
+
+def _remember_region_plan_final_binding(
+    *, result: Mapping[str, Any], source_version: str, context: Mapping[str, str]
+) -> None:
+    """Retain the backend-derived dynamic plan only behind its resolution digest."""
+
+    resolution_digest = _require_region_plan_digest(
+        result.get("resolution_digest"), field="resolution_digest"
+    )
+    plan_id = _require_region_plan_final_id(result.get("plan_id"))
+    if not plan_id.startswith("atlanta_6area_v2_"):
+        raise PermissionError("Legacy region-plan versions are read-only.")
+    if (
+        plan_id != _REGION_PLAN_FIXED_ID
+        and _region_plan_versioned_digest(plan_id) != resolution_digest
+    ):
+        raise RuntimeError("Region-plan final binding is invalid.")
+    version = _require_region_plan_digest(source_version, field="source_version")
+    now = datetime.now(timezone.utc)
+    with _REGION_PLAN_FINAL_BINDING_LOCK:
+        expired = [
+            digest
+            for digest, (_, _, _, issued_at) in _REGION_PLAN_FINAL_BINDINGS.items()
+            if now - issued_at > _MASTER_PREVIEW_CONFIRMATION_TTL
+        ]
+        for digest in expired:
+            _REGION_PLAN_FINAL_BINDINGS.pop(digest, None)
+        _REGION_PLAN_FINAL_BINDINGS[resolution_digest] = (
+            plan_id,
+            version,
+            f"{context['remote_target_id']}:{context['release_version']}",
+            now,
+        )
+
+
+def _bound_region_plan_id(
+    *, context: Mapping[str, str], resolution_digest: str
+) -> str:
+    digest = _require_region_plan_digest(resolution_digest, field="resolution_digest")
+    now = datetime.now(timezone.utc)
+    with _REGION_PLAN_FINAL_BINDING_LOCK:
+        item = _REGION_PLAN_FINAL_BINDINGS.get(digest)
+        if item is None:
+            raise PermissionError(
+                "Region-plan resolution binding is unavailable; resolve the candidate again."
+            )
+        plan_id, _source_version, target_release, issued_at = item
+        if now - issued_at > _MASTER_PREVIEW_CONFIRMATION_TTL:
+            _REGION_PLAN_FINAL_BINDINGS.pop(digest, None)
+            raise PermissionError(
+                "Region-plan resolution binding has expired; resolve the candidate again."
+            )
+        if target_release != f"{context['remote_target_id']}:{context['release_version']}":
+            raise PermissionError("Region-plan resolution binding does not match the selected target.")
+        return plan_id
+
+
+def _region_plan_resolution_artifact(
+    *, environment: str, resolution_digest: str, artifact_id: str
+) -> dict[str, Any]:
+    """Generate one explicit PII-bearing download from a memory-bound resolution."""
+
+    _profile, context = _region_plan_development_context(environment)
+    digest = _require_region_plan_digest(resolution_digest, field="resolution_digest")
+    now = datetime.now(timezone.utc)
+    with _REGION_PLAN_RESOLUTION_DOWNLOAD_LOCK:
+        item = _REGION_PLAN_RESOLUTION_DOWNLOADS.get(digest)
+        if item is None:
+            raise PermissionError("Region-plan download is unavailable; preview the resolutions again.")
+        source_version, resolutions, target_release, _plan_id, issued_at = item
+        if now - issued_at > _MASTER_PREVIEW_CONFIRMATION_TTL:
+            _REGION_PLAN_RESOLUTION_DOWNLOADS.pop(digest, None)
+            raise PermissionError("Region-plan download has expired; preview the resolutions again.")
+        if target_release != f"{context['remote_target_id']}:{context['release_version']}":
+            raise PermissionError("Region-plan download does not match the selected target.")
+        # Do not keep the mutable object owned by an outside caller after the
+        # lock: it contains operator-entered rationales and remains memory-only.
+        bound_resolutions = {
+            postal: dict(decision) for postal, decision in resolutions.items()
+        }
+    _metadata, source_bytes = _load_managed_data_version(
+        scope=_MANAGED_DATA_CANDIDATE_SCOPE,
+        dataset_id=_MANAGED_DATA_CANDIDATE_DATASET,
+        version=source_version,
+    )
+    from tools.data.atlanta_6area_plan import (
+        BOUNDARY_POLICY_FILENAME,
+        FIXED_REGION_FILENAME,
+        MANIFEST_FILENAME,
+        TECHNICIAN_POLICY_FILENAME,
+        build_atlanta_6area_bundle,
+    )
+
+    artifacts = {
+        "fixed_region_csv": (FIXED_REGION_FILENAME, "text/csv"),
+        "technician_policy_csv": (TECHNICIAN_POLICY_FILENAME, "text/csv"),
+        "boundary_policy_csv": (BOUNDARY_POLICY_FILENAME, "text/csv"),
+        "manifest": (MANIFEST_FILENAME, "application/json"),
+    }
+    selected = artifacts.get(str(artifact_id))
+    if selected is None:
+        raise ValueError("artifact_id is not allowed.")
+    try:
+        bundle = build_atlanta_6area_bundle(
+            source_bytes, boundary_resolutions=bound_resolutions
+        )
+    except Exception as exc:
+        # The data-owned parser supplies detailed validation internally; a
+        # download endpoint should not disclose its raw inputs or paths.
+        raise RuntimeError("Region-plan artifact could not be regenerated from the bound source.") from exc
+    filename, content_type = selected
+    payload = bundle.artifacts.get(filename)
+    if not isinstance(payload, bytes):
+        raise RuntimeError("Region-plan artifact is unavailable.")
+    return {
+        "artifact_id": str(artifact_id),
+        "file_name": filename,
+        "content_type": content_type,
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        # Bytes are intentionally returned only from this explicit download
+        # boundary. Do not add them to receipts, previews, or history.
+        "content": payload,
+    }
+
+
+def download_region_plan_resolution_artifact(
+    *, environment: str, resolution_digest: str, artifact_id: str
+) -> dict[str, Any]:
+    return _region_plan_resolution_artifact(
+        environment=environment,
+        resolution_digest=resolution_digest,
+        artifact_id=artifact_id,
+    )
+
+
+def preview_region_plan_resolutions(
+    *,
+    environment: str,
+    source_version: str,
+    boundary_resolutions: Mapping[str, Any],
+    imported_by: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """Validate a fixed resolution request locally without writing remote state."""
+
+    profile, _context = _region_plan_development_context(environment)
+    request = _region_plan_resolution_request(
+        profile=profile,
+        source_version=source_version,
+        boundary_resolutions=boundary_resolutions,
+        imported_by=imported_by,
+        idempotency_key=idempotency_key,
+    )
+    digest, _payload = _region_plan_request_bytes(request)
+    _remember_region_plan_resolution_download(
+        request_sha256=digest, request=request, context=_context
+    )
+    return {
+        "status": "ready",
+        "environment": _MANAGED_DATA_CANDIDATE_SCOPE,
+        "source_version": request["source_sha256"],
+        "request_sha256": digest,
+        "resolution_digest": digest,
+        "lifecycle_stage": "candidate_resolution_pending",
+        "artifacts": [
+            {"artifact_id": artifact_id, "available": True}
+            for artifact_id in (
+                "fixed_region_csv",
+                "technician_policy_csv",
+                "boundary_policy_csv",
+                "manifest",
+            )
+        ],
+    }
+
+
+def apply_region_plan_resolutions(
+    *,
+    environment: str,
+    source_version: str,
+    boundary_resolutions: Mapping[str, Any],
+    imported_by: str,
+    idempotency_key: str,
+    expected_request_sha256: str | None = None,
+    confirm: bool = False,
+) -> dict[str, Any]:
+    """Resolve the fixed candidate through an immutable, checksum-bound request."""
+
+    profile, context = _region_plan_development_context(environment)
+    if confirm is not True:
+        raise PermissionError("Region-plan resolution requires explicit confirmation.")
+    request = _region_plan_resolution_request(
+        profile=profile,
+        source_version=source_version,
+        boundary_resolutions=boundary_resolutions,
+        imported_by=imported_by,
+        idempotency_key=idempotency_key,
+    )
+    request_sha256, _request_bytes = _region_plan_request_bytes(request)
+    if expected_request_sha256 is not None and _require_region_plan_digest(
+        expected_request_sha256, field="expected_request_sha256"
+    ) != request_sha256:
+        raise PermissionError("Region-plan resolution request does not match its preview.")
+    result = _run_region_plan_workflow_request(
+        profile=profile, context=context, command="resolve", request=request
+    )
+    _remember_region_plan_resolution_download(
+        request_sha256=request_sha256, request=request, context=context
+    )
+    _remember_region_plan_final_binding(
+        result=result,
+        source_version=str(request["source_sha256"]),
+        context=context,
+    )
+    # The browser may still download the locally regenerated bound artifacts.
+    # Alias that request record by the Admin Tools decision digest returned for
+    # the final plan, without replacing the preview-time request binding.
+    final_digest = str(result["resolution_digest"])
+    with _REGION_PLAN_RESOLUTION_DOWNLOAD_LOCK:
+        item = _REGION_PLAN_RESOLUTION_DOWNLOADS.get(request_sha256)
+        if item is None:
+            raise RuntimeError("Region-plan resolution download binding was lost.")
+        source_version, resolutions, target_release, _plan_id, issued_at = item
+        _REGION_PLAN_RESOLUTION_DOWNLOADS[final_digest] = (
+            source_version,
+            resolutions,
+            target_release,
+            str(result["plan_id"]),
+            issued_at,
+        )
+    result["request_sha256"] = request_sha256
+    result["artifacts"] = [
+        {"artifact_id": artifact_id, "available": True}
+        for artifact_id in (
+            "fixed_region_csv",
+            "technician_policy_csv",
+            "boundary_policy_csv",
+            "manifest",
+        )
+    ]
+    return result
+
+
+def review_region_plan(
+    *,
+    environment: str,
+    expected_revision: int,
+    reviewed_by: str,
+    review_reference: str,
+    resolution_digest: str | None = None,
+    confirm: bool = False,
+) -> dict[str, Any]:
+    """Review a locally bound resolved plan at an optimistic revision."""
+
+    profile, context = _region_plan_development_context(environment)
+    if confirm is not True:
+        raise PermissionError("Region-plan review requires explicit confirmation.")
+    plan_id = (
+        _REGION_PLAN_FIXED_ID
+        if resolution_digest is None
+        else _bound_region_plan_id(context=context, resolution_digest=resolution_digest)
+    )
+    request = {
+        "schema": "region-plan-review-request/v1",
+        "plan_id": plan_id,
+        "expected_revision": _require_region_plan_revision(
+            expected_revision, field="expected_revision"
+        ),
+        "reviewed_by": _require_region_plan_token(reviewed_by, field="reviewed_by"),
+        "review_reference": _require_region_plan_token(
+            review_reference, field="review_reference"
+        ),
+    }
+    return _run_region_plan_workflow_request(
+        profile=profile, context=context, command="review", request=request
+    )
+
+
+def preview_region_plan_activation(
+    *, environment: str, resolution_digest: str | None = None
+) -> dict[str, Any]:
+    """Obtain a target-bound activation digest for a locally bound reviewed plan."""
+
+    profile, context = _region_plan_development_context(environment)
+    plan_id = (
+        _REGION_PLAN_FIXED_ID
+        if resolution_digest is None
+        else _bound_region_plan_id(context=context, resolution_digest=resolution_digest)
+    )
+    raw_result = _run_region_plan_workflow_request(
+        profile=profile,
+        context=context,
+        command="activation-preview",
+        request={
+            "schema": "region-plan-activation-preview-request/v1",
+            "plan_id": plan_id,
+        },
+    )
+    now = datetime.now(timezone.utc)
+    with _REGION_PLAN_ACTIVATION_PREVIEW_LOCK:
+        expired = [
+            digest
+            for digest, (_, _, _, _, _, issued_at) in _REGION_PLAN_ACTIVATION_PREVIEWS.items()
+            if now - issued_at > _MASTER_PREVIEW_CONFIRMATION_TTL
+        ]
+        for digest in expired:
+            _REGION_PLAN_ACTIVATION_PREVIEWS.pop(digest, None)
+        _REGION_PLAN_ACTIVATION_PREVIEWS[raw_result["preview_id"]] = (
+            raw_result["preview_digest"],
+            raw_result["checksum"],
+            raw_result["expected_activation_revision"],
+            plan_id,
+            f"{context['remote_target_id']}:{context['release_version']}",
+            now,
+        )
+    return raw_result
+
+
+def apply_region_plan_activation(
+    *,
+    environment: str,
+    preview_id: str,
+    preview_digest: str,
+    activated_by: str,
+    activation_reference: str,
+    idempotency_key: str,
+    confirm: bool = False,
+) -> dict[str, Any]:
+    """Activate only an in-memory bound preview; never accept a caller checksum/revision."""
+
+    profile, context = _region_plan_development_context(environment)
+    if confirm is not True:
+        raise PermissionError("Region-plan activation requires explicit confirmation.")
+    preview_id = _require_region_plan_digest(preview_id, field="preview_id")
+    preview_digest = _require_region_plan_digest(preview_digest, field="preview_digest")
+    now = datetime.now(timezone.utc)
+    with _REGION_PLAN_ACTIVATION_PREVIEW_LOCK:
+        item = _REGION_PLAN_ACTIVATION_PREVIEWS.get(preview_id)
+        if item is None:
+            raise PermissionError("Region-plan activation preview is unavailable; create a new preview.")
+        digest, checksum, expected_revision, plan_id, target_release, issued_at = item
+        if now - issued_at > _MASTER_PREVIEW_CONFIRMATION_TTL:
+            _REGION_PLAN_ACTIVATION_PREVIEWS.pop(preview_id, None)
+            raise PermissionError("Region-plan activation preview has expired; create a new preview.")
+        if (
+            digest != preview_digest
+            or target_release != f"{context['remote_target_id']}:{context['release_version']}"
+        ):
+            raise PermissionError("Region-plan activation preview does not match the selected target.")
+    request = {
+        "schema": "region-plan-activate-request/v1",
+        "plan_id": plan_id,
+        "preview_id": preview_id,
+        "preview_digest": preview_digest,
+        "checksum": checksum,
+        "expected_activation_revision": expected_revision,
+        "activated_by": _require_region_plan_token(activated_by, field="activated_by"),
+        "activation_reference": _require_region_plan_token(
+            activation_reference, field="activation_reference"
+        ),
+        "idempotency_key": _require_region_plan_idempotency_key(idempotency_key),
+    }
+    return _run_region_plan_workflow_request(
+        profile=profile, context=context, command="activate", request=request
+    )
 
 
 def _development_admin_tools_activation_context(
@@ -4780,39 +7808,241 @@ def rollback_release(
     return {"status": "rolled_back", "remote_path": entry.get("version", "")}
 
 
+def _region_plan_v2_api_origin() -> str:
+    """Return the single, locally configured Region Plan v2 API origin.
+
+    The console intentionally does not accept an endpoint from the browser.  It
+    prevents a UI action from becoming an SSRF primitive and keeps the API
+    destination stable across upload/review/activation steps.
+    """
+    origin = os.environ.get(_REGION_PLAN_V2_API_ENV, _REGION_PLAN_V2_API_ORIGIN).strip()
+    parsed = urlparse(origin)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise RuntimeError("Region Plan v2 API endpoint configuration is invalid.")
+    return origin.rstrip("/")
+
+
+def _region_plan_v2_url(path: str) -> str:
+    if not path.startswith("/") or ".." in path or "?" in path:
+        raise ValueError("Region Plan v2 API path is invalid.")
+    return _region_plan_v2_api_origin() + "/api/region-plans/v2" + path
+
+
+def _region_plan_v2_resource_id(value: object, *, field: str) -> str:
+    token = str(value).strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,159}", token):
+        raise ValueError(f"Region Plan v2 {field} is invalid.")
+    return token
+
+
+def _region_plan_v2_request(
+    method: str, path: str, *, body: bytes | None = None,
+    headers: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    request_headers = {"Accept": "application/json"}
+    request_headers.update(dict(headers or {}))
+    request = Request(_region_plan_v2_url(path), data=body, headers=request_headers, method=method)
+    try:
+        with urlopen(request, timeout=_REGION_PLAN_V2_TIMEOUT_SECONDS) as response:  # nosec B310: fixed configured origin
+            raw, status = response.read(), response.status
+    except HTTPError as exc:
+        raw, status = exc.read(), exc.code
+    except URLError as exc:
+        return {"contract_version": "region-plan/v2", "status": "failed", "error": {
+            "code": "REGION_PLAN_API_UNAVAILABLE", "message": "Region Plan API is unavailable.", "retryable": True,
+        }}
+    try:
+        envelope = json.loads(raw.decode("utf-8")) if raw else {}
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        envelope = {}
+    if not isinstance(envelope, dict):
+        envelope = {}
+    envelope["http_status"] = int(status)
+    if "status" not in envelope:
+        envelope.update({"contract_version": "region-plan/v2", "status": "failed", "error": {
+            "code": "REGION_PLAN_API_INVALID_RESPONSE", "message": "Region Plan API returned an invalid response.", "retryable": status >= 500,
+        }})
+    return envelope
+
+
+def _region_plan_v2_json(method: str, path: str, payload: Mapping[str, Any] | None = None, *,
+                         revision: int | None = None) -> dict[str, Any]:
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if revision is not None:
+        headers["If-Match"] = str(int(revision))
+    body = None if payload is None else json.dumps(dict(payload), separators=(",", ":")).encode("utf-8")
+    if method != "GET":
+        # The same logical request gets the same key across browser/API retries.
+        # Authentication is server-owned because this client is loopback-only.
+        fingerprint = hashlib.sha256(method.encode() + b"\0" + path.encode() + b"\0" + (body or b"{}")).hexdigest()
+        headers["Idempotency-Key"] = str(uuid.uuid5(uuid.NAMESPACE_URL, f"region-plan-v2:{fingerprint}"))
+    return _region_plan_v2_request(method, path, body=body, headers=headers)
+
+
+def list_region_plan_v2_cities() -> dict[str, Any]:
+    return _region_plan_v2_json("GET", "/cities")
+
+
+def list_region_plan_v2_candidates(*, subsidiary_id: str, target_city_id: str) -> dict[str, Any]:
+    # Candidate discovery is API-owned.  The query is encoded as a JSON request
+    # body only where the v2 API exposes a list endpoint; no DB fallback exists.
+    city = str(target_city_id).strip()
+    if not city:
+        raise ValueError("Target city is required.")
+    subsidiary = str(subsidiary_id).strip()
+    if not subsidiary:
+        raise ValueError("Subsidiary is required.")
+    return _region_plan_v2_json(
+        "POST", "/plans/list",
+        {"subsidiary_id": subsidiary, "target_city_id": city},
+    )
+
+
+def import_region_plan_v2_workbook(*, workbook_name: str, workbook_bytes: bytes,
+                                   metadata: Mapping[str, Any]) -> dict[str, Any]:
+    if not workbook_name.lower().endswith(".xlsx") or not workbook_bytes:
+        raise ValueError("Select a non-empty .xlsx workbook.")
+    if len(workbook_bytes) > _REGION_PLAN_V2_MAX_WORKBOOK_BYTES:
+        raise ValueError("Workbook exceeds the console upload limit.")
+    city_metadata = {
+        str(key): str(value) for key, value in dict(metadata).items()
+        if value is not None
+    }
+    return _region_plan_v2_json("POST", "/imports", {
+        "workbook_name": Path(workbook_name).name,
+        "workbook_base64": base64.b64encode(workbook_bytes).decode("ascii"),
+        "city_metadata": city_metadata,
+    })
+
+
+def get_region_plan_v2_plan(*, subsidiary_id: str, target_city_id: str, plan_id: str) -> dict[str, Any]:
+    return adopt_region_plan_v2_candidate(
+        subsidiary_id=subsidiary_id,
+        target_city_id=target_city_id,
+        plan_id=plan_id,
+    )
+
+
+def adopt_region_plan_v2_candidate(*, subsidiary_id: str, target_city_id: str,
+                                   plan_id: str) -> dict[str, Any]:
+    return _region_plan_v2_json("POST", "/adopt", {
+        "subsidiary_id": str(subsidiary_id).strip(),
+        "target_city_id": str(target_city_id).strip(),
+        "plan_id": _region_plan_v2_resource_id(plan_id, field="plan id"),
+    })
+
+
+def review_region_plan_v2(*, subsidiary_id: str, target_city_id: str, plan_id: str,
+                          plan_revision: int, activation_revision: int) -> dict[str, Any]:
+    return _region_plan_v2_json("POST", f"/plans/{_region_plan_v2_resource_id(plan_id, field='plan id')}/review", {
+        "subsidiary_id": str(subsidiary_id).strip(),
+        "target_city_id": str(target_city_id).strip(),
+        "plan_revision": int(plan_revision),
+        "activation_revision": int(activation_revision),
+    }, revision=plan_revision)
+
+
+def preview_region_plan_v2_activation(*, subsidiary_id: str, target_city_id: str, plan_id: str,
+                                      plan_revision: int,
+                                      activation_revision: int) -> dict[str, Any]:
+    return _region_plan_v2_json("POST", f"/plans/{_region_plan_v2_resource_id(plan_id, field='plan id')}/activation-preview", {
+        "subsidiary_id": str(subsidiary_id).strip(),
+        "target_city_id": str(target_city_id).strip(),
+        "plan_revision": int(plan_revision),
+        "activation_revision": int(activation_revision),
+    }, revision=plan_revision)
+
+
+def activate_region_plan_v2(*, subsidiary_id: str, target_city_id: str, plan_id: str,
+                            plan_revision: int, activation_revision: int,
+                            preview_token: str, activation_reference: str) -> dict[str, Any]:
+    return _region_plan_v2_json("POST", f"/plans/{_region_plan_v2_resource_id(plan_id, field='plan id')}/activate", {
+        "subsidiary_id": str(subsidiary_id).strip(),
+        "target_city_id": str(target_city_id).strip(),
+        "plan_revision": int(plan_revision),
+        "activation_revision": int(activation_revision),
+        "preview_token": str(preview_token).strip(),
+        "activation_reference": str(activation_reference).strip(),
+        "confirmation": True,
+    }, revision=plan_revision)
+
+
+def rollback_region_plan_v2(*, subsidiary_id: str, target_city_id: str, plan_id: str,
+                            plan_revision: int, activation_revision: int,
+                            preview_token: str, rollback_reason: str,
+                            confirmation: str) -> dict[str, Any]:
+    reason=str(rollback_reason).strip()
+    if not reason or confirmation != "ROLLBACK":
+        raise ValueError("Rollback reason and exact ROLLBACK confirmation are required.")
+    city=_region_plan_v2_resource_id(target_city_id,field="target city id")
+    return _region_plan_v2_json("POST",f"/cities/{city}/rollback",{
+        "subsidiary_id":str(subsidiary_id).strip(),"target_city_id":city,
+        "plan_id":_region_plan_v2_resource_id(plan_id,field="plan id"),
+        "plan_revision":int(plan_revision),"activation_revision":int(activation_revision),
+        "preview_token":str(preview_token).strip(),"rollback_reason":reason,
+        "confirmation":"ROLLBACK",
+    },revision=plan_revision)
+
+
 __all__ = [
     "ArtifactEntry",
     "ArtifactInspection",
     "activate_admin_tools_development_release",
     "apply_managed_data_db_sync",
+    "apply_managed_technician_profile_sync",
+    "apply_fixed_region_plan_bundle_import",
+    "apply_region_plan_activation",
+    "apply_region_plan_resolutions",
     "build_admin_tools_artifact",
     "build_runtime_artifact",
     "deployment_policy",
+    "download_region_plan_resolution_artifact",
     "execute_migration",
     "get_connection_settings",
     "get_database_overview",
     "get_master_change_receipt",
     "inspect_artifact",
+    "install_region_plan_schema",
+    "list_region_plan_v2_candidates",
+    "list_region_plan_v2_cities",
     "list_artifacts",
     "list_history",
     "list_managed_data_sets",
     "list_managed_data_versions",
     "list_migrations",
     "list_master_table_specs",
+    "list_region_plan_schema_migrations",
     "list_seed_actions",
     "observe_platform",
     "observe_services",
+    "get_fixed_region_plan_bundle_status",
     "preview_migration",
+    "preview_fixed_region_plan_bundle_import",
+    "preview_region_plan_activation",
+    "preview_region_plan_resolutions",
+    "preview_region_plan_schema",
     "preview_master_csv_upsert",
     "preview_admin_tools_build",
     "preview_admin_tools_development_activation",
     "preview_managed_data_db_sync",
+    "preview_managed_technician_profile_sync",
     "preview_managed_data_upload",
     "preview_managed_data_version",
     "preview_runtime_build",
     "preview_remote_diff",
     "preview_development_secure_config_upload",
+    "preview_production_secure_config_upload",
     "resolve_latest_runtime_artifact",
+    "review_region_plan",
+    "review_region_plan_v2",
     "rollback_release",
     "run_seed_action",
     "apply_master_csv_upsert",
@@ -4820,5 +8050,12 @@ __all__ = [
     "upload_artifact",
     "upload_managed_data_file",
     "upload_development_secure_config",
+    "upload_production_secure_config",
     "update_connection_settings",
+    "import_region_plan_v2_workbook",
+    "get_region_plan_v2_plan",
+    "adopt_region_plan_v2_candidate",
+    "preview_region_plan_v2_activation",
+    "activate_region_plan_v2",
+    "rollback_region_plan_v2",
 ]

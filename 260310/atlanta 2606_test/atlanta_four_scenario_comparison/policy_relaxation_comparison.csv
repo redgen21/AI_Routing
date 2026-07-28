@@ -1,0 +1,5 @@
+﻿scenario,policy_version,relaxed_jobs,relaxed_slots,reassigned_to_other_technician_jobs,reassigned_to_other_technician_slots,relaxed_unassigned_jobs,relaxed_unassigned_slots
+Integrated_13tech,hard_fixed_integrated/v1,0,0,0,0,0,0
+Atlanta_3area,fixed_outside_active_plan_soft_priority/v1,112,148,110,145,2,3
+Atlanta_6area_new,fixed_outside_active_plan_soft_priority/v1,126,170,123,166,3,4
+Atlanta_6area_overlab,fixed_outside_active_plan_soft_priority/v1,92,126,90,124,2,2

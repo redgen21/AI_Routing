@@ -2,7 +2,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
-$outputRelative = ".artifact-test"
+$testId = [guid]::NewGuid().ToString("N")
+$version = "contract-test-$testId"
+$outputRelative = ".artifact-test-$testId"
 $output = [System.IO.Path]::GetFullPath((Join-Path $root $outputRelative))
 $dirtyMarker = Join-Path $output ".dirty-source-marker"
 if (-not $output.StartsWith("$root$([System.IO.Path]::DirectorySeparatorChar)", [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -14,8 +16,8 @@ try {
     New-Item -ItemType Directory -Path $output -Force | Out-Null
     Set-Content -LiteralPath $dirtyMarker -Value "contract test only" -Encoding UTF8
     & (Join-Path $root "services\deploy\build_deploy_package.ps1") `
-        -Version "contract-test" -OutputDir $outputRelative -Environment development -AllowDirtySource
-    $staging = Join-Path $output "development\contract-test"
+        -Version $version -OutputDir $outputRelative -Environment development -AllowDirtySource
+    $staging = Join-Path $output "development\$version"
     $smartRoutingRequired = @(
         "smart_routing\__init__.py",
         "smart_routing\area_map.py",
@@ -62,8 +64,13 @@ try {
         "services\__init__.py",
         "services\api\__init__.py",
         "services\api\common_vrp_config.py",
+        "services\api\region_plan_repository_v2.py",
+        "services\api\region_plan_v2.py",
         "services\api\run_common_vrp_api.py",
         "services\api\sr_vrp_api_server.py",
+        "tools\__init__.py",
+        "tools\data\__init__.py",
+        "tools\data\region_plan_workflow_v2.py",
         "systemd\common-vrp-dev.service",
         "systemd\common-vrp-client-dev.service",
         "systemd\smart-routing-dev.service"
@@ -91,7 +98,6 @@ try {
         "services\tests",
         "osrm",
         "prompts",
-        "tools",
         "data",
         "config\server_ftp.local.json",
         "sr_area_map.py",
@@ -110,6 +116,35 @@ try {
         if (Test-Path -LiteralPath (Join-Path $staging $relative)) {
             throw "Server runtime artifact contains development/operations file: $relative"
         }
+    }
+    $actualTools = Get-ChildItem -LiteralPath (Join-Path $staging "tools") -Recurse -File |
+        ForEach-Object { $_.FullName.Substring($staging.Length + 1).Replace("/", "\") } |
+        Sort-Object
+    $expectedTools = @(
+        "tools\__init__.py",
+        "tools\data\__init__.py",
+        "tools\data\region_plan_workflow_v2.py"
+    ) | Sort-Object
+    if (Compare-Object -ReferenceObject $expectedTools -DifferenceObject $actualTools) {
+        throw "Runtime tools subset differs from the explicit Region Plan v2 allowlist."
+    }
+    $actualServiceApi = Get-ChildItem -LiteralPath (Join-Path $staging "services\api") -File |
+        ForEach-Object { "services\api\$($_.Name)" } |
+        Sort-Object
+    $expectedServiceApi = @(
+        "services\api\__init__.py",
+        "services\api\common_vrp_config.py",
+        "services\api\region_plan_repository_v2.py",
+        "services\api\region_plan_v2.py",
+        "services\api\run_common_vrp_api.py",
+        "services\api\sr_vrp_api_server.py"
+    ) | Sort-Object
+    if (Compare-Object -ReferenceObject $expectedServiceApi -DifferenceObject $actualServiceApi) {
+        throw "Runtime services/api subset differs from the explicit server allowlist."
+    }
+    $builderSource = Get-Content -LiteralPath (Join-Path $root "services\deploy\build_deploy_package.ps1") -Raw
+    if ($builderSource -notmatch "Runtime secret scan rejected") {
+        throw "Runtime artifact builder does not contain a fail-closed secret scan."
     }
     $manifestPath = Join-Path $staging "deploy_manifest.json"
     $manifestBytes = [System.IO.File]::ReadAllBytes($manifestPath)
@@ -179,7 +214,7 @@ try {
         $env:PYTHONPATH = $staging
         Push-Location $staging
         try {
-            & python -c "import sr_common_vrp_api_server, sr_common_vrp_client_server, sr_vrp_api_server; from smart_routing.vrp_api_service import _load_mode_handler; assert callable(_load_mode_handler('na_general')); assert callable(_load_mode_handler('z_weekend'))"
+            & python -c "import sr_common_vrp_api_server, sr_common_vrp_client_server, sr_vrp_api_server; import services.api.region_plan_repository_v2; import services.api.region_plan_v2; import tools.data.region_plan_workflow_v2; from smart_routing.vrp_api_service import _load_mode_handler; assert callable(_load_mode_handler('na_general')); assert callable(_load_mode_handler('z_weekend'))"
             if ($LASTEXITCODE -ne 0) {
                 throw "Generated artifact import/dynamic-handler smoke test failed."
             }

@@ -10,6 +10,18 @@ Parallel work is limited to independent files or read-only investigation.
 Use only the specialists materially affected by the request; the larger registry
 does not mean every task should use every agent.
 
+### Data access before delegation
+
+- The main orchestration agent must not read full CSV/XLSX contents before
+  delegation.
+- The main orchestration agent may inspect only filenames, file sizes,
+  extensions, headers, and row counts for triage.
+- CSV/XLSX content inspection, profiling, transformation, validation, and writing
+  must be delegated to `terra_routing_data`.
+- Large files must be sampled or profiled through a bounded tool or script.
+- If the main orchestration agent reads data directly as an exception, the
+  reason and scope must be recorded.
+
 ## Agent routing
 
 ### `luna_worker`

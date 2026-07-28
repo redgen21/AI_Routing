@@ -1,0 +1,9 @@
+﻿scenario,job_slot_count,total_jobs,assigned_jobs,unassigned_jobs,requested_slots,assigned_slots,job_fill_rate_pct
+Integrated_13tech,1,1032,975,57,1032,975,94.47674418604652
+Integrated_13tech,2,457,380,77,914,760,83.15098468271334
+Integrated_13tech,3,16,16,0,48,48,100.0
+Integrated_13tech,4,1,1,0,4,4,100.0
+Atlanta_6area_13tech,1,1032,882,150,1032,882,85.46511627906976
+Atlanta_6area_13tech,2,457,321,136,914,642,70.24070021881839
+Atlanta_6area_13tech,3,16,16,0,48,48,100.0
+Atlanta_6area_13tech,4,1,1,0,4,4,100.0

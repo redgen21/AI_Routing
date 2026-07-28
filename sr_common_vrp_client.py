@@ -45,7 +45,22 @@ COMMON_JOB_STORE_PATH = Path("data/common_vrp_job_input.parquet")
 COMMON_TECHNICIAN_STORE_PATH = Path("data/common_vrp_technician_input.parquet")
 DEFAULT_SUBSIDIARY_NAME = "LGEAI"
 DEFAULT_STRATEGIC_CITY_NAME = "Atlanta, GA"
-DEFAULT_STRATEGIC_CITY_OPTIONS = [DEFAULT_STRATEGIC_CITY_NAME, "Los Angeles, CA"]
+ATLANTA_6AREA_CITY_NAME = "Atlanta_6area"
+ATLANTA_REGION_CITY_NAMES = (
+    ATLANTA_6AREA_CITY_NAME,
+    "Atlanta_3area",
+    "Atlanta_6area_new",
+    "Atlanta_6area_overlab",
+)
+STRATEGIC_CITY_BASE_ALIASES = {
+    city_name: DEFAULT_STRATEGIC_CITY_NAME for city_name in ATLANTA_REGION_CITY_NAMES
+}
+_CITY_CONTEXT_METADATA: dict[str, dict[str, object]] = {}
+DEFAULT_STRATEGIC_CITY_OPTIONS = [
+    DEFAULT_STRATEGIC_CITY_NAME,
+    *ATLANTA_REGION_CITY_NAMES,
+    "Los Angeles, CA",
+]
 KM_TO_MILES = 0.621371
 FORCE_ASSIGN_PREVIEW_KEY = "common_vrp_force_assign_preview"
 
@@ -258,11 +273,62 @@ def _load_common_client_config(config_path: str = str(CONFIG_COMMON_PATH)) -> di
         return {}
 
 
+def _register_context_city_metadata(contexts: object) -> None:
+    """Cache optional API context metadata without assuming it is present."""
+    global _CITY_CONTEXT_METADATA
+    if not isinstance(contexts, dict):
+        _CITY_CONTEXT_METADATA = {}
+        return
+    metadata: dict[str, dict[str, object]] = {}
+    for key in ("city_metadata", "city_contexts", "region_plan_cities"):
+        value = contexts.get(key)
+        entries = value.items() if isinstance(value, dict) else (("", item) for item in value) if isinstance(value, list) else []
+        for city_key, entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            city_name = _clean_text(entry.get("strategic_city_name") or entry.get("city_name") or entry.get("city_key") or city_key)
+            if city_name:
+                metadata[city_name] = dict(entry)
+    _CITY_CONTEXT_METADATA = metadata
+
+
+def _context_city_value(strategic_city_name: str, *keys: str) -> str:
+    metadata = _CITY_CONTEXT_METADATA.get(_clean_text(strategic_city_name), {})
+    for key in keys:
+        value = _clean_text(metadata.get(key))
+        if value:
+            return value
+    return ""
+
+
+def _context_base_city_name(strategic_city_name: str) -> str:
+    requested_city = _clean_text(strategic_city_name)
+    return _context_city_value(
+        requested_city,
+        "source_strategic_city_name",
+        "base_city_name",
+        "geometry_city_name",
+    ) or STRATEGIC_CITY_BASE_ALIASES.get(requested_city, requested_city)
+
+
+def _context_source_city_name(strategic_city_name: str) -> str:
+    """Return the API-declared operational source for an active plan context."""
+    requested_city = _clean_text(strategic_city_name)
+    return _context_city_value(
+        requested_city,
+        "source_strategic_city_name",
+        "operational_source_city_name",
+    ) or requested_city
+
+
 def _resolve_city_osrm_url(strategic_city_name: str) -> str:
     cfg = _load_common_client_config()
     routing_seed = cfg.get("routing_seed", {}) if isinstance(cfg.get("routing_seed", {}), dict) else {}
     city_urls = routing_seed.get("city_osrm_urls", {}) if isinstance(routing_seed.get("city_osrm_urls", {}), dict) else {}
-    city_url = str(city_urls.get(str(strategic_city_name).strip(), "")).strip()
+    requested_city = _clean_text(strategic_city_name)
+    city_url = _context_city_value(requested_city, "osrm_url", "osrm_base_url")
+    base_city = _context_base_city_name(requested_city)
+    city_url = city_url or str(city_urls.get(base_city, "")).strip()
     if city_url:
         return city_url
     return ""
@@ -366,14 +432,14 @@ def _default_city_center(strategic_city_name: str) -> tuple[float, float]:
 
 
 def _geometry_city_name(strategic_city_name: str) -> str:
-    city_name = str(strategic_city_name or "").strip()
+    city_name = _context_base_city_name(strategic_city_name)
     if city_name.startswith("Los Angeles, CA - "):
         return "Los Angeles, CA"
     return city_name
 
 
 def _profile_city_name(strategic_city_name: str) -> str:
-    return _geometry_city_name(strategic_city_name)
+    return _context_city_value(strategic_city_name, "profile_city_name") or _geometry_city_name(strategic_city_name)
 
 
 def _marker_border_style(center_type: object) -> tuple[str, str]:
@@ -1578,9 +1644,63 @@ def _city_options_for_subsidiary(contexts: dict, subsidiary_name: str) -> list[s
         city_options = cities_by_subsidiary.get(str(subsidiary_name), []) or []
     if not city_options:
         city_options = contexts.get("cities", []) if isinstance(contexts, dict) else []
+    cleaned = [_clean_text(city) for city in city_options if _clean_text(city)]
+    # Static choices are an offline fallback only.  An API response is the
+    # authority for active region-plan contexts, including LA_6area.
+    if cleaned:
+        return list(dict.fromkeys(cleaned))
     if str(subsidiary_name) == DEFAULT_SUBSIDIARY_NAME:
-        return _with_default_city_options(city_options)
-    return [_clean_text(city) for city in city_options if _clean_text(city)]
+        return _with_default_city_options([])
+    return []
+
+
+def _load_payload_source_rows(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    promise_date: str,
+) -> tuple[str, pd.DataFrame, pd.DataFrame]:
+    """Load plan-context source work and roster through the versioned API."""
+    source_city_name = _context_source_city_name(strategic_city_name)
+    jobs_df = pd.DataFrame(
+        _api_get(
+            DEFAULT_COMMON_SERVER_URL,
+            "/api/v1/common/jobs",
+            subsidiary_name=subsidiary_name,
+            strategic_city_name=source_city_name,
+        ).get("rows", [])
+    )
+    if not jobs_df.empty and "promise_date" in jobs_df.columns:
+        jobs_df = jobs_df[jobs_df["promise_date"].astype(str) == str(promise_date)].copy()
+    technicians_df = pd.DataFrame(
+        _api_get(
+            DEFAULT_COMMON_SERVER_URL,
+            "/api/v1/common/technicians",
+            subsidiary_name=subsidiary_name,
+            strategic_city_name=source_city_name,
+            promise_date=str(promise_date),
+        ).get("rows", [])
+    )
+    return source_city_name, jobs_df, technicians_df
+
+
+def _build_payload_request(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    promise_date: str,
+    jobs_df: pd.DataFrame,
+    technicians_df: pd.DataFrame,
+    capability_rows: list[dict],
+) -> dict:
+    """Keep the submitted routing request traceable to the selected context."""
+    return {
+        "subsidiary_name": subsidiary_name,
+        "strategic_city_name": strategic_city_name,
+        "promise_date": str(promise_date),
+        "jobs": jobs_df.to_dict("records"),
+        "technicians": technicians_df.to_dict("records"),
+        "capabilities": capability_rows,
+        "mode": "na_general",
+    }
 
 
 def _read_uploaded_technician_master_csv(
@@ -3935,20 +4055,29 @@ def _render_technicians_tab(subsidiary_name: str, strategic_city_name: str) -> N
 
 
 def _render_payload_tab(subsidiary_name: str, strategic_city_name: str) -> None:
-    jobs_df = _load_local_jobs(subsidiary_name, strategic_city_name)
-    if jobs_df.empty:
-        st.info("No saved jobs.")
+    source_city_name = _context_source_city_name(strategic_city_name)
+    source_jobs_df = pd.DataFrame(
+        _api_get(
+            DEFAULT_COMMON_SERVER_URL,
+            "/api/v1/common/jobs",
+            subsidiary_name=subsidiary_name,
+            strategic_city_name=source_city_name,
+        ).get("rows", [])
+    )
+    if source_jobs_df.empty or "promise_date" not in source_jobs_df.columns:
+        st.info("No API source jobs for the selected context.")
         return
-    promise_dates = sorted(jobs_df["promise_date"].dropna().astype(str).unique().tolist(), reverse=True)
+    promise_dates = sorted(source_jobs_df["promise_date"].dropna().astype(str).unique().tolist(), reverse=True)
     selected_date = st.selectbox("PROMISE_DATE to Build Payload", promise_dates, index=0 if promise_dates else None)
-    selected_jobs_df = jobs_df[jobs_df["promise_date"].astype(str) == str(selected_date)].copy() if selected_date else jobs_df.head(0).copy()
-    technicians_df = _load_local_technicians(subsidiary_name, strategic_city_name, str(selected_date))
+    source_city_name, selected_jobs_df, technicians_df = _load_payload_source_rows(
+        subsidiary_name, strategic_city_name, str(selected_date)
+    )
     engineer_master_df = pd.DataFrame(
         _api_get(
             DEFAULT_COMMON_SERVER_URL,
             "/api/v1/common/engineers",
             subsidiary_name=subsidiary_name,
-            strategic_city_name=strategic_city_name,
+            strategic_city_name=source_city_name,
         ).get("rows", [])
     )
     technicians_df = _normalize_technician_rows(
@@ -3960,9 +4089,10 @@ def _render_payload_tab(subsidiary_name: str, strategic_city_name: str) -> None:
         default_source="manual_input",
     )
     capability_rows = _build_capability_rows_for_payload(strategic_city_name, technicians_df, selected_jobs_df)
-    st.caption(f"Jobs for selected date: {len(selected_jobs_df)}")
+    st.caption(f"API source context: {source_city_name} → routing context: {strategic_city_name}")
+    st.caption(f"API source jobs for selected date: {len(selected_jobs_df)}")
     available_tech_count = int(technicians_df["available"].fillna(False).astype(bool).sum()) if not technicians_df.empty and "available" in technicians_df.columns else 0
-    st.caption(f"Available technicians saved: {available_tech_count}")
+    st.caption(f"Available API source technicians: {available_tech_count}")
     st.caption(f"Capability rows prepared: {len(capability_rows)}")
 
     if st.button("Build Payload", type="primary", width="stretch"):
@@ -3971,15 +4101,14 @@ def _render_payload_tab(subsidiary_name: str, strategic_city_name: str) -> None:
                 response = _api_post(
                     DEFAULT_COMMON_SERVER_URL,
                     "/api/v1/common/routing/build-payload",
-                    {
-                        "subsidiary_name": subsidiary_name,
-                        "strategic_city_name": strategic_city_name,
-                        "promise_date": str(selected_date),
-                        "jobs": selected_jobs_df.to_dict("records"),
-                        "technicians": technicians_df.to_dict("records"),
-                        "capabilities": capability_rows,
-                        "mode": "na_general",
-                    },
+                    _build_payload_request(
+                        subsidiary_name,
+                        strategic_city_name,
+                        str(selected_date),
+                        selected_jobs_df,
+                        technicians_df,
+                        capability_rows,
+                    ),
                 )
             payload = response.get("payload")
             st.session_state["common_vrp_payload"] = payload
@@ -4004,6 +4133,10 @@ def _render_payload_tab(subsidiary_name: str, strategic_city_name: str) -> None:
         st.caption(
             f"Payload: technicians={len(payload.get('technicians', []))}, jobs={len(jobs_list)}, capabilities={len(payload.get('capabilities', []))}"
         )
+        region_plan = ((payload.get("options") or {}).get("region_plan") or {}) if isinstance(payload, dict) else {}
+        policy_version = str(region_plan.get("policy_version", "")).strip()
+        if policy_version:
+            st.caption(f"Active region policy: {policy_version} (distance: km; duration: minutes; slots: jobs)")
         payload_debug = st.session_state.get("common_vrp_payload_debug") or {}
         for message in payload_debug.get("precheck_messages", []) or []:
             message_text = str(message).strip()
@@ -4122,9 +4255,11 @@ def main() -> None:
     st.title("Smart Routing Client")
     try:
         contexts = _api_get(DEFAULT_COMMON_SERVER_URL, "/api/v1/common/contexts")
+        _register_context_city_metadata(contexts)
         subsidiaries = contexts.get("subsidiaries", []) or [DEFAULT_SUBSIDIARY_NAME]
     except Exception:
         contexts = {}
+        _register_context_city_metadata(contexts)
         subsidiaries = [DEFAULT_SUBSIDIARY_NAME]
 
     left_col, right_col = st.columns([1, 1.7])

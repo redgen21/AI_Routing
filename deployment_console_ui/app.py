@@ -41,6 +41,7 @@ NAVIGATION = (
     ("package-production", "Package Management", "Production"),
     ("package-admin-tools", "Package Management", "Admin Tools"),
     ("data", "Data Management", "Managed data"),
+    ("region-plans", "Data Management", "Region Plans v2"),
     ("settings", "Settings", "Connection settings"),
 )
 
@@ -137,7 +138,7 @@ def _render_navigation() -> str:
                 "dashboard": "▦", "monitoring": "◌", "package-development": "⌘",
                 "package-production": "⌘", "package-admin-tools": "⌘",
                 "data": "▤", "settings": "⚙",
-            }[key]
+            }.get(key, "•")
             if st.button(
                 f"{icon}  {label}",
                 key=f"nav-{key}",
@@ -419,37 +420,45 @@ def _secure_config_intent(preview: Mapping[str, Any]) -> str:
     return str(preview.get("fingerprint") or preview.get("preview_fingerprint") or "")
 
 
-def _render_development_secure_config(adapter: BackendAdapter) -> None:
-    """Render the deliberately narrow, secret-free development config uploader."""
+def _render_secure_config(
+    adapter: BackendAdapter,
+    environment: str,
+    *,
+    config_path: str = SERVER_CONFIG_PATH,
+) -> None:
+    """Render the two-click, redacted secure-config uploader for one environment."""
 
-    if not (
-        adapter.has("preview_development_secure_config_upload")
-        and adapter.has("upload_development_secure_config")
-    ):
+    environment_label = environment.capitalize()
+    preview_method = f"preview_{environment}_secure_config_upload"
+    upload_method = f"upload_{environment}_secure_config"
+    if not (adapter.has(preview_method) and adapter.has(upload_method)):
         return
 
-    st.markdown("### Development secure config")
+    st.markdown(f"### {environment_label} secure config")
     st.caption(
-        "Uploads the approved development config only. Values, passwords, and API keys are never shown here. "
+        f"Uploads the approved {environment} config only. Values, passwords, and API keys are never shown here. "
         "This action does not restart services."
     )
     # The backend owns the fixed secure-config source set.  The UI supplies only
     # the deployment profile used to resolve the approved SFTP target and policy.
-    config_path = SERVER_CONFIG_PATH
     preview = _invoke(
         adapter,
-        "preview_development_secure_config_upload",
-        environment="development",
+        preview_method,
+        environment=environment,
         config_path=config_path,
     )
     if preview is None:
         return
     data = _mapping(preview)
     fingerprint = _secure_config_intent(data)
-    allowed = data.get("upload_allowed") is True and bool(fingerprint)
+    policy_allowed = data.get("upload_allowed") is True
+    mutation_required = data.get("mutation_required") is not False
+    allowed = policy_allowed and mutation_required and bool(fingerprint)
     status = redact_text(data.get("status") or "unknown")[:160]
-    if not allowed:
-        st.error("Development secure config upload is unavailable: " + status)
+    if not policy_allowed:
+        st.error(f"{environment_label} secure config upload is unavailable: " + status)
+    elif not mutation_required:
+        st.success(f"{environment_label} secure config is already up to date.")
 
     cols = st.columns(2)
     cols[0].metric("Local config", "2 protected local files")
@@ -473,8 +482,8 @@ def _render_development_secure_config(adapter: BackendAdapter) -> None:
     else:
         st.caption("No secret values or file contents are displayed.")
 
-    pending_key = "pending-development-secure-config"
-    notice_key = "development-secure-config-notice"
+    pending_key = f"pending-{environment}-secure-config"
+    notice_key = f"{environment}-secure-config-notice"
     pending = _mapping(st.session_state.get(pending_key) or {})
     # A new preview fingerprint makes an older confirmation unsafe.
     if pending and pending.get("preview_fingerprint") != fingerprint:
@@ -486,25 +495,25 @@ def _render_development_secure_config(adapter: BackendAdapter) -> None:
         st.session_state.pop(notice_key, None)
         notice = {}
     if notice.get("status") == "completed":
-        st.success("Development secure config uploaded. Service restart is required and was not performed.")
+        st.success(f"{environment_label} secure config uploaded. Service restart is required and was not performed.")
     elif notice.get("status") == "failed":
-        st.error("Development secure config upload failed. Review the preview and try again.")
+        st.error(f"{environment_label} secure config upload failed. Review the preview and try again.")
 
     if pending:
-        st.warning("Upload this reviewed development secure config?")
+        st.warning(f"Upload this reviewed {environment} secure config?")
         confirm_col, cancel_col = st.columns(2)
         if confirm_col.button(
             "Confirm secure config upload",
             type="primary",
             disabled=not allowed,
-            key=f"secure-config-confirm-{fingerprint}",
+            key=f"secure-config-confirm-{environment}-{fingerprint}",
         ):
             with st.status("Upload phase 0/2: submitting protected configuration...", expanded=True) as progress:
                 st.caption("Current/total: 0/2. The backend reports this protected pair atomically, without per-file callbacks.")
                 result = _invoke(
                     adapter,
-                    "upload_development_secure_config",
-                    environment="development",
+                    upload_method,
+                    environment=environment,
                     config_path=config_path,
                     expected_fingerprint=fingerprint,
                     dry_run=False,
@@ -525,18 +534,33 @@ def _render_development_secure_config(adapter: BackendAdapter) -> None:
                     "preview_fingerprint": fingerprint,
                 }
             st.rerun()
-        if cancel_col.button("Cancel secure config upload", key=f"secure-config-cancel-{fingerprint}"):
+        if cancel_col.button(
+            "Cancel secure config upload",
+            key=f"secure-config-cancel-{environment}-{fingerprint}",
+        ):
             st.session_state.pop(pending_key, None)
             st.rerun()
     elif st.button(
-        "Upload development secure config",
+        f"Upload {environment} secure config",
         type="primary",
         disabled=not allowed,
-        key=f"secure-config-request-{fingerprint}",
+        key=f"secure-config-request-{environment}-{fingerprint}",
     ):
         st.session_state.pop(notice_key, None)
         st.session_state[pending_key] = {"preview_fingerprint": fingerprint}
         st.rerun()
+
+
+def _render_development_secure_config(adapter: BackendAdapter) -> None:
+    """Compatibility wrapper for callers of the development config panel."""
+
+    _render_secure_config(adapter, "development")
+
+
+def _render_production_secure_config(adapter: BackendAdapter) -> None:
+    """Compatibility wrapper for the production config panel."""
+
+    _render_secure_config(adapter, "production")
 
 
 def _render_environment_warning(environment: str) -> None:
@@ -928,8 +952,8 @@ def _render_artifact_tab(
         _render_build_artifact(adapter, environment)
     if "admin-tools" in kinds:
         _render_admin_tools_build(adapter, environment)
-    if environment == "development" and "runtime" in kinds:
-        _render_development_secure_config(adapter)
+    if environment in {"development", "production"} and "runtime" in kinds:
+        _render_secure_config(adapter, environment, config_path=config_path)
     st.markdown("### Select and upload artifact")
     artifact_kind_key = f"artifact-kind-{environment}"
     artifact_kind_query_key = f"deploy-kind-{environment}"
@@ -1960,6 +1984,13 @@ def _managed_data_preview_payload(value: object) -> dict[str, Any]:
                 "file_type", "secret_redacted", "canonical_sha256",
                 "canonical_row_count", "masked_samples", "normalization", "errors",
                 "expires_at", "operation_id", "created_at", "completed_at",
+                "plan_id", "region_mapping_source",
+                "technician_create_count", "technician_update_count",
+                "technician_unchanged_count", "capability_create_count",
+                "capability_update_count", "capability_unchanged_count",
+                "capability_delete_count",
+                "region_mapping_create_count", "region_mapping_update_count",
+                "region_mapping_unchanged_count", "rejected_count", "error_count",
             ),
         )
     )
@@ -1976,13 +2007,116 @@ def _managed_dataset_db_supported(dataset: Mapping[str, Any]) -> bool:
     return bool(dataset.get("db_profile")) and isinstance(targets, list) and bool(targets)
 
 
+def _managed_dataset_ui_metadata(dataset: Mapping[str, Any]) -> dict[str, Any]:
+    """Apply presentation-only grouping without changing registry source meaning."""
+
+    data = dict(dataset)
+    dataset_id = _managed_dataset_id(data)
+    hidden_inputs = {"service_raw", "service_geocoded", "map_debug", "map_debug_input"}
+    if dataset_id in hidden_inputs:
+        data["ui_hidden"] = True
+        return data
+    # Raw workbooks are legacy inputs.  The normal Region Data lane consumes
+    # an immutable, already-resolved candidate ZIP bundle instead.
+    if dataset_id == "territory_plan_workbook" and data.get("ui_legacy_visible") is not True:
+        data["ui_hidden"] = True
+        return data
+    if dataset_id == "technician_data_workbook":
+        data["label"] = "Technician workbook (Address / Product / Region)"
+        data["ui_role"] = "source_workbook"
+    elif dataset_id == "technician_profile_workbook":
+        data["label"] = "Legacy technician profile (upload only)"
+        data["ui_role"] = "source_workbook"
+    elif dataset_id == "profile_raw":
+        data["label"] = "Technician profile workbook (source)"
+        data["ui_role"] = "source_workbook"
+    elif dataset_id in {"atlanta_engineer_home", "atlanta_engineer_region"}:
+        data["label"] = (
+            "Engineer home projection" if dataset_id.endswith("_home")
+            else "Engineer region projection"
+        )
+        data["ui_role"] = "derived_projection"
+        data["ui_upload_allowed"] = False
+    elif dataset_id == "territory_plan_workbook":
+        data["label"] = "Legacy region workbook"
+        data["ui_role"] = "legacy_region_workbook"
+    elif dataset_id == "fixed_region_plan_bundle":
+        data["label"] = "Canonical fixed region DB-input bundle (ZIP)"
+        data["ui_role"] = "fixed_region_bundle"
+    elif "territory" in dataset_id or "region_plan" in dataset_id:
+        data["ui_role"] = "candidate_lifecycle"
+    elif str(data.get("scope") or "").lower() == "common":
+        data["ui_role"] = "reference_common"
+    return data
+
+
+def _managed_dataset_section(dataset: Mapping[str, Any]) -> str:
+    """Return the primary operational section for one backend dataset."""
+
+    dataset_id = _managed_dataset_id(dataset).lower()
+    role = str(dataset.get("ui_role") or "").lower()
+    if "technician" in dataset_id or dataset_id in {
+        "profile_raw", "atlanta_engineer_home", "atlanta_engineer_region",
+    } or role in {"source_workbook", "derived_projection"}:
+        return "technician"
+    if (
+        "territory" in dataset_id or "region_plan" in dataset_id
+        or role in {"candidate_lifecycle", "fixed_region_bundle", "legacy_region_workbook"}
+    ):
+        return "region"
+    return "other"
+
+
+def _render_active_region_binding(dataset: Mapping[str, Any]) -> None:
+    """Show only non-personal active-region binding metadata when supplied by API."""
+
+    binding = _mapping(
+        dataset.get("active_region_binding")
+        or dataset.get("region_binding")
+        or {}
+    )
+    if not binding:
+        binding = {
+            key: dataset[key]
+            for key in (
+                "active_region_plan_id", "active_region_plan_version",
+                "active_region_version", "region_binding_status",
+            )
+            if dataset.get(key) not in (None, "")
+        }
+    safe_binding = public_mapping(
+        binding,
+        (
+            "status", "binding_status", "plan_id", "plan_version", "version",
+            "region_plan_id", "region_plan_version", "active_region_plan_id",
+            "active_region_plan_version", "active_region_version", "source_version",
+        ),
+    )
+    if safe_binding:
+        st.markdown("#### Active region binding")
+        st.caption(
+            "Read-only binding returned by the backend contract. This screen cannot assign technicians directly."
+        )
+        st.json(safe_binding)
+    else:
+        st.info(
+            "No active-region binding is exposed for this technician dataset by the current backend contract."
+        )
+
+
 def _render_managed_data_preview(data: Mapping[str, Any]) -> None:
     summary = public_mapping(
         data,
         (
             "status", "scope", "dataset_id", "file_name", "size_bytes", "version",
             "row_count", "create_count", "update_count", "unchanged_count",
-            "target_environment", "warnings",
+            "target_environment", "warnings", "plan_id", "region_mapping_source",
+            "technician_create_count", "technician_update_count",
+            "technician_unchanged_count", "capability_create_count",
+            "capability_update_count", "capability_unchanged_count",
+            "capability_delete_count",
+            "region_mapping_create_count", "region_mapping_update_count",
+            "region_mapping_unchanged_count", "rejected_count", "error_count",
         ),
     )
     if summary:
@@ -2002,6 +2136,10 @@ def _render_managed_data_preview(data: Mapping[str, Any]) -> None:
     normalization = data.get("normalization")
     if isinstance(normalization, Mapping) and normalization:
         st.json(dict(normalization))
+    errors = data.get("errors")
+    if isinstance(errors, list) and errors:
+        st.markdown("#### Validation summary")
+        st.dataframe(errors, width="stretch", hide_index=True)
 
 
 def _render_managed_data_file_section(
@@ -2086,6 +2224,12 @@ def _render_managed_data_file_section(
         if viewed and viewed.get("version") == selected_version:
             _render_managed_data_preview(viewed)
 
+    if dataset.get("ui_upload_allowed") is False:
+        st.info(
+            "Derived projection: this dataset is displayed from an approved source workflow and is not a separate source upload."
+        )
+        return selected_version
+
     allowed_types = dataset.get("allowed_file_types") or dataset.get("extensions")
     uploader_types = (
         [str(item).lower().lstrip(".") for item in allowed_types if str(item).strip()]
@@ -2114,8 +2258,10 @@ def _render_managed_data_file_section(
         st.session_state.pop(pending_key, None)
         retained = {}
     if st.button(
-        "Validate managed data file",
-        key=f"managed-data-validate-{scope}-{dataset_id}",
+        "Validate and upload managed data",
+        type="primary",
+        disabled=not adapter.has("start_managed_data_upload_job"),
+        key=f"managed-data-apply-{scope}-{dataset_id}-{digest}",
     ):
         preview_errors: list[str] = []
         preview = _invoke(
@@ -2136,41 +2282,13 @@ def _render_managed_data_file_section(
             safe_preview = _managed_data_preview_payload(preview)
             safe_preview["bound_sha256"] = digest
             st.session_state[preview_key] = safe_preview
-            st.session_state.pop(notice_key, None)
-        st.rerun()
-    retained = _mapping(st.session_state.get(preview_key) or {})
-    if retained and retained.get("bound_sha256") == digest:
-        _render_managed_data_preview(retained)
-    notice = _mapping(st.session_state.get(notice_key) or {})
-    if notice.get("status") in {"uploaded", "already_exists"}:
-        version = _safe_release_version(notice.get("version"))
-        st.success("Managed data upload completed" + (f" ({version})." if version else "."))
-    elif notice.get("status") == "failed":
-        st.error(str(notice.get("message") or "Managed data upload did not complete."))
-
-    preview_ready = (
-        retained.get("status") == "ready"
-        and retained.get("bound_sha256") == digest
-        and str(retained.get("sha256") or "") == digest
-    )
-    pending = _mapping(st.session_state.get(pending_key) or {})
-    if pending and pending.get("sha256") != digest:
-        st.session_state.pop(pending_key, None)
-        pending = {}
-    if pending:
-        st.warning("Upload this reviewed managed data file?")
-        confirm, cancel = st.columns(2)
-        if confirm.button(
-            "Confirm managed data upload",
-            type="primary",
-            disabled=not adapter.has("upload_managed_data_file"),
-            key=f"managed-data-upload-confirm-{scope}-{dataset_id}-{digest}",
-        ):
-            upload_errors: list[str] = []
-            with st.status("Upload phase 0/1: submitting reviewed managed data...", expanded=True) as progress:
+            if safe_preview.get("status") != "ready" or safe_preview.get("sha256") != digest:
+                st.session_state[notice_key] = {"status": "failed", "message": "Managed file validation did not complete."}
+            else:
+                upload_errors: list[str] = []
                 result = _invoke(
                     adapter,
-                    "upload_managed_data_file",
+                    "start_managed_data_upload_job",
                     scope=scope,
                     dataset_id=dataset_id,
                     file_name=uploaded.name,
@@ -2182,38 +2300,50 @@ def _render_managed_data_file_section(
                 )
                 result_data = _mapping(result or {})
                 succeeded = result_data.get("status") in {"uploaded", "already_exists"}
-                progress.update(
-                    label="Upload phase 1/1: completed" if succeeded else "Upload phase 0/1: failed",
-                    state="complete" if succeeded else "error",
-                )
-            st.session_state.pop(pending_key, None)
-            if succeeded:
-                st.session_state[notice_key] = {
-                    "status": str(result_data.get("status")),
-                    "version": _safe_release_version(result_data.get("version")),
-                }
-                st.session_state.pop(preview_key, None)
-            else:
-                st.session_state[notice_key] = {
-                    "status": "failed",
-                    "message": "Managed data upload did not complete. Review the validated file and retry.",
-                }
-            st.rerun()
-        if cancel.button(
-            "Cancel managed data upload",
-            key=f"managed-data-upload-cancel-{scope}-{dataset_id}-{digest}",
-        ):
-            st.session_state.pop(pending_key, None)
-            st.rerun()
-    elif preview_ready and st.button(
-        "Upload reviewed file",
-        type="primary",
-        disabled=not adapter.has("upload_managed_data_file"),
-        key=f"managed-data-upload-request-{scope}-{dataset_id}-{digest}",
-    ):
-        st.session_state.pop(notice_key, None)
-        st.session_state[pending_key] = {"sha256": digest}
+                queued = result_data.get("status") == "queued" and result_data.get("job_id")
+                if queued:
+                    st.session_state[f"managed-data-upload-job-{scope}-{dataset_id}"] = str(result_data["job_id"])
+                    st.session_state[notice_key] = {"status": "queued", "job_id": str(result_data["job_id"])}
+                    succeeded = False
+                if succeeded:
+                    st.session_state[notice_key] = {"status": str(result_data.get("status")), "version": _safe_release_version(result_data.get("version"))}
+                    candidate_workflow = _mapping(result_data.get("candidate_workflow") or {})
+                    if dataset_id in {"territory_plan_workbook", "fixed_region_plan_bundle"} and candidate_workflow:
+                        st.session_state[f"region-plan-candidate-summary-{scope}-{dataset_id}"] = dict(public_mapping(candidate_workflow, ("status", "plan_id", "lifecycle_stage", "approval_status", "candidate_version", "artifact_sha256", "created_at", "promotable", "promotion_required", "direct_db_upsert", "membership_input_rows", "membership_accepted_rows", "membership_rejected_rows", "unique_postal_count", "ambiguous_postal_count", "technician_input_rows", "technician_accepted_rows", "technician_rejected_rows")))
+                    st.session_state.pop(preview_key, None)
+                elif not queued:
+                    st.session_state[notice_key] = {"status": "failed", "message": "Managed data upload did not complete. Review the validated file and retry."}
         st.rerun()
+    retained = _mapping(st.session_state.get(preview_key) or {})
+    if retained and retained.get("bound_sha256") == digest:
+        _render_managed_data_preview(retained)
+    notice = _mapping(st.session_state.get(notice_key) or {})
+    job_key = f"managed-data-upload-job-{scope}-{dataset_id}"
+    job_id = st.session_state.get(job_key)
+    if job_id and adapter.has("get_managed_data_upload_job"):
+        job = _mapping(_invoke(adapter, "get_managed_data_upload_job", job_id=str(job_id)) or {})
+        if job.get("status") == "completed":
+            notice = _mapping(job.get("result") or {})
+            st.session_state[notice_key] = {"status": notice.get("status", "uploaded"), "version": notice.get("version")}
+            st.session_state.pop(job_key, None)
+        elif job.get("status") == "failed":
+            st.session_state[notice_key] = {"status": "failed", "message": str(job.get("error") or "Managed data upload failed.")}
+            st.session_state.pop(job_key, None)
+        else:
+            st.info(f"Upload is running in the background (job {str(job_id)[:8]}…).")
+    if notice.get("status") in {"uploaded", "already_exists"}:
+        version = _safe_release_version(notice.get("version"))
+        st.success("Managed data upload completed" + (f" ({version})." if version else "."))
+    elif notice.get("status") == "failed":
+        st.error(str(notice.get("message") or "Managed data upload did not complete."))
+
+    preview_ready = (
+        retained.get("status") == "ready"
+        and retained.get("bound_sha256") == digest
+        and str(retained.get("sha256") or "") == digest
+    )
+    # The single action above performs validation and upload atomically from the
+    # operator's perspective.  The backend still enforces checksum and policy.
     return selected_version
 
 
@@ -2256,8 +2386,9 @@ def _render_managed_data_db_section(
     target = str(target or "development")
     preview_key = f"managed-data-db-preview-{dataset_id}-{target}"
     if st.button(
-        "Preview DB update",
-        key=f"managed-data-db-preview-button-{dataset_id}-{selected_version}-{target}",
+        "Validate and apply DB update",
+        type="primary",
+        key=f"managed-data-db-apply-once-{dataset_id}-{selected_version}-{target}",
     ):
         preview_errors: list[str] = []
         preview = _invoke(
@@ -2278,6 +2409,23 @@ def _render_managed_data_db_section(
         else:
             preview_data["idempotency_key"] = str(uuid.uuid4())
             st.session_state[preview_key] = preview_data
+            valid = bool(preview_data.get("preview_id") and preview_data.get("preview_digest"))
+            if valid:
+                result = _invoke(
+                    adapter,
+                    "apply_managed_data_db_sync",
+                    preview_id=str(preview_data.get("preview_id")),
+                    preview_digest=str(preview_data.get("preview_digest")),
+                    idempotency_key=str(preview_data.get("idempotency_key")),
+                    target_environment=target,
+                    confirm=True,
+                )
+                result_data = _mapping(result or {})
+                if result_data.get("status") in {"applied", "already_applied"}:
+                    st.session_state.pop(preview_key, None)
+                    st.session_state[f"managed-data-db-notice-{dataset_id}-{target}"] = "Managed dataset database update applied."
+                else:
+                    st.session_state[f"managed-data-db-notice-{dataset_id}-{target}"] = "Managed dataset database update did not complete."
         st.rerun()
     preview = _mapping(st.session_state.get(preview_key) or {})
     if preview and preview.get("version") == selected_version:
@@ -2288,32 +2436,850 @@ def _render_managed_data_db_section(
                 st.warning("Development DB update preview is unavailable for this dataset or version.")
             return
         _render_managed_data_preview(preview)
-        valid = bool(preview.get("preview_id") and preview.get("preview_digest"))
-        if st.button(
-            "Confirm Apply",
-            type="primary",
-            disabled=not valid,
-            key=f"managed-data-db-apply-{dataset_id}-{selected_version}-{target}",
+    notice = st.session_state.pop(f"managed-data-db-notice-{dataset_id}-{target}", None)
+    if notice:
+        st.success(notice) if notice.endswith("applied.") else st.error(notice)
+
+
+REGION_PLAN_BOUNDARY_ZIPS = ("30028", "30040", "30041", "30107")
+
+
+def _first_backend_capability(adapter: BackendAdapter, *names: str) -> str:
+    """Select a versioned bundle capability without assuming one backend release."""
+    return next((name for name in names if adapter.has(name)), "")
+
+
+def _render_fixed_region_plan_bundle_workflow(
+    adapter: BackendAdapter,
+    *,
+    scope: str,
+    dataset: Mapping[str, Any],
+    source_version: str,
+) -> None:
+    """Import an already-resolved ZIP bundle; ambiguity resolution is intentionally absent."""
+    if _managed_dataset_id(dataset) != "fixed_region_plan_bundle":
+        return
+    st.markdown("### Fixed region plan bundle lifecycle")
+    st.caption(
+        "Upload one immutable canonical DB-input bundle ZIP. The backend validates its fixed schema; "
+        "arbitrary historical fixed-region CSV/XLSX files are rejected. This console never reparses a workbook "
+        "or asks for ZIP owner/overflow decisions."
+    )
+    if scope != "development":
+        st.error("Fixed region plan bundle import, review, and activation are Development-only.")
+        return
+    if not source_version:
+        st.info("Upload or select a fixed region plan bundle version first.")
+        return
+
+    preview_capability = _first_backend_capability(
+        adapter, "preview_fixed_region_plan_bundle_import", "preview_region_plan_bundle_import",
+        "preview_region_plan_bundle",
+    )
+    import_capability = _first_backend_capability(
+        adapter, "apply_fixed_region_plan_bundle_import",
+        "import_fixed_region_plan_bundle", "import_region_plan_bundle",
+        "apply_region_plan_bundle_import",
+    )
+    status_capability = _first_backend_capability(
+        adapter, "get_fixed_region_plan_bundle_status"
+    )
+    review_capability = _first_backend_capability(adapter, "review_region_plan")
+    activation_preview_capability = _first_backend_capability(adapter, "preview_region_plan_activation")
+    activation_capability = _first_backend_capability(adapter, "apply_region_plan_activation")
+    missing = [label for label, capability in (
+        ("bundle preview", preview_capability), ("bundle status", status_capability),
+        ("bundle import", import_capability),
+        ("review", review_capability), ("activation preview", activation_preview_capability),
+        ("activation", activation_capability),
+    ) if not capability]
+    if missing:
+        st.info("Fixed bundle workflow capability is unavailable from this backend version: " + ", ".join(missing))
+        return
+
+    state_key = f"fixed-region-plan-bundle-workflow-{source_version}"
+    state = dict(_mapping(st.session_state.get(state_key) or {}))
+    status_errors: list[str] = []
+    persisted_status = _safe_region_plan_result(
+        _invoke(
+            adapter,
+            status_capability,
+            environment="development",
+            version=source_version,
+            error_sink=status_errors.append,
+        )
+        or {}
+    )
+    if status_errors:
+        st.error(
+            "The checksum-bound Region Data lifecycle status is unavailable; "
+            "review and activation remain disabled."
+        )
+    candidate = _mapping(
+        persisted_status
+        if persisted_status.get("status") in {"candidate", "reviewed", "active", "superseded"}
+        else state.get("import_result")
+        or st.session_state.get(
+            f"region-plan-candidate-summary-{scope}-{_managed_dataset_id(dataset)}"
+        )
+        or {}
+    )
+
+    st.markdown("#### 1. Backend bundle preview and import")
+    if st.button("Preview fixed region plan bundle import", key=f"fixed-region-bundle-preview-{source_version}"):
+        errors: list[str] = []
+        result = _invoke(
+            adapter, preview_capability, environment="development",
+            version=source_version, error_sink=errors.append,
+        )
+        state["preview"] = _safe_region_plan_result(result or {})
+        st.session_state[state_key] = state
+        st.rerun()
+    preview = _mapping(state.get("preview") or {})
+    if preview:
+        st.json(preview)
+    preview_ready = preview.get("status") == "ready"
+    imported_by = st.text_input("Bundle import actor", value="console-ui", key=f"fixed-region-bundle-imported-by-{source_version}").strip()
+    if preview_ready and st.button(
+        "Prepare fixed region plan bundle import", disabled=not imported_by,
+        key=f"fixed-region-bundle-import-prepare-{source_version}",
+    ):
+        state["import_pending"] = {"imported_by": imported_by, "idempotency_key": str(uuid.uuid4())}
+        st.session_state[state_key] = state
+        st.rerun()
+    pending_import = _mapping(state.get("import_pending") or {})
+    if pending_import and st.button(
+        "Confirm Import Fixed Region Plan Bundle", type="primary",
+        key=f"fixed-region-bundle-import-confirm-{source_version}",
+    ):
+        errors: list[str] = []
+        result = _invoke(
+            adapter, import_capability, environment="development", version=source_version,
+            imported_by=str(pending_import.get("imported_by") or ""),
+            idempotency_key=str(pending_import.get("idempotency_key") or ""), confirm=True,
+            error_sink=errors.append,
+        )
+        state.pop("import_pending", None)
+        state["import_result"] = _safe_region_plan_result(result or {})
+        st.session_state[state_key] = state
+        st.rerun()
+    imported = not status_errors and candidate.get("status") in {
+        "candidate", "reviewed", "active", "candidate_imported",
+        "candidate_imported_for_development_verification", "already_imported"
+    }
+    if candidate:
+        st.json(_safe_region_plan_result(candidate))
+    if "import_result" in state and not imported:
+        st.error("Fixed region plan bundle import did not complete; review and activation remain disabled.")
+
+    st.markdown("#### 2. Review")
+    reviewed_by = st.text_input("Bundle review actor", value="console-ui", key=f"fixed-region-bundle-reviewed-by-{source_version}").strip()
+    review_reference = st.text_input("Bundle review reference", key=f"fixed-region-bundle-review-reference-{source_version}").strip()
+    if st.button("Prepare Fixed Region Plan Review", disabled=not imported or not reviewed_by or not review_reference, key=f"fixed-region-bundle-review-prepare-{source_version}"):
+        state["review_pending"] = {"reviewed_by": reviewed_by, "review_reference": review_reference, "expected_revision": int(candidate.get("revision", 0))}
+        st.session_state[state_key] = state
+        st.rerun()
+    pending_review = _mapping(state.get("review_pending") or {})
+    if pending_review and st.button("Confirm Fixed Region Plan Review", type="primary", key=f"fixed-region-bundle-review-confirm-{source_version}"):
+        errors: list[str] = []
+        result = _invoke(adapter, review_capability, environment="development", confirm=True,
+                         resolution_digest=str(candidate.get("resolution_digest") or ""),
+                         expected_revision=int(pending_review.get("expected_revision", 0)),
+                         reviewed_by=str(pending_review.get("reviewed_by") or ""),
+                         review_reference=str(pending_review.get("review_reference") or ""),
+                         error_sink=errors.append)
+        state.pop("review_pending", None)
+        state["review_result"] = _safe_region_plan_result(result or {})
+        st.session_state[state_key] = state
+        st.rerun()
+    reviewed = not status_errors and (
+        candidate.get("status") in {"reviewed", "active"}
+        or _mapping(state.get("review_result") or {}).get("status") == "reviewed"
+    )
+
+    st.markdown("#### 3. Activation preview and confirm")
+    if st.button("Preview Fixed Region Plan Activation", disabled=not reviewed, key=f"fixed-region-bundle-activation-preview-{source_version}"):
+        errors: list[str] = []
+        result = _invoke(adapter, activation_preview_capability, environment="development",
+                         resolution_digest=str(candidate.get("resolution_digest") or ""),
+                         error_sink=errors.append)
+        state["activation_preview"] = _safe_region_plan_result(result or {})
+        st.session_state[state_key] = state
+        st.rerun()
+    activation_preview = _mapping(state.get("activation_preview") or {})
+    if activation_preview:
+        st.json(activation_preview)
+    activated_by = st.text_input("Bundle activation actor", value="console-ui", key=f"fixed-region-bundle-activated-by-{source_version}").strip()
+    activation_reference = st.text_input("Bundle activation reference", key=f"fixed-region-bundle-activation-reference-{source_version}").strip()
+    if activation_preview.get("status") == "ready" and st.button("Confirm Activate Fixed Region Plan", type="primary", disabled=not activated_by or not activation_reference, key=f"fixed-region-bundle-activation-confirm-{source_version}"):
+        errors: list[str] = []
+        result = _invoke(adapter, activation_capability, environment="development",
+                         preview_id=str(activation_preview.get("preview_id") or ""),
+                         preview_digest=str(activation_preview.get("preview_digest") or ""),
+                         activated_by=activated_by, activation_reference=activation_reference,
+                         idempotency_key=str(uuid.uuid4()), confirm=True,
+                         error_sink=errors.append)
+        state["activation_result"] = _safe_region_plan_result(result or {})
+        st.session_state[state_key] = state
+        st.rerun()
+    if candidate.get("status") == "active" or _mapping(
+        state.get("activation_result") or {}
+    ).get("status") in {"activated", "already_active"}:
+        st.success("Fixed region plan bundle is active in Development only.")
+
+
+def _safe_region_plan_result(value: object) -> dict[str, Any]:
+    return dict(
+        public_mapping(
+            value,
+            (
+                "status", "migration_id", "checksum_sha256", "statement_count",
+                "statement_types", "rollback_instructions", "environment", "plan_id",
+                "source_version", "request_sha256", "lifecycle_stage", "revision",
+                "checksum", "preview_id", "preview_digest", "plan_revision",
+                "expected_activation_revision", "region_count", "postal_count",
+                "technician_count", "boundary_resolution_count", "activation_revision",
+                "resolution_digest", "artifacts", "managed_version", "bundle_sha256",
+                "verification_only", "promotable", "write_allowed",
+            ),
+        )
+    )
+
+
+def _render_region_plan_artifacts(
+    adapter: BackendAdapter, resolution_result: Mapping[str, Any]
+) -> None:
+    if not adapter.has("download_region_plan_resolution_artifact"):
+        st.info("Reviewed region-plan artifact downloads are unavailable from this backend version.")
+        return
+    resolution_digest = str(resolution_result.get("resolution_digest") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", resolution_digest):
+        st.info("Resolution-bound artifact downloads are not available for this candidate result.")
+        return
+    st.markdown("#### Resolution artifacts")
+    specifications = (
+        ("fixed_region_csv", "reviewed fixed-region CSV", "text/csv"),
+        ("technician_policy_csv", "technician policy CSV", "text/csv"),
+        ("boundary_policy_csv", "boundary policy CSV", "text/csv"),
+        ("manifest", "reviewed plan manifest", "application/json"),
+    )
+    columns = st.columns(4)
+    for column, (key, label, mime) in zip(columns, specifications):
+        if column.button(
+            f"Prepare {label}",
+            key=f"region-plan-artifact-prepare-{resolution_digest}-{key}",
         ):
-            apply_errors: list[str] = []
+            errors: list[str] = []
             result = _invoke(
                 adapter,
-                "apply_managed_data_db_sync",
-                preview_id=str(preview.get("preview_id")),
-                preview_digest=str(preview.get("preview_digest")),
-                idempotency_key=str(preview.get("idempotency_key")),
-                target_environment=target,
-                confirm=True,
-                error_sink=apply_errors.append,
+                "download_region_plan_resolution_artifact",
+                environment="development",
+                resolution_digest=resolution_digest,
+                artifact_id=key,
+                error_sink=errors.append,
             )
-            result_data = _mapping(result or {})
-            if result_data.get("status") in {"applied", "already_applied"}:
-                st.session_state.pop(preview_key, None)
-                st.success("Managed dataset database update applied.")
+            item = _mapping(result or {})
+            content = item.get("content")
+            if isinstance(content, str):
+                content = content.encode("utf-8")
+            if isinstance(content, bytes):
+                # PII-bearing bytes live only for this render and are never
+                # copied into session_state, logs, JSON, or captions.
+                column.download_button(
+                    f"Download {label}",
+                    data=content,
+                    file_name=Path(str(item.get("file_name") or f"{key}.csv")).name,
+                    mime=mime,
+                    key=f"region-plan-artifact-download-{resolution_digest}-{key}",
+                )
             else:
-                st.error("Managed dataset database update did not complete. No raw backend error is displayed.")
+                column.error("Artifact download did not complete.")
 
 
+def _render_region_plan_workflow(
+    adapter: BackendAdapter,
+    *,
+    scope: str,
+    dataset: Mapping[str, Any],
+    source_version: str,
+) -> None:
+    if _managed_dataset_id(dataset) != "territory_plan_workbook":
+        return
+    st.markdown("### Territory plan candidate lifecycle")
+    st.caption(
+        "Candidate, resolved, reviewed, and active plans are immutable separate stages. "
+        "This workflow never uses the generic master-table uploader."
+    )
+    if scope != "development":
+        st.error(
+            "Production region-plan schema, resolution, review, and activation writes are disabled."
+        )
+        for label in (
+            "Preview region-plan schema", "Apply ambiguity resolutions",
+            "Review region plan", "Preview activation",
+        ):
+            st.button(label, disabled=True, key=f"region-plan-production-disabled-{label}")
+        return
+    required = (
+        "preview_region_plan_schema", "install_region_plan_schema",
+        "apply_region_plan_resolutions", "review_region_plan",
+        "preview_region_plan_activation", "apply_region_plan_activation",
+    )
+    missing = [name for name in required if not adapter.has(name)]
+    if missing:
+        st.info(
+            "Region-plan workflow capability is unavailable from this backend version: "
+            + ", ".join(missing)
+        )
+        return
+    if not source_version:
+        st.info("Select or upload an immutable territory plan workbook version first.")
+        return
+
+    state_key = f"region-plan-workflow-{source_version}"
+    state = dict(_mapping(st.session_state.get(state_key) or {}))
+    candidate = _mapping(
+        st.session_state.get(
+            f"region-plan-candidate-summary-{scope}-{_managed_dataset_id(dataset)}"
+        )
+        or {}
+    )
+    st.markdown("#### Candidate summary")
+    summary = {
+        "source_version": source_version,
+        **public_mapping(
+            candidate,
+            (
+                "status", "plan_id", "lifecycle_stage", "approval_status",
+                "membership_input_rows", "membership_accepted_rows",
+                "membership_rejected_rows", "unique_postal_count",
+                "ambiguous_postal_count", "technician_input_rows",
+                "technician_accepted_rows", "technician_rejected_rows",
+            ),
+        ),
+    }
+    st.json(summary)
+    st.warning(
+        "Development verification only - not production-approved or promotable. Four boundary "
+        "decisions, 57 ZIPs without ZCTA polygons, jobs outside the plan, missing bound demand/solver "
+        "evidence, and thin Zone 3 / ATL Outer Area technician coverage remain explicit limitations."
+    )
+
+    st.markdown("#### 1. Development schema")
+    migrations = _invoke(
+        adapter,
+        "list_region_plan_schema_migrations",
+        environment="development",
+        error_sink=lambda _message: None,
+    ) if adapter.has("list_region_plan_schema_migrations") else []
+    migration_rows = [item for item in migrations if isinstance(item, Mapping)] if isinstance(migrations, list) else []
+    migration_ids = [str(item.get("migration_id")) for item in migration_rows if item.get("migration_id")]
+    if not migration_ids:
+        # Compatibility with an older console backend. Current deployments
+        # expose the registry above; this fallback remains V001-only.
+        migration_ids = ["V001__atlanta_6area_region_plan"]
+    selected_migration = st.selectbox(
+        "Schema migration",
+        migration_ids,
+        key=f"region-plan-schema-migration-{source_version}",
+    )
+    if st.button("Preview region-plan schema", key=f"region-plan-schema-preview-{source_version}"):
+        errors: list[str] = []
+        result = _invoke(
+            adapter,
+            "preview_region_plan_schema",
+            environment="development",
+            migration_id=selected_migration,
+            error_sink=errors.append,
+        )
+        state["schema_preview"] = _safe_region_plan_result(result or {})
+        state["schema_error"] = state["schema_preview"].get("status") != "ready"
+        state.pop("schema_install", None)
+        st.session_state[state_key] = state
+        st.rerun()
+    schema_preview = _mapping(state.get("schema_preview") or {})
+    if state.get("schema_error") is True:
+        st.error("Region-plan schema preview did not complete; schema installation remains disabled.")
+    if schema_preview.get("status") == "ready":
+        st.json(schema_preview)
+        if st.button(
+            "Confirm Install Region Plan Schema",
+            type="primary",
+            key=f"region-plan-schema-install-{source_version}",
+        ):
+            errors: list[str] = []
+            result = _invoke(
+                adapter,
+                "install_region_plan_schema",
+                environment="development",
+                migration_id=str(schema_preview.get("migration_id") or selected_migration),
+                confirm=True,
+                error_sink=errors.append,
+            )
+            state["schema_install"] = _safe_region_plan_result(result or {})
+            state["schema_error"] = state["schema_install"].get("status") not in {
+                "applied", "already_applied"
+            }
+            st.session_state[state_key] = state
+            st.rerun()
+    schema_install = _mapping(state.get("schema_install") or {})
+    schema_ready = schema_install.get("status") in {"applied", "already_applied"}
+    if schema_ready:
+        st.success("Development region-plan schema is installed for the previewed checksum.")
+
+    st.markdown("#### 2. Resolve four ambiguous ZIPs")
+    boundary_resolutions: dict[str, dict[str, Any]] = {}
+    resolutions_valid = schema_ready
+    for postal_code in REGION_PLAN_BOUNDARY_ZIPS:
+        cols = st.columns([1, 1.4, 1, 2.6])
+        cols[0].markdown(f"**{postal_code}**")
+        owner = cols[1].selectbox(
+            "Owner",
+            ("Select owner", "Zone 2", "Zone 3"),
+            key=f"region-plan-owner-{source_version}-{postal_code}",
+            label_visibility="collapsed",
+        )
+        allow_overflow = cols[2].checkbox(
+            "Allow overflow",
+            key=f"region-plan-overflow-{source_version}-{postal_code}",
+        )
+        rationale = cols[3].text_input(
+            "Rationale",
+            key=f"region-plan-rationale-{source_version}-{postal_code}",
+            placeholder="Required decision rationale",
+            label_visibility="collapsed",
+        ).strip()
+        valid = owner in {"Zone 2", "Zone 3"} and bool(rationale) and len(rationale) <= 500
+        resolutions_valid = resolutions_valid and valid
+        boundary_resolutions[postal_code] = {
+            "primary_region": owner if owner in {"Zone 2", "Zone 3"} else "",
+            "allow_overflow": bool(allow_overflow),
+            "rationale": rationale,
+        }
+    imported_by = st.text_input(
+        "Resolution actor",
+        value="console-ui",
+        key=f"region-plan-imported-by-{source_version}",
+    ).strip()
+    preview_resolutions_available = adapter.has("preview_region_plan_resolutions")
+    if st.button(
+        "Prepare ambiguity resolutions",
+        disabled=not resolutions_valid or not bool(imported_by),
+        key=f"region-plan-resolution-prepare-{source_version}",
+    ):
+        idempotency_key = str(uuid.uuid4())
+        expected_request_sha256 = ""
+        if preview_resolutions_available:
+            errors: list[str] = []
+            preview = _invoke(
+                adapter,
+                "preview_region_plan_resolutions",
+                environment="development",
+                source_version=source_version,
+                boundary_resolutions=boundary_resolutions,
+                imported_by=imported_by,
+                idempotency_key=idempotency_key,
+                error_sink=errors.append,
+            )
+            preview_data = _safe_region_plan_result(preview or {})
+            if preview_data.get("status") != "ready":
+                state["resolution_error"] = True
+                st.session_state[state_key] = state
+                st.rerun()
+            expected_request_sha256 = str(preview_data.get("request_sha256") or "")
+        state["resolution_pending"] = {
+            "source_version": source_version,
+            "boundary_resolutions": boundary_resolutions,
+            "imported_by": imported_by,
+            "idempotency_key": idempotency_key,
+            "expected_request_sha256": expected_request_sha256,
+        }
+        state.pop("resolution_error", None)
+        st.session_state[state_key] = state
+        st.rerun()
+    pending_resolution = _mapping(state.get("resolution_pending") or {})
+    if state.get("resolution_error") is True:
+        st.error("Ambiguity resolution preview did not complete; no candidate state was changed.")
+    if pending_resolution:
+        st.warning("Apply these four reviewed owner/overflow decisions to the Development candidate?")
+        if st.button(
+            "Confirm Apply Ambiguity Resolutions",
+            type="primary",
+            key=f"region-plan-resolution-confirm-{source_version}",
+        ):
+            errors: list[str] = []
+            kwargs: dict[str, Any] = {
+                "environment": "development",
+                "source_version": str(pending_resolution.get("source_version")),
+                "boundary_resolutions": dict(_mapping(pending_resolution.get("boundary_resolutions") or {})),
+                "imported_by": str(pending_resolution.get("imported_by")),
+                "idempotency_key": str(pending_resolution.get("idempotency_key")),
+                "confirm": True,
+            }
+            expected = str(pending_resolution.get("expected_request_sha256") or "")
+            if expected:
+                kwargs["expected_request_sha256"] = expected
+            result = _invoke(
+                adapter,
+                "apply_region_plan_resolutions",
+                error_sink=errors.append,
+                **kwargs,
+            )
+            state.pop("resolution_pending", None)
+            state["resolution_result"] = _safe_region_plan_result(result or {})
+            st.session_state[state_key] = state
+            st.rerun()
+    resolution_result = _mapping(state.get("resolution_result") or {})
+    resolution_ready = (
+        resolution_result.get("status") == "candidate_imported"
+        and resolution_result.get("lifecycle_stage") == "candidate_resolved"
+    )
+    if resolution_ready:
+        st.success("All four ambiguity decisions are applied to the immutable candidate revision.")
+        st.json(resolution_result)
+        _render_region_plan_artifacts(adapter, resolution_result)
+    elif "resolution_result" in state:
+        st.error("Ambiguity resolution did not complete; review and activation remain disabled.")
+
+    st.markdown("#### 3. Review")
+    verification_acknowledged = st.checkbox(
+        "I acknowledge this review is for Development verification only and does not approve Production promotion.",
+        key=f"region-plan-verification-ack-{source_version}",
+    )
+    default_revision = int(resolution_result.get("revision") or 1)
+    expected_revision = int(
+        st.number_input(
+            "Expected candidate revision",
+            min_value=1,
+            value=max(default_revision, 1),
+            step=1,
+            key=f"region-plan-review-revision-{source_version}",
+        )
+    )
+    reviewed_by = st.text_input(
+        "Review actor", value="console-ui", key=f"region-plan-reviewed-by-{source_version}"
+    ).strip()
+    review_reference = st.text_input(
+        "Review reference", key=f"region-plan-review-reference-{source_version}"
+    ).strip()
+    if st.button(
+        "Prepare Region Plan Review",
+        disabled=(
+            not resolution_ready
+            or not reviewed_by
+            or not review_reference
+            or not verification_acknowledged
+        ),
+        key=f"region-plan-review-prepare-{source_version}",
+    ):
+        state["review_pending"] = {
+            "expected_revision": expected_revision,
+            "reviewed_by": reviewed_by,
+            "review_reference": review_reference,
+            "resolution_digest": str(resolution_result.get("resolution_digest") or ""),
+        }
+        st.session_state[state_key] = state
+        st.rerun()
+    pending_review = _mapping(state.get("review_pending") or {})
+    if pending_review and st.button(
+        "Confirm Review Region Plan",
+        type="primary",
+        key=f"region-plan-review-confirm-{source_version}",
+    ):
+        errors: list[str] = []
+        review_kwargs: dict[str, Any] = {
+            "environment": "development",
+            "expected_revision": int(pending_review.get("expected_revision") or 0),
+            "reviewed_by": str(pending_review.get("reviewed_by")),
+            "review_reference": str(pending_review.get("review_reference")),
+            "confirm": True,
+        }
+        review_resolution_digest = str(pending_review.get("resolution_digest") or "")
+        if review_resolution_digest:
+            review_kwargs["resolution_digest"] = review_resolution_digest
+        result = _invoke(
+            adapter,
+            "review_region_plan",
+            error_sink=errors.append,
+            **review_kwargs,
+        )
+        state.pop("review_pending", None)
+        state["review_result"] = _safe_region_plan_result(result or {})
+        st.session_state[state_key] = state
+        st.rerun()
+    review_result = _mapping(state.get("review_result") or {})
+    reviewed = review_result.get("status") == "reviewed"
+    if reviewed:
+        st.success("Development verification review completed; Production promotion remains prohibited.")
+        st.json(review_result)
+    elif "review_result" in state:
+        st.error("Region plan review did not complete; activation remains disabled.")
+
+    st.markdown("#### 4. Activation preview and confirm")
+    activated_by = st.text_input(
+        "Activation actor", value="console-ui", key=f"region-plan-activated-by-{source_version}"
+    ).strip()
+    activation_reference = st.text_input(
+        "Activation reference", key=f"region-plan-activation-reference-{source_version}"
+    ).strip()
+    if st.button(
+        "Preview Region Plan Activation",
+        disabled=not reviewed,
+        key=f"region-plan-activation-preview-{source_version}",
+    ):
+        errors: list[str] = []
+        activation_kwargs: dict[str, Any] = {"environment": "development"}
+        resolution_digest = str(resolution_result.get("resolution_digest") or "")
+        if resolution_digest:
+            activation_kwargs["resolution_digest"] = resolution_digest
+        result = _invoke(
+            adapter,
+            "preview_region_plan_activation",
+            error_sink=errors.append,
+            **activation_kwargs,
+        )
+        state["activation_preview"] = _safe_region_plan_result(result or {})
+        st.session_state[state_key] = state
+        st.rerun()
+    activation_preview = _mapping(state.get("activation_preview") or {})
+    if "activation_preview" in state and activation_preview.get("status") != "ready":
+        st.error("Activation preview did not complete; activation remains disabled.")
+    if activation_preview.get("status") == "ready":
+        st.json(
+            public_mapping(
+                activation_preview,
+                (
+                    "region_count", "postal_count", "technician_count",
+                    "boundary_resolution_count", "checksum", "plan_revision",
+                    "expected_activation_revision",
+                ),
+            )
+        )
+        if st.button(
+            "Confirm Activate Region Plan",
+            type="primary",
+            disabled=not activated_by or not activation_reference,
+            key=f"region-plan-activation-confirm-{source_version}",
+        ):
+            errors: list[str] = []
+            result = _invoke(
+                adapter,
+                "apply_region_plan_activation",
+                environment="development",
+                preview_id=str(activation_preview.get("preview_id")),
+                preview_digest=str(activation_preview.get("preview_digest")),
+                activated_by=activated_by,
+                activation_reference=activation_reference,
+                idempotency_key=str(uuid.uuid4()),
+                confirm=True,
+                error_sink=errors.append,
+            )
+            state["activation_result"] = _safe_region_plan_result(result or {})
+            state.pop("activation_preview", None)
+            st.session_state[state_key] = state
+            st.rerun()
+    activation_result = _mapping(state.get("activation_result") or {})
+    if activation_result.get("status") in {"activated", "already_active"}:
+        st.success("Atlanta_6area verification plan is active in Development only.")
+        st.json(activation_result)
+    elif "activation_result" in state:
+        st.error("Region plan activation did not complete; the active plan was not changed.")
+
+
+def _region_plan_v2_data(value: object) -> Mapping[str, Any]:
+    envelope = _mapping(value)
+    data = envelope.get("data")
+    return _mapping(data) if isinstance(data, Mapping) else {}
+
+
+def _render_region_plan_v2_receipt(value: object) -> None:
+    envelope = _mapping(value)
+    data = _region_plan_v2_data(envelope)
+    nested_plan = _mapping(data.get("plan"))
+    visible = dict(data)
+    if nested_plan:
+        visible.update(nested_plan)
+    error = _mapping(envelope.get("error"))
+    safe = {
+        key: visible[key] for key in (
+            "job_id", "plan_id", "lifecycle", "state", "workbook_sha256",
+            "canonical_sha256", "plan_revision", "activation_revision", "preview_token",
+            "row_accounting", "counts", "reject_summary", "reject_count", "checksum",
+            "accepted", "rejected", "region_count", "postal_count",
+            "technician_count", "boundary_resolution_count", "source_sha256",
+            "manifest_sha256", "bundle_sha256", "plan_status",
+        ) if key in visible
+    }
+    if safe:
+        st.json(safe)
+    if str(envelope.get("status")) in {"rejected", "failed"}:
+        st.error(f"{error.get('code', 'REGION_PLAN_REQUEST_FAILED')}: {error.get('message', 'Request did not complete.')}")
+
+
+_fragment = getattr(st, "fragment", lambda fn: fn)
+
+
+@_fragment
+def _render_region_plan_v2(adapter: BackendAdapter) -> None:
+    """The only visible Region Plan workflow: browser -> versioned HTTP API."""
+    st.caption("Upload one Area + Technician Excel workbook, then explicitly review, preview, and activate through the Region Plan v2 API.")
+    required = ("preview_region_plan_schema", "install_region_plan_schema", "list_region_plan_v2_cities", "import_region_plan_v2_workbook", "review_region_plan_v2", "preview_region_plan_v2_activation", "activate_region_plan_v2")
+    if not all(adapter.has(name) for name in required):
+        st.info("Region Plan v2 is unavailable from this console backend version.")
+        return
+    state = st.session_state.setdefault("region-plan-v2", {})
+    st.subheader("Common Region Plan Schema v2")
+    if "schema_preview" not in state:
+        state["schema_preview"] = _mapping(
+            _invoke(adapter, "preview_region_plan_schema", environment="development") or {}
+        )
+    schema_preview = _mapping(state.get("schema_preview"))
+    if schema_preview.get("status") == "ready":
+        st.json(public_mapping(schema_preview, (
+            "status", "schema_id", "target_id", "checksum_sha256",
+        )))
+    else:
+        st.error("Common Region Plan Schema v2 readiness check failed.")
+        return
+    schema_result = _mapping(state.get("schema_result"))
+    if st.button(
+        "Prepare common Region Plan schema", type="primary",
+        disabled=schema_result.get("status") == "reconciled", key="rp2-schema-prepare",
+    ):
+        state["schema_result"] = _mapping(
+            _invoke(
+                adapter, "install_region_plan_schema",
+                environment="development", confirm=True,
+            ) or {}
+        )
+        schema_result = _mapping(state["schema_result"])
+    if schema_result.get("status") != "reconciled":
+        st.info("Prepare the common schema once before importing or adopting a plan.")
+        return
+    st.success("Common Region Plan Schema v2 is prepared for development.")
+    st.divider()
+    cities_response = _invoke(adapter, "list_region_plan_v2_cities")
+    cities_data = _region_plan_v2_data(cities_response or {})
+    cities = cities_data.get("cities", [])
+    cities = [item for item in cities if isinstance(item, Mapping)] if isinstance(cities, list) else []
+    if not cities:
+        _render_region_plan_v2_receipt(cities_response or {})
+        st.warning("No permitted city registry entries were returned by the Region Plan API.")
+        return
+    subsidiaries = sorted({str(item.get("subsidiary_id") or "") for item in cities if str(item.get("subsidiary_id") or "")})
+    subsidiary_id = st.selectbox("Subsidiary", subsidiaries, key="rp2-subsidiary")
+    registries = [item for item in cities if str(item.get("subsidiary_id") or "") == subsidiary_id]
+    registry_by_source = {str(item.get("source_city_id") or ""): item for item in registries if str(item.get("source_city_id") or "")}
+    source_city_id = st.selectbox("Source city", list(registry_by_source), key="rp2-source-city")
+    city = registry_by_source[source_city_id]
+    target_city_id = st.text_input(
+        "Target city ID", placeholder="LA_6area", key="rp2-target-city",
+        help="New runtime scenario ID. Letters, numbers, dot, underscore, and hyphen only.",
+    ).strip()
+    target_valid = bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", target_city_id))
+    if target_city_id and not target_valid:
+        st.error("Target city ID format is invalid.")
+    policies = [item for item in city.get("policies", []) if isinstance(item, Mapping)]
+    policy_by_version = {
+        str(item.get("policy_version")): item for item in policies
+        if str(item.get("policy_version") or "") and str(item.get("technician_policy_mode") or "")
+    }
+    policy_version = st.selectbox("Policy", list(policy_by_version), key="rp2-policy")
+    selected_policy = policy_by_version[policy_version]
+    technician_policy_mode = str(selected_policy["technician_policy_mode"])
+    st.caption(f"Technician policy mode: {technician_policy_mode} (set by registry policy)")
+    overlap_options = selected_policy.get("allowed_overlap_policies") or city.get("allowed_overlap_policies") or ("registry_default", "explicit_workbook")
+    overlap_policy = st.selectbox("Overlap policy", [str(value) for value in overlap_options], key="rp2-overlap")
+    # Upload is deliberately candidate-only. Review and activation always need
+    # separate visible operator actions below.
+    intent = "review_only"
+    selection_key = f"{subsidiary_id}:{source_city_id}:{target_city_id}"
+    if state.get("selection_key") != selection_key:
+        for key in ("import", "adopt", "plan", "review", "preview", "activation", "candidates"):
+            state.pop(key, None)
+        state["selection_key"] = selection_key
+    workbook = st.file_uploader("Area + Technician workbook (.xlsx)", type=["xlsx"], key="rp2-workbook")
+    if st.button("Upload and validate", type="primary", disabled=workbook is None or not target_valid, key="rp2-upload"):
+        result = _invoke(adapter, "import_region_plan_v2_workbook", workbook_name=workbook.name, workbook_bytes=workbook.getvalue(), metadata={
+            "subsidiary_id": subsidiary_id, "target_city_id": target_city_id, "source_city_id": source_city_id,
+            "policy_version": policy_version, "technician_policy_mode": technician_policy_mode,
+            "overlap_policy": overlap_policy, "activation_intent": intent,
+        })
+        state["import"] = _mapping(result or {})
+        imported = _region_plan_v2_data(result or {})
+        imported_plan_id = str(imported.get("plan_id") or "")
+        if imported_plan_id and str(_mapping(result).get("status")) == "accepted" and adapter.has("adopt_region_plan_v2_candidate"):
+            adopted = _invoke(adapter, "adopt_region_plan_v2_candidate", subsidiary_id=subsidiary_id, target_city_id=target_city_id, plan_id=imported_plan_id)
+            state["adopt"] = _mapping(adopted or {})
+            adopted_plan = _region_plan_v2_data(adopted or {}).get("plan", {})
+            if isinstance(adopted_plan, Mapping):
+                state["plan"] = dict(adopted_plan)
+        _render_region_plan_v2_receipt(result or {})
+    st.divider()
+    st.subheader("Existing candidate")
+    if adapter.has("list_region_plan_v2_candidates") and st.button("List candidates for selected city", disabled=not target_valid, key="rp2-list"):
+        state["candidates"] = _mapping(_invoke(adapter, "list_region_plan_v2_candidates", subsidiary_id=subsidiary_id, target_city_id=target_city_id) or {})
+    candidates = _region_plan_v2_data(state.get("candidates", {})).get("plans", [])
+    candidates = [item for item in candidates if isinstance(item, Mapping)] if isinstance(candidates, list) else []
+    candidate_ids = [str(item.get("plan_id")) for item in candidates if str(item.get("plan_id") or "")]
+    selected_plan = st.selectbox("Candidate plan", candidate_ids or ["No candidate loaded"], disabled=not candidate_ids, key="rp2-candidate")
+    if adapter.has("adopt_region_plan_v2_candidate") and st.button("Adopt selected candidate", disabled=not candidate_ids, key="rp2-adopt"):
+        result = _invoke(adapter, "adopt_region_plan_v2_candidate", subsidiary_id=subsidiary_id, target_city_id=target_city_id, plan_id=selected_plan)
+        state["adopt"] = _mapping(result or {})
+        plan = _region_plan_v2_data(result or {}).get("plan", {})
+        if isinstance(plan, Mapping):
+            state["plan"] = dict(plan)
+    plan = _region_plan_v2_data(state.get("import", {}))
+    plan = dict(state.get("plan", {})) if state.get("plan") else dict(plan)
+    if state.get("adopt"):
+        _render_region_plan_v2_receipt(state["adopt"])
+    plan_id = str(plan.get("plan_id") or "")
+    revision = plan.get("plan_revision", plan.get("revision"))
+    activation_revision = plan.get("activation_revision")
+    if not plan_id or revision is None or activation_revision is None:
+        st.info("Upload completion or candidate adoption is required before review.")
+        return
+    st.divider()
+    st.subheader(f"Lifecycle: {plan_id}")
+    if st.button("Review", key="rp2-review"):
+        result = _invoke(adapter, "review_region_plan_v2", subsidiary_id=subsidiary_id, target_city_id=target_city_id, plan_id=plan_id, plan_revision=int(revision), activation_revision=int(activation_revision))
+        state["review"] = _mapping(result or {}); plan.update(_region_plan_v2_data(result or {})); state["plan"] = plan
+        _render_region_plan_v2_receipt(result or {})
+    reviewed = _region_plan_v2_data(state.get("review", {}))
+    if st.button("Preview activation", disabled=reviewed.get("lifecycle") != "reviewed", key="rp2-preview"):
+        result = _invoke(adapter, "preview_region_plan_v2_activation", subsidiary_id=subsidiary_id, target_city_id=target_city_id, plan_id=plan_id, plan_revision=int(plan.get("plan_revision", revision)), activation_revision=int(plan.get("activation_revision", activation_revision)))
+        state["preview"] = _mapping(result or {})
+        plan.update(_region_plan_v2_data(result or {})); state["plan"] = plan
+        _render_region_plan_v2_receipt(result or {})
+    preview = _region_plan_v2_data(state.get("preview", {}))
+    reference = st.text_input("Activation reference", key="rp2-activation-reference")
+    if st.button("Activate", type="primary", disabled=not preview.get("preview_token") or not reference.strip(), key="rp2-activate"):
+        result = _invoke(adapter, "activate_region_plan_v2", subsidiary_id=subsidiary_id, target_city_id=target_city_id, plan_id=plan_id, plan_revision=int(preview.get("plan_revision", plan.get("plan_revision", revision))), activation_revision=int(preview.get("activation_revision", plan.get("activation_revision", activation_revision))), preview_token=str(preview.get("preview_token")), activation_reference=reference)
+        state["activation"] = _mapping(result or {})
+        plan.update(_region_plan_v2_data(result or {})); state["plan"] = plan
+        _render_region_plan_v2_receipt(result or {})
+    superseded = [item for item in candidates if str(item.get("lifecycle")) == "superseded"]
+    if adapter.has("rollback_region_plan_v2") and superseded:
+        st.divider(); st.subheader("Rollback (roll-forward activation)")
+        rollback_ids=[str(item["plan_id"]) for item in superseded]
+        rollback_id=st.selectbox("Previous plan",rollback_ids,key="rp2-rollback-plan")
+        if st.button("Load rollback target",key="rp2-rollback-load"):
+            loaded=_invoke(adapter,"adopt_region_plan_v2_candidate",subsidiary_id=subsidiary_id,target_city_id=target_city_id,plan_id=rollback_id)
+            state["rollback_plan"]=_mapping(_region_plan_v2_data(loaded or {}).get("plan",{}))
+        rollback_plan=_mapping(state.get("rollback_plan"))
+        if rollback_plan:
+            if st.button("Preview rollback",key="rp2-rollback-preview"):
+                result=_invoke(adapter,"preview_region_plan_v2_activation",subsidiary_id=subsidiary_id,target_city_id=target_city_id,plan_id=str(rollback_plan["plan_id"]),plan_revision=int(rollback_plan["plan_revision"]),activation_revision=int(rollback_plan["activation_revision"]))
+                state["rollback_preview"]=_mapping(result or {})
+            rollback_preview=_region_plan_v2_data(state.get("rollback_preview",{}))
+            reason=st.text_input("Rollback reason",key="rp2-rollback-reason")
+            confirmation=st.text_input("Type ROLLBACK",key="rp2-rollback-confirm")
+            if st.button("Activate previous plan",disabled=not rollback_preview.get("preview_token") or not reason.strip() or confirmation!="ROLLBACK",key="rp2-rollback-apply"):
+                result=_invoke(adapter,"rollback_region_plan_v2",subsidiary_id=subsidiary_id,target_city_id=target_city_id,plan_id=str(rollback_plan["plan_id"]),plan_revision=int(rollback_preview["plan_revision"]),activation_revision=int(rollback_preview["activation_revision"]),preview_token=str(rollback_preview["preview_token"]),rollback_reason=reason,confirmation=confirmation)
+                state["rollback_result"]=_mapping(result or {}); _render_region_plan_v2_receipt(result or {})
+
+
+@_fragment
 def _render_data_management(adapter: BackendAdapter, config_path: str) -> None:
     st.caption(
         "Manage versioned allowlisted operational datasets. Source-code packages are managed separately under Package Management."
@@ -2339,7 +3305,17 @@ def _render_data_management(adapter: BackendAdapter, config_path: str) -> None:
         or {}
     )
     datasets = response.get("datasets")
-    datasets = datasets if isinstance(datasets, list) else []
+    datasets = (
+        [
+            presented
+            for item in datasets
+            if isinstance(item, Mapping)
+            for presented in [_managed_dataset_ui_metadata(_mapping(item))]
+            if presented.get("ui_hidden") is not True
+        ]
+        if isinstance(datasets, list)
+        else []
+    )
     if not datasets:
         st.info(f"No managed datasets are available for the {scope} scope.")
         return
@@ -2358,36 +3334,91 @@ def _render_data_management(adapter: BackendAdapter, config_path: str) -> None:
             }
         )
     st.dataframe(rows, width="stretch", hide_index=True)
-    by_id = {
-        _managed_dataset_id(_mapping(item)): _mapping(item)
-        for item in datasets
-        if _managed_dataset_id(_mapping(item))
+
+    grouped: dict[str, list[Mapping[str, Any]]] = {
+        "technician": [], "region": [], "other": [],
     }
-    selected_id = st.selectbox(
-        "Managed dataset",
-        list(by_id),
-        format_func=lambda value: str(by_id[value].get("label") or value),
-        key=f"managed-data-dataset-{scope}",
+    for item in datasets:
+        data = _mapping(item)
+        section = _managed_dataset_section(data)
+        # Region plans have one visible API-only lane under Region Plans v2.
+        # Legacy workbook, fixed bundle, SQL, and migration controls remain
+        # backend-compatible but are never presented as alternate workflows.
+        if section == "region":
+            continue
+        grouped[section].append(data)
+
+    def render_dataset_control(section: str, label: str) -> None:
+        options = grouped[section]
+        if not options:
+            return
+        by_id = {
+            _managed_dataset_id(item): item
+            for item in options
+            if _managed_dataset_id(item)
+        }
+        if not by_id:
+            return
+        selected_id = st.selectbox(
+            label,
+            list(by_id),
+            format_func=lambda value: str(by_id[value].get("label") or value),
+            key=f"managed-data-{section}-dataset-{scope}",
+        )
+        dataset = by_id[str(selected_id)]
+        st.caption(str(dataset.get("description") or "Backend-allowlisted managed dataset."))
+        badge = "DB-sync" if _managed_dataset_db_supported(dataset) else "Upload-only"
+        privacy_value = dataset.get("contains_pii")
+        if privacy_value is None:
+            privacy_value = dataset.get("PII", dataset.get("pii", "not specified"))
+        st.info(f"Scope: {scope} | Capability: {badge} | PII: {privacy_value}")
+        if section == "technician":
+            _render_active_region_binding(dataset)
+        selected_version = _render_managed_data_file_section(
+            adapter,
+            scope=scope,
+            dataset=dataset,
+            config_path=config_path,
+        )
+        _render_managed_data_db_section(
+            adapter,
+            dataset=dataset,
+            selected_version=selected_version,
+        )
+        if section == "region":
+            if _managed_dataset_id(dataset) == "fixed_region_plan_bundle":
+                _render_fixed_region_plan_bundle_workflow(
+                    adapter,
+                    scope=scope,
+                    dataset=dataset,
+                    source_version=selected_version,
+                )
+            elif dataset.get("ui_legacy_visible") is True:
+                _render_region_plan_workflow(
+                    adapter,
+                    scope=scope,
+                    dataset=dataset,
+                    source_version=selected_version,
+                )
+
+    st.markdown("## Technician Data")
+    st.caption(
+        "Upload and validate versioned technician workbooks. Previews, counts, and validation errors are redacted; database changes require a backend preview and confirmation."
     )
-    dataset = by_id[str(selected_id)]
-    st.caption(str(dataset.get("description") or "Backend-allowlisted managed dataset."))
-    badge = "DB-sync" if _managed_dataset_db_supported(dataset) else "Upload-only"
-    privacy_value = dataset.get("contains_pii")
-    if privacy_value is None:
-        privacy_value = dataset.get("PII", dataset.get("pii", "not specified"))
-    privacy = str(privacy_value)
-    st.info(f"Scope: {scope} | Capability: {badge} | PII: {privacy}")
-    selected_version = _render_managed_data_file_section(
-        adapter,
-        scope=scope,
-        dataset=dataset,
-        config_path=config_path,
+    if grouped["technician"]:
+        render_dataset_control("technician", "Technician dataset")
+    else:
+        st.info("No technician dataset is allowlisted for this scope.")
+
+    st.markdown("## Region Data")
+    st.caption(
+        "Region plan upload, review, and activation are available only in Region Plans v2."
     )
-    _render_managed_data_db_section(
-        adapter,
-        dataset=dataset,
-        selected_version=selected_version,
-    )
+    st.info("Open Region Plans v2 to manage Area + Technician workbooks through the versioned API.")
+
+    if grouped["other"]:
+        with st.expander("Other managed datasets", expanded=False):
+            render_dataset_control("other", "Managed dataset")
 
     with st.expander("Advanced Database Operations", expanded=False):
         load_advanced = st.toggle(
@@ -2531,6 +3562,9 @@ def render_app(backend: object | None = None) -> None:
         return
     if route == "data":
         _render_data_management(adapter, server_config_path)
+        return
+    if route == "region-plans":
+        _render_region_plan_v2(adapter)
         return
     if route == "package-admin-tools":
         st.caption(

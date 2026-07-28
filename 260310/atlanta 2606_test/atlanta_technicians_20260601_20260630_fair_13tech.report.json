@@ -1,0 +1,81 @@
+{
+  "schema_version": "atlanta_technician_csv/v1",
+  "parent_source": "260310\\atlanta 2606_test\\atlanta_technicians_20260601_20260630.csv",
+  "source_sha256": "e661480bff6ab0949f1020aa5212d450b7be38f34fbe0bf5fcc6e63cb72e9f52",
+  "output": "260310\\atlanta 2606_test\\atlanta_technicians_20260601_20260630_fair_13tech.csv",
+  "output_sha256": "63e2bed2cadfe5bda5a7ec9b6fe5331e31328373f08adcd766fcc86331258cf5",
+  "schema_columns": [
+    "record_id",
+    "subsidiary_name",
+    "strategic_city_name",
+    "promise_date",
+    "employee_code",
+    "employee_name",
+    "center_type",
+    "shift_start",
+    "shift_end",
+    "slot_count",
+    "max_jobs",
+    "available",
+    "start_location_type",
+    "start_location_address",
+    "source",
+    "created_at",
+    "updated_at",
+    "priority_group",
+    "max_minutes",
+    "preferred_region_name"
+  ],
+  "row_accounting": {
+    "input_rows": 329,
+    "accepted_rows": 285,
+    "rejected_rows": 44,
+    "rejection_reason": "FAIR_COMPARISON_EXCLUDED_TECHNICIAN"
+  },
+  "exclusions": {
+    "AI102933": {
+      "employee_name": "Richardo Brooks",
+      "rows": 22,
+      "available_days": 7,
+      "slots": 56,
+      "date_count": 22
+    },
+    "AI105115": {
+      "employee_name": "Jason Patterson",
+      "rows": 22,
+      "available_days": 17,
+      "slots": 152,
+      "date_count": 22
+    }
+  },
+  "date_coverage": {
+    "count": 22,
+    "dates": [
+      "20260601",
+      "20260602",
+      "20260603",
+      "20260604",
+      "20260605",
+      "20260608",
+      "20260609",
+      "20260610",
+      "20260611",
+      "20260612",
+      "20260615",
+      "20260616",
+      "20260617",
+      "20260618",
+      "20260619",
+      "20260622",
+      "20260623",
+      "20260624",
+      "20260625",
+      "20260626",
+      "20260629",
+      "20260630"
+    ]
+  },
+  "duplicate_promise_date_employee_code": 0,
+  "null_policy": "Values are preserved verbatim from the canonical source; this transform removes only the explicitly named employees.",
+  "stable_identifier": "record_id is preserved unchanged; employee_code identifies an employee within a promise_date."
+}

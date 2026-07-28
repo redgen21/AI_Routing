@@ -1,0 +1,111 @@
+{
+  "schema_version": "atlanta_four_scenario_comparison/v1",
+  "status": "completed",
+  "completed": true,
+  "generated_at_utc": "2026-07-23T12:16:17.171689+00:00",
+  "scenarios": [
+    "Integrated_13tech",
+    "Atlanta_3area",
+    "Atlanta_6area_new",
+    "Atlanta_6area_overlab"
+  ],
+  "dates": [
+    20260601,
+    20260602,
+    20260603,
+    20260604,
+    20260605,
+    20260608,
+    20260609,
+    20260610,
+    20260611,
+    20260612,
+    20260615,
+    20260616,
+    20260617,
+    20260618,
+    20260619,
+    20260622,
+    20260623,
+    20260624,
+    20260625,
+    20260626,
+    20260629,
+    20260630
+  ],
+  "completed_date_count_per_scenario": 22,
+  "aligned_jobs": 1506,
+  "fair_technician_input_sha256": "63e2bed2cadfe5bda5a7ec9b6fe5331e31328373f08adcd766fcc86331258cf5",
+  "plan_evidence": {
+    "Integrated_13tech": {
+      "jobs.csv": "8e31ab691a6e8b285d7056aaeb2484f062e1598a61277afbbfc4a4c2f03924f8",
+      "fair_technicians.csv": "63e2bed2cadfe5bda5a7ec9b6fe5331e31328373f08adcd766fcc86331258cf5",
+      "technician_homes.csv": "2bf435f20b8ef264e592fb6a859b707d20e7aa01b1a7748eb785ef996e6f3f96",
+      "capability_profile.xlsx": "83aa2a9376680cf671a0edf8d82d6f6a2b51a56df877f5e021295f14d80e71b6",
+      "bundle_sha256": "6297cb7098e28aa1e446df43c95ce9fb2923b069994b0ba704dcd66fcb8a9515"
+    },
+    "Atlanta_3area": {
+      "manifest.json": "ed2f9c6862f6ee67c7f169c0ef0f0cc31a81fb94bb7a69feae6d8bc4a3bcb792",
+      "region_postals.csv": "b644fad4190788c02ba3c4033000fe73694c58b11148a7d12ced4994bdd1f8f1",
+      "technician_assignments.csv": "b28a8ef354d5dcc83512056c444c4c732e64940e4e85f0703604f401eac595c2",
+      "boundary_overflow.csv": "6fe91798f1c369f4ed6328b53f9cdd5910201c65fe23156af5496f1d80e345dd",
+      "db_override_provenance.json": "d2531afc527ed9031fa6981d65b8e2ec2189a984cca50c387ac643e080a6c6ad",
+      "bundle_sha256": "fc82694cfec8325855e1c1ed070da070b22e78842ec5e48cae74f27f39fd2555"
+    },
+    "Atlanta_6area_new": {
+      "manifest.json": "9b8b7116d0336e23084ea8e5b6fa5da1c2a5ec474096a5c8d28b1b032c7a0f07",
+      "region_postals.csv": "0690ebedd31ceb8e7570179818123ce61eeb17af6a37828d8a2fc4c8ba1dfa9e",
+      "technician_assignments.csv": "5dd9244fd1997cd6ae3cef300520368e4390f547ecaf194c9cf8b2c5d4bdc2f4",
+      "boundary_overflow.csv": "c3435be0eb3fbca52b79752adb278f7220b3add05a4917cf6f8ac7be47c5e802",
+      "bundle_sha256": "7359622083daae23bb874244a4cafcf6a17465fba4c58b54d6e587392848e6bd"
+    },
+    "Atlanta_6area_overlab": {
+      "manifest.json": "de8f3cf0662c23065d12382a63997582370ff7b0d429f23fd4a325b97c1cb2b2",
+      "region_postals.csv": "e81e5bc4f03c21f913a5c8e4d98a373331b794dccb8ee15605b101338f776ca6",
+      "technician_assignments.csv": "5dd9244fd1997cd6ae3cef300520368e4390f547ecaf194c9cf8b2c5d4bdc2f4",
+      "boundary_overflow.csv": "061c5dcacc5208a43d1bf0cb8ed78303ca5f425b7b941e8616e7f224965e8ed9",
+      "bundle_sha256": "5a370c5f318e6c9e5b49f2b7654f1b49e20f1c7d5230b8a9db01ccd85333f844"
+    }
+  },
+  "solver": {
+    "engine": "OR-Tools na_general",
+    "objective": "min_total_travel_time",
+    "time_limit_seconds_per_day": 10
+  },
+  "matrix": {
+    "endpoint": "http://20.51.244.68:5002",
+    "profile": "driving",
+    "coordinate_order": "longitude,latitude",
+    "table_direction": "source_to_destination",
+    "raw_units": "metres/seconds",
+    "normalized_units": "km/min",
+    "fallback_policy": "fail_closed_on_osrm_error",
+    "matrix_request_count": 2118,
+    "actual_fallback_count": 0,
+    "failure_count": 0,
+    "telemetry_evidence": "per-day checkpoint solver_diagnostics.matrix_telemetry",
+    "map_version": "unavailable"
+  },
+  "distance_metric": "solver route summary, job-to-job/no-return; home-to-first leg excluded",
+  "fixed_job_policy": {
+    "Integrated_13tech": "hard_fixed_integrated/v1",
+    "regional_scenarios": "fixed_outside_active_plan_soft_priority/v1",
+    "approval_basis": "user-approved: fixed jobs outside their technician region use reschedule-like priority, not a hard assignment",
+    "aggregate_file": "policy_relaxation_comparison.csv"
+  },
+  "regional_slot_shortage": {
+    "aggregate_file": "regional_slot_shortage_comparison.csv",
+    "classification": "observed eligible-candidate remaining slots < requested job slots; not an isolating causal probe",
+    "other_region_rule": "per date, exclude all primary job regions with slot-shortage jobs; sum positive input capacity minus assigned slots once for technicians in every other assigned region",
+    "caveat": "remaining slots do not prove product, time, travel, fixed-job, or overflow-policy feasibility"
+  },
+  "result_accounting": {
+    "each_scenario_jobs": {
+      "Integrated_13tech": 1506,
+      "Atlanta_3area": 1506,
+      "Atlanta_6area_new": 1506,
+      "Atlanta_6area_overlab": 1506
+    },
+    "every_job_assigned_or_explicitly_unassigned": true
+  }
+}

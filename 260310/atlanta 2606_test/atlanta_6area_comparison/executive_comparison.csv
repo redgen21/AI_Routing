@@ -1,0 +1,9 @@
+﻿metric,existing,atlanta_6area,delta_atlanta6_minus_existing
+Total jobs,1506.0,1506.0,0.0
+Dispatch jobs,1439.0,1220.0,-219.0
+Dispatch slots,1897.0,1576.0,-321.0
+Not dispatch jobs,67.0,286.0,219.0
+Daily avg job fill rate (%),95.825,81.16207292631702,-14.66292707368298
+Daily avg slot fill rate (%),93.04952580788895,78.9145674084203,-14.134958399468658
+Total travel miles,15034.12105468,10416.98034321,-4617.14071147
+Avg travel miles / active tech-day,56.47398041833492,39.77005696715976,-16.703923451175157

@@ -14,6 +14,7 @@ from .vrp_api_common import format_planned_timestamp
 
 CONFIG_JSON_PATH = Path("config/config.json")
 FIXED_Z_WEEKEND_SLOTS = ["09:00", "10:00", "11:00", "12:00"]
+OPTIONAL_JOB_DROP_PENALTY = 1_000_000_000
 
 
 def _load_runtime_config() -> dict[str, Any]:
@@ -281,7 +282,7 @@ def _solve_jobs(
         allowed_vehicles = [
             vehicle_idx
             for vehicle_idx, tech in enumerate(tech_states)
-            if not tech["eligible_products"] or not job["product"] or job["product"] in tech["eligible_products"]
+            if job["product"] and job["product"] in tech["eligible_products"]
         ]
         if not allowed_vehicles:
             invalid_jobs.append(
@@ -296,6 +297,10 @@ def _solve_jobs(
         for vehicle_idx in range(vehicle_count):
             if vehicle_idx not in allowed_vehicles:
                 routing.VehicleVar(index).RemoveValue(vehicle_idx)
+        # Jobs with an eligible technician are still optional: if the combined
+        # technician slot capacity is smaller than the requested jobs, keep
+        # the feasible subset and return the remainder as unassigned.
+        routing.AddDisjunction([index], OPTIONAL_JOB_DROP_PENALTY)
 
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()
     search_parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC

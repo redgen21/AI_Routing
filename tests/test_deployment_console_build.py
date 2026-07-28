@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -576,6 +577,51 @@ class AdminToolsArtifactBuildTests(unittest.TestCase):
         self.assertTrue(preview["source_dirty"])
         self.assertFalse(preview["promotable"])
         self.assertTrue(preview["requires_dirty_approval"])
+
+    def test_package_allowlist_contains_complete_region_plan_migration_chain(self) -> None:
+        """The standalone Admin Tools release cannot rely on checkout migrations."""
+
+        script = console_backend._ADMIN_TOOLS_BUILD_SCRIPT.read_text(encoding="utf-8")
+        required_paths = (
+            "admin_tools/db/migrations/manifest.json",
+            "admin_tools/db/migrations/V001__atlanta_6area_region_plan.manifest.json",
+            "admin_tools/db/migrations/V001__atlanta_6area_region_plan.sql",
+            "admin_tools/db/migrations/V002__region_plan_unbounded_region_seq.sql",
+            "admin_tools/db/migrations/V003__region_plan_technician_source_id.sql",
+            "admin_tools/db/migrations/V004__region_plan_area_type_region_soft.sql",
+            "admin_tools/db/region_plan_schema_backend.py",
+            "admin_tools/db/region_plan_schema_v2.sql",
+        )
+        for relative in required_paths:
+            with self.subTest(path=relative):
+                self.assertIn(f'"{relative}"', script)
+                self.assertTrue((console_backend.PROJECT_ROOT / relative).is_file())
+        self.assertIn('$ScannableExtensions = @(".py", ".json", ".md", ".sql", ".txt")', script)
+
+        root = console_backend.PROJECT_ROOT / "admin_tools" / "db" / "migrations"
+        central = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        sidecar = json.loads(
+            (root / "V001__atlanta_6area_region_plan.manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        entries = {entry["migration_id"]: entry for entry in central["migrations"]}
+        self.assertEqual(entries["V001__atlanta_6area_region_plan"]["migration_id"], sidecar["migration_id"])
+        self.assertEqual(entries["V001__atlanta_6area_region_plan"]["sql_file"], sidecar["sql_file"])
+        self.assertEqual(
+            entries["V001__atlanta_6area_region_plan"]["checksum_sha256"],
+            sidecar["checksum_sha256"],
+        )
+        for migration_id in (
+            "V001__atlanta_6area_region_plan",
+            "V002__region_plan_unbounded_region_seq",
+            "V003__region_plan_technician_source_id",
+            "V004__region_plan_area_type_region_soft",
+        ):
+            entry = entries[migration_id]
+            with self.subTest(migration=migration_id):
+                digest = hashlib.sha256((root / entry["sql_file"]).read_bytes()).hexdigest()
+                self.assertEqual(entry["checksum_sha256"], digest)
 
     def test_invalid_version_and_collision_block_before_build_process(self) -> None:
         with mock.patch.object(console_backend, "_run_local_process") as run:

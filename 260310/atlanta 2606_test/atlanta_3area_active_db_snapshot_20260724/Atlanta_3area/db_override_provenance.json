@@ -1,0 +1,17 @@
+{
+  "schema": "active-db-manual-override-evidence/v1",
+  "environment": "development",
+  "database": "vrp_db_dev",
+  "strategic_city_name": "Atlanta_3area",
+  "active_plan_id": "atlanta_3area_20260723",
+  "change": {
+    "employee_code": "AI103146",
+    "before_region_seq": 3,
+    "after_region_seq": 1,
+    "after_territory": "ATL East"
+  },
+  "operator_verification": "DB query returned assigned_region_seq=1 and source_territory=ATL East",
+  "canonical_workbook_sha256": "7f861cd9000c6e2af6202f643184a376c4bcaef8ec6a02851fac76c5a0c11f4b",
+  "snapshot_purpose": "routing simulation and report refresh only",
+  "integrity_exception": "active DB plan row was changed in place; stored plan checksums remain historical until a new immutable plan is activated"
+}

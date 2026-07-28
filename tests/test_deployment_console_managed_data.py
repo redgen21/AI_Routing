@@ -14,6 +14,19 @@ from unittest import mock
 from services.deploy import console_backend
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+TERRITORY_SOURCE = PROJECT_ROOT / "260310" / "New ATL Buckets.xlsx"
+TECHNICIAN_PROFILE_SOURCE = (
+    PROJECT_ROOT
+    / "data"
+    / "north_america"
+    / "raw"
+    / "profile"
+    / "20260317"
+    / "Top 10_DMS_DMS2_Profile_20260317.xlsx"
+)
+
+
 class _ManagedRemote:
     def __init__(self) -> None:
         self.files: dict[str, bytes] = {}
@@ -65,6 +78,7 @@ class ManagedDataBackendTests(unittest.TestCase):
             "password": "not-used-by-fake",
             "remote_root": "/home/csda/AI_Routing",
             "allow_upload": True,
+            "admin_tools_release_version": "admin-v20260721",
         }
         self.remote = _ManagedRemote()
         self.history: list[dict[str, object]] = []
@@ -173,35 +187,224 @@ class ManagedDataBackendTests(unittest.TestCase):
         self.assertEqual(detail["version"], self.version)
         self.assertNotIn("path", json.dumps(detail).lower())
 
-    def test_environment_scope_uses_separate_state_root(self) -> None:
-        payload = (
-            "STRATEGIC_CITY_NAME,GSFS_RECEIPT_NO,POSTAL_CODE,latitude,longitude\n"
-            "Atlanta,R1,30301,33.7,-84.3\n"
-        ).encode("utf-8")
+    def test_territory_workbook_uses_development_candidate_workflow_only(self) -> None:
+        payload = TERRITORY_SOURCE.read_bytes()
         version = hashlib.sha256(payload).hexdigest()
-        result = console_backend.upload_managed_data_file(
+        candidate = {
+            "contract_version": "region-plan/v1",
+            "status": "candidate_staged",
+            "source_sha256": version,
+            "managed_version": version,
+            "plan_id": "atlanta_6area_new_atl_buckets_20260721_v1",
+            "lifecycle_stage": "candidate_plan",
+            "approval_status": "pending_boundary_resolutions",
+            "promotable": False,
+            "promotion_required": True,
+            "direct_db_upsert": False,
+            "membership_input_rows": 301,
+        }
+        with mock.patch.object(
+            console_backend,
+            "_run_region_plan_candidate_command",
+            return_value=candidate,
+        ) as stage:
+            result = console_backend.upload_managed_data_file(
+                scope="development",
+                dataset_id="territory_plan_workbook",
+                file_name=TERRITORY_SOURCE.name,
+                file_bytes=payload,
+                expected_sha256=version,
+                confirm=True,
+                config_path="config/server_deploy.local.json",
+            )
+
+        self.assertEqual(result["scope"], "development")
+        self.assertEqual(result["lifecycle_stage"], "candidate_plan")
+        self.assertTrue(result["promotion_required"])
+        self.assertEqual(result["candidate_workflow"]["plan_id"], candidate["plan_id"])
+        self.assertEqual(
+            self.remote.uploads[-1],
+            "/home/csda/AI_Routing/state/development/managed_data/"
+            f"territory_plan_workbook/{version}/payload.xlsx",
+        )
+        self.assertEqual(stage.call_args.kwargs["source_path"], self.remote.uploads[-1])
+        self.assertEqual(stage.call_args.kwargs["version"], version)
+        metadata = json.loads(
+            (
+                self.managed_root
+                / "development"
+                / "territory_plan_workbook"
+                / version
+                / "metadata.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(metadata["lifecycle_stage"], "candidate_plan")
+        self.assertEqual(metadata["candidate_workflow"]["source_sha256"], version)
+        with self.assertRaisesRegex(ValueError, "registered for this scope"):
+            console_backend.preview_managed_data_upload(
+                scope="production",
+                dataset_id="territory_plan_workbook",
+                file_name=TERRITORY_SOURCE.name,
+                file_bytes=payload,
+            )
+
+    def test_fixed_region_bundle_preflights_pinned_capability_before_remote_upload(self) -> None:
+        payload = b"PK\x03\x04opaque-immutable-region-bundle"
+        version = hashlib.sha256(payload).hexdigest()
+        spec = {
+            "dataset_id": "fixed_region_plan_bundle",
+            "lifecycle_stage": "candidate_plan",
+            "promotion_required": True,
+            "candidate_workflow_supported": False,
+            "fixed_region_bundle_supported": True,
+        }
+        with mock.patch.object(
+            console_backend,
+            "_managed_data_validation",
+            return_value=(spec, "payload.zip", {"summary": {}, "sample": []}),
+        ), mock.patch.object(
+            console_backend,
+            "_verify_fixed_region_plan_bundle_admin_release",
+            side_effect=PermissionError(
+                "Pinned Admin Tools release does not support fixed Region Data imports."
+            ),
+        ):
+            with self.assertRaisesRegex(PermissionError, "does not support"):
+                console_backend.upload_managed_data_file(
+                    scope="development",
+                    dataset_id="fixed_region_plan_bundle",
+                    file_name="region_bundle.zip",
+                    file_bytes=payload,
+                    expected_sha256=version,
+                    confirm=True,
+                    config_path="config/server_deploy.local.json",
+                )
+        self.assertEqual(self.remote.uploads, [])
+        self.assertFalse((self.managed_root / "development").exists())
+
+    def test_fixed_region_bundle_upload_writes_immutable_zip_receipt_only(self) -> None:
+        payload = b"PK\x03\x04opaque-immutable-region-bundle"
+        version = hashlib.sha256(payload).hexdigest()
+        spec = {
+            "dataset_id": "fixed_region_plan_bundle",
+            "lifecycle_stage": "candidate_plan",
+            "promotion_required": True,
+            "candidate_workflow_supported": False,
+            "fixed_region_bundle_supported": True,
+        }
+        with mock.patch.object(
+            console_backend,
+            "_managed_data_validation",
+            return_value=(spec, "payload.zip", {"summary": {}, "sample": []}),
+        ), mock.patch.object(
+            console_backend, "_verify_fixed_region_plan_bundle_admin_release"
+        ) as preflight:
+            result = console_backend.upload_managed_data_file(
+                scope="development",
+                dataset_id="fixed_region_plan_bundle",
+                file_name="region_bundle.zip",
+                file_bytes=payload,
+                expected_sha256=version,
+                confirm=True,
+                config_path="config/server_deploy.local.json",
+            )
+        target = (
+            "/home/csda/AI_Routing/state/development/managed_data/"
+            f"fixed_region_plan_bundle/{version}/payload.zip"
+        )
+        self.assertEqual(self.remote.uploads, [target])
+        self.assertEqual(result["status"], "uploaded")
+        self.assertEqual(result["version"], version)
+        self.assertTrue(result["admin_tools_capability_verified"])
+        self.assertEqual(preflight.call_count, 1)
+        metadata = json.loads(
+            (
+                self.managed_root
+                / "development"
+                / "fixed_region_plan_bundle"
+                / version
+                / "metadata.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(metadata["payload_name"], "payload.zip")
+        self.assertNotIn("candidate_workflow", metadata)
+        self.assertNotIn("target", self.history[0])
+
+    def test_fixed_region_bundle_status_uses_checksum_bound_read_only_command(self) -> None:
+        version = "a" * 64
+        captured: dict[str, object] = {}
+
+        def run(_remote: object, **kwargs: object) -> dict[str, object]:
+            captured.update(kwargs)
+            return {
+                "status": "reviewed",
+                "managed_version": version,
+                "plan_id": f"atlanta_6area_v2_{version}",
+                "resolution_digest": version,
+            }
+
+        with mock.patch.object(
+            console_backend,
+            "_fixed_region_plan_bundle_development_context",
+            return_value=(
+                {"remote_root": "/home/csda/AI_Routing"},
+                {
+                    "environment": "development",
+                    "remote_target_id": "development:vrp_db_dev",
+                    "release_version": "admin-20260721-000000",
+                },
+            ),
+        ), mock.patch.object(
+            console_backend, "_load_fixed_region_plan_bundle", return_value=version
+        ), mock.patch.object(
+            console_backend, "_remote_session_factory", return_value=contextlib.nullcontext(self.remote)
+        ), mock.patch.object(
+            console_backend, "_run_fixed_region_plan_bundle_command", side_effect=run
+        ):
+            result = console_backend.get_fixed_region_plan_bundle_status(
+                environment="development", version=version
+            )
+
+        self.assertEqual(result["status"], "reviewed")
+        self.assertEqual(captured["command"], "status-bundle")
+        self.assertEqual(
+            captured["arguments"],
+            ("--bundle-sha256", version, "--managed-version", version),
+        )
+        self.assertEqual(captured["version"], version)
+
+    def test_technician_profile_workbook_is_a_scoped_source_snapshot(self) -> None:
+        payload = TECHNICIAN_PROFILE_SOURCE.read_bytes()
+        version = hashlib.sha256(payload).hexdigest()
+        preview = console_backend.preview_managed_data_upload(
             scope="development",
-            dataset_id="service_geocoded",
-            file_name="services.csv",
+            dataset_id="technician_profile_workbook",
+            file_name=TECHNICIAN_PROFILE_SOURCE.name,
+            file_bytes=payload,
+        )
+        self.assertEqual(preview["lifecycle_stage"], "source_upload")
+        self.assertFalse(preview["promotion_required"])
+        self.assertFalse(preview["candidate_workflow_supported"])
+        self.assertNotIn("Tech Name", json.dumps(preview))
+
+        result = console_backend.upload_managed_data_file(
+            scope="production",
+            dataset_id="technician_profile_workbook",
+            file_name=TECHNICIAN_PROFILE_SOURCE.name,
             file_bytes=payload,
             expected_sha256=version,
             confirm=True,
             config_path="config/server_deploy.local.json",
         )
-
-        self.assertEqual(result["scope"], "development")
+        self.assertEqual(result["scope"], "production")
+        self.assertEqual(result["lifecycle_stage"], "source_upload")
+        self.assertFalse(result["promotion_required"])
+        self.assertNotIn("candidate_workflow", result)
         self.assertEqual(
             self.remote.uploads[-1],
-            "/home/csda/AI_Routing/state/development/managed_data/"
-            f"service_geocoded/{version}/payload.csv",
+            "/home/csda/AI_Routing/state/production/managed_data/"
+            f"technician_profile_workbook/{version}/payload.xlsx",
         )
-        with self.assertRaisesRegex(ValueError, "registered for this scope"):
-            console_backend.preview_managed_data_upload(
-                scope="common",
-                dataset_id="service_geocoded",
-                file_name="services.csv",
-                file_bytes=payload,
-            )
 
     def test_confirmation_checksum_and_local_collision_fail_closed(self) -> None:
         with self.assertRaisesRegex(PermissionError, "explicit confirmation"):
