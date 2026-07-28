@@ -8,6 +8,8 @@ __pycache__/
 .pytest_cache/
 /deployment/
 /.artifact-admin-test/
+/.artifact-*/
+
 
 260310/input/
 260310/output/
