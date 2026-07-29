@@ -2465,6 +2465,7 @@ def _build_common_actual_frames(
     jobs_df: pd.DataFrame,
     engineer_master_df: pd.DataFrame,
     region_zip_df: pd.DataFrame,
+    strategic_city_name: str = "",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     if jobs_df.empty:
         return pd.DataFrame(), pd.DataFrame()
@@ -2520,7 +2521,51 @@ def _build_common_actual_frames(
         actual_df["new_region_name"] = pd.NA
         actual_df["area_type"] = pd.NA
     actual_df["assigned_sm_name"] = actual_df["assigned_sm_name"].replace("", pd.NA).fillna(actual_df["assigned_sm_name_master"])
-    actual_df["visit_seq"] = actual_df.groupby(["service_date_key", "assigned_sm_code"], dropna=False).cumcount() + 1
+    # Actual assignments are not changed, but display them in an OSRM-ordered
+    # route so the map and route metrics reflect a practical technician tour.
+    # Keep the home start fixed when it is available, matching area_map.
+    actual_df["visit_seq"] = 0
+    actual_df["actual_route_distance_km"] = 0.0
+    actual_df["actual_route_duration_min"] = 0.0
+    for (_, engineer_code), group in actual_df.groupby(["service_date_key", "assigned_sm_code"], dropna=False, sort=False):
+        group_indices = list(group.index)
+        if not group_indices:
+            continue
+        start_coord = None
+        first_row = actual_df.loc[group_indices[0]]
+        if pd.notna(first_row.get("home_start_longitude")) and pd.notna(first_row.get("home_start_latitude")):
+            start_coord = (float(first_row["home_start_longitude"]), float(first_row["home_start_latitude"]))
+        stop_coords = [(float(actual_df.loc[idx, "longitude"]), float(actual_df.loc[idx, "latitude"])) for idx in group_indices]
+        coord_chain = [start_coord] + stop_coords if start_coord is not None else stop_coords
+        try:
+            route_payload = get_route_client(strategic_city_name).build_ordered_route(
+                tuple(coord_chain), preserve_first=start_coord is not None
+            )
+            ordered_coords = list(route_payload.get("ordered_coords", []))
+        except Exception:
+            route_payload = {"distance_km": 0.0, "duration_min": 0.0, "ordered_coords": coord_chain}
+            ordered_coords = coord_chain
+        # Match optimized stop coordinates back to source rows, preserving
+        # duplicates by consuming each source row at most once.
+        remaining = set(group_indices)
+        ordered_indices: list[int] = []
+        for coord in ordered_coords:
+            if start_coord is not None and tuple(coord) == tuple(start_coord):
+                continue
+            candidates = [
+                idx for idx in remaining
+                if abs(float(actual_df.loc[idx, "longitude"]) - float(coord[0])) < 1e-7
+                and abs(float(actual_df.loc[idx, "latitude"]) - float(coord[1])) < 1e-7
+            ]
+            if candidates:
+                chosen = candidates[0]
+                remaining.remove(chosen)
+                ordered_indices.append(chosen)
+        ordered_indices.extend(idx for idx in group_indices if idx in remaining)
+        for sequence, idx in enumerate(ordered_indices, start=1):
+            actual_df.at[idx, "visit_seq"] = sequence
+        actual_df.loc[group_indices, "actual_route_distance_km"] = float(route_payload.get("distance_km", 0.0) or 0.0)
+        actual_df.loc[group_indices, "actual_route_duration_min"] = float(route_payload.get("duration_min", 0.0) or 0.0)
     actual_df["visit_start_time"] = ""
     actual_df["visit_end_time"] = ""
     actual_df["travel_time_from_prev_min"] = pd.NA
@@ -2602,7 +2647,9 @@ def _build_result_view_state(subsidiary_name: str, strategic_city_name: str) -> 
     result_jobs_df = payload_jobs_df if not payload_jobs_df.empty else actual_jobs_df
     assignment_df, schedule_df = _build_common_result_frames(result_payload, result_jobs_df, engineer_master_df, region_zip_df)
     if compare_mode == "Actual":
-        assignment_df, schedule_df = _build_common_actual_frames(actual_jobs_df, engineer_master_df, region_zip_df)
+        assignment_df, schedule_df = _build_common_actual_frames(
+            actual_jobs_df, engineer_master_df, region_zip_df, strategic_city_name
+        )
     home_df = _build_common_home_df(engineer_master_df)
     unassigned_display_df = _build_unassigned_job_display_df(result_payload, result_jobs_df, region_zip_df)
 

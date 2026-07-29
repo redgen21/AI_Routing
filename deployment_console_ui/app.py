@@ -1190,7 +1190,9 @@ def _render_artifact_tab(
     # not by a live upload; it must not disable resuming the remaining files.
     st.session_state.pop(inflight_key, None)
     pending = _mapping(st.session_state.get(pending_key) or {})
-    if pending and pending.get("intent_id") != intent["intent_id"]:
+    # Upload uses the reviewed artifact preview as its confirmation boundary;
+    # do not require a second browser rerun/click for the same immutable intent.
+    if pending:
         st.session_state.pop(pending_key, None)
         pending = {}
     notice = _mapping(st.session_state.get(notice_key) or {})
@@ -1229,36 +1231,15 @@ def _render_artifact_tab(
     confirm = False
     cancel = False
     with confirmation_area.container():
-        if pending:
-            st.warning(
-                f"{pending.get('environment')} server: Upload "
-                f"{len(pending.get('selected_files') or [])} selected files?"
-            )
-            confirm_column, cancel_column = st.columns(2)
-            confirm = confirm_column.button(
-                "Confirm upload",
-                type="primary",
-                key=f"upload-confirm-{intent['intent_id']}",
-                disabled=not allowed,
-            )
-            cancel = cancel_column.button(
-                "Cancel",
-                key=f"upload-cancel-{intent['intent_id']}",
-            )
-        elif changed_files:
-            if st.button(
+        if changed_files:
+            confirm = st.button(
                 "Upload selected files",
                 disabled=not allowed,
                 type="primary",
                 key=f"upload-request-{environment}-{kind}-{identifier}",
-            ):
+            )
+            if confirm:
                 st.session_state.pop(notice_key, None)
-                st.session_state[pending_key] = intent
-                st.rerun()
-    if cancel:
-        confirmation_area.empty()
-        st.session_state.pop(pending_key, None)
-        st.rerun()
 
     if confirm and not inflight:
         confirmation_area.empty()

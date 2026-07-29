@@ -99,6 +99,56 @@ def _hard_eligible_employee_codes(job: dict[str, Any]) -> list[str] | None:
     return _explicit_employee_codes(job.get("eligible_employee_codes"))
 
 
+def _skill_eligible_employee_codes(
+    request_payload: dict[str, Any],
+    product: object,
+) -> list[str] | None:
+    """Return hard candidates derived from technician skills when supplied."""
+
+    technicians = list(request_payload.get("technicians", []))
+    raw_capabilities = request_payload.get("capabilities", [])
+    capability_rows: list[dict[str, Any]] = []
+    if isinstance(raw_capabilities, list):
+        capability_rows = [row for row in raw_capabilities if isinstance(row, dict)]
+    elif isinstance(raw_capabilities, dict):
+        for value in raw_capabilities.values():
+            if isinstance(value, list):
+                capability_rows.extend(row for row in value if isinstance(row, dict))
+            elif isinstance(value, dict):
+                capability_rows.append(value)
+    has_skill_source = any(isinstance(tech, dict) and "skills" in tech for tech in technicians)
+    has_capability_source = bool(capability_rows)
+    if not technicians or not has_skill_source and not has_capability_source:
+        return None
+    normalized_product = str(product or "").strip().upper()
+    if not normalized_product:
+        return []
+    eligible: list[str] = []
+    for tech in technicians:
+        if not isinstance(tech, dict):
+            continue
+        employee_code = str(tech.get("employee_code", "")).strip()
+        if not employee_code:
+            continue
+        skill_products = {
+            str(skill.get("product") or skill.get("product_code") or skill.get("SERVICE_PRODUCT_CODE") or "")
+            .strip()
+            .upper()
+            for skill in list(tech.get("skills") or [])
+            if isinstance(skill, dict)
+        }
+        skill_products.update(
+            str(row.get("product_code") or row.get("product") or row.get("SERVICE_PRODUCT_CODE") or "")
+            .strip()
+            .upper()
+            for row in capability_rows
+            if str(row.get("employee_code") or row.get("SVC_ENGINEER_CODE") or "").strip() == employee_code
+        )
+        if normalized_product in skill_products:
+            eligible.append(employee_code)
+    return sorted(set(eligible))
+
+
 def _approved_boundary_overflow_employee_codes(job: dict[str, Any]) -> list[str]:
     """Return approved overflow candidates intersected with the hard candidate set."""
 
@@ -492,7 +542,19 @@ def _build_service_frame_from_payload(
             is_heavy_repair = bool(job.get("is_heavy_repair", False)) if heavy_text not in {"true", "1", "y", "yes", "t", "false", "0", "n", "no", "f", ""} else heavy_text in {"true", "1", "y", "yes", "t"}
             slot_minutes = 45 * job_slot_count
             service_minutes = max(slot_minutes, 100 if is_heavy_repair else 45)
-        eligible_employee_codes = _hard_eligible_employee_codes(job)
+        explicit_eligible_employee_codes = _hard_eligible_employee_codes(job)
+        skill_eligible_employee_codes = _skill_eligible_employee_codes(
+            request_payload,
+            job.get("product") or job.get("product_code") or job.get("SERVICE_PRODUCT_CODE"),
+        )
+        if skill_eligible_employee_codes is None:
+            eligible_employee_codes = explicit_eligible_employee_codes
+        elif explicit_eligible_employee_codes is None:
+            eligible_employee_codes = skill_eligible_employee_codes
+        else:
+            eligible_employee_codes = sorted(
+                set(explicit_eligible_employee_codes) & set(skill_eligible_employee_codes)
+            )
         if not _postal_is_in_active_region_plan(job, region_policy):
             eligible_employee_codes = []
         boundary_overflow_employee_codes = (
@@ -506,8 +568,12 @@ def _build_service_frame_from_payload(
                 "GSFS_RECEIPT_NO": receipt_no or salesforce_id,
                 "SVC_ENGINEER_CODE": str(job.get("current_employee_code", "")).strip(),
                 "SVC_ENGINEER_NAME": str(job.get("current_employee_name", job.get("current_employee_code", ""))).strip(),
-                "SERVICE_PRODUCT_GROUP_CODE": str(job.get("product_group", "") or job.get("product", "")).strip().upper(),
-                "SERVICE_PRODUCT_CODE": str(job.get("product", "") or job.get("service_product_code", "")).strip().upper(),
+                "SERVICE_PRODUCT_GROUP_CODE": str(
+                    job.get("product_group", "") or job.get("product", "") or job.get("product_code", "")
+                ).strip().upper(),
+                "SERVICE_PRODUCT_CODE": str(
+                    job.get("product", "") or job.get("product_code", "") or job.get("service_product_code", "")
+                ).strip().upper(),
                 "RECEIPT_DETAIL_SYMPTOM_CODE": str(job.get("symptom", "") or job.get("symptom_code", "")).strip().upper(),
                 "ADDRESS_LINE1_INFO": str(job.get("address", "")).strip(),
                 "CITY_NAME": str(job.get("city_name", "")).strip(),

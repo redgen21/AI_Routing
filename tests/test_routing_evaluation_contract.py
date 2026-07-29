@@ -275,6 +275,18 @@ class KoreanCompatibilityRegressionTest(unittest.TestCase):
         self.assertEqual(result["summary"], {"total_jobs": 1, "assigned_jobs": 0, "unassigned_jobs": 1})
         self.assertEqual(result["unassigned"][0]["reason"], "NO_ELIGIBLE_TECHNICIAN")
 
+    @patch.object(vrp_mode_z_weekend, "_osrm_route_distance_km", return_value=1.0)
+    def test_weekend_accepts_product_code_payload_fields(self, _route_distance) -> None:
+        payload = self._weekend_payload(skills=[{"product_code": "P1"}], job_count=2)
+        for technician in payload["technicians"]:
+            technician["skills"] = [{"product_code": "P1"}]
+        for job in payload["jobs"]:
+            job["product_code"] = job.pop("product")
+
+        result = vrp_mode_z_weekend.run_mode(payload)
+
+        self.assertEqual(result["summary"], {"total_jobs": 2, "assigned_jobs": 1, "unassigned_jobs": 1})
+
 
 if __name__ == "__main__":
     unittest.main()

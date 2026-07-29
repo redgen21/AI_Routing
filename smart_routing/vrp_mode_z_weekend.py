@@ -131,7 +131,11 @@ def _osrm_route_distance_km(origin: tuple[float, float], dest: tuple[float, floa
 def _normalize_skill_priorities(skills: list[dict[str, Any]]) -> dict[str, float]:
     priorities: dict[str, float] = {}
     for skill in skills:
-        product = _text_value(skill.get("product"), skill.get("SERVICE_PRODUCT_CODE"))
+        product = _text_value(
+            skill.get("product"),
+            skill.get("product_code"),
+            skill.get("SERVICE_PRODUCT_CODE"),
+        )
         if product:
             priority = float(
                 pd.to_numeric(
@@ -183,7 +187,11 @@ def _solve_jobs(
                 "receipt_no": receipt_no,
                 "job_lat": float(job_lat),
                 "job_lng": float(job_lng),
-                "product": _text_value(job.get("product"), job.get("SERVICE_PRODUCT_CODE")),
+                "product": _text_value(
+                    job.get("product"),
+                    job.get("product_code"),
+                    job.get("SERVICE_PRODUCT_CODE"),
+                ),
                 "service_minutes": int(
                     pd.to_numeric(
                         pd.Series([job.get("service_minutes", job.get("SERVICE_MINUTES", 45))]),
