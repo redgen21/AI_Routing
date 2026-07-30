@@ -197,7 +197,13 @@ function Get-FileSha256WithRetry {
 
     for ($Attempt = 1; $Attempt -le $MaxAttempts; $Attempt++) {
         try {
-            return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+            $Stream = [System.IO.File]::OpenRead($Path)
+            $Sha = [System.Security.Cryptography.SHA256]::Create()
+            $HashBytes = $Sha.ComputeHash($Stream)
+            $Stream.Close()
+            $Stream.Dispose()
+            $Sha.Dispose()
+            return [System.BitConverter]::ToString($HashBytes).Replace("-", "").ToLowerInvariant()
         }
         catch {
             if ($Attempt -eq $MaxAttempts) {
@@ -398,11 +404,13 @@ foreach ($relativePath in $RequiredArtifactPaths) {
 
 # Fail closed before manifest/ZIP creation. Runtime packages contain templates
 # only; resolved credentials and ignored local configuration are forbidden.
+$RegexOptions = [System.Text.RegularExpressions.RegexOptions]::Compiled
 $CredentialAssignment = [regex]::new(
-    '(?i)["'']?(?:password|passwd|pwd|secret|token|api[_-]?key)["'']?\s*[:=]\s*["''](?<value>[^"'']*)["'']'
+    '(?i)["'']?(?:password|passwd|pwd|secret|token|api[_-]?key)["'']?\s*[:=]\s*["''](?<value>[^"'']*)["'']',
+    $RegexOptions
 )
-$ConnectionCredential = [regex]::new('(?i)[a-z][a-z0-9+.-]*://[^\s:/@]+:[^\s@]+@')
-$PrivateKeyMarker = [regex]::new('-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----')
+$ConnectionCredential = [regex]::new('(?i)[a-z][a-z0-9+.-]*://[^\s:/@]+:[^\s@]+@', $RegexOptions)
+$PrivateKeyMarker = [regex]::new('-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----', $RegexOptions)
 $ScannableExtensions = @(".py", ".json", ".md", ".sh", ".txt")
 foreach ($file in Get-ChildItem -LiteralPath $StagingDir -Recurse -File) {
     $relative = (Get-RelativePathFromBase -BasePath $StagingDir -FullName $file.FullName).Replace("\", "/")
@@ -433,7 +441,7 @@ $ArtifactFiles = Get-ChildItem -LiteralPath $StagingDir -Recurse -File | ForEach
     $relativePath = (Get-RelativePathFromBase -BasePath $StagingDir -FullName $_.FullName).Replace("\", "/")
     [ordered]@{
         path = $relativePath
-        sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        sha256 = (Get-FileSha256WithRetry -Path $_.FullName)
     }
 }
 

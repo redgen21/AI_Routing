@@ -2304,14 +2304,22 @@ def _resequence_force_assigned_routes(result_payload: dict, affected_employee_co
     """Recalculate the complete route for technicians changed by force assign."""
     if not affected_employee_codes:
         return result_payload
-    payload = st.session_state.get("common_vrp_payload") or {}
-    city_name = str(payload.get("strategic_city_name", "")).strip()
+    request_payload = st.session_state.get("common_vrp_payload") or {}
+    city_name = str(
+        result_payload.get("strategic_city_name")
+        or result_payload.get("city")
+        or st.session_state.get("common_result_strategic_city_name", "")
+    ).strip()
     if not city_name:
         return result_payload
     assignments = list(result_payload.get("assignments", []))
-    job_lookup = {
+    result_job_lookup = {
         str(job.get("receipt_no", "") or job.get("salesforce_id", "")).strip(): job
-        for job in list(payload.get("jobs", []))
+        for job in list(result_payload.get("jobs", []))
+    }
+    request_job_lookup = {
+        str(job.get("receipt_no", "") or job.get("salesforce_id", "")).strip(): job
+        for job in list(request_payload.get("jobs", []))
     }
     try:
         route_client = get_route_client(city_name)
@@ -2326,7 +2334,8 @@ def _resequence_force_assigned_routes(result_payload: dict, affected_employee_co
         coord_items: list[tuple[dict, tuple[float, float]]] = []
         for item in route_items:
             receipt_no = str(item.get("receipt_no", "") or item.get("salesforce_id", "")).strip()
-            location = job_lookup.get(receipt_no, {}).get("location") or {}
+            job = result_job_lookup.get(receipt_no) or request_job_lookup.get(receipt_no) or {}
+            location = job.get("location") or {}
             try:
                 coord_items.append((item, (float(location["lng"]), float(location["lat"]))))
             except (KeyError, TypeError, ValueError):
@@ -2665,6 +2674,7 @@ def _build_common_home_df(engineer_master_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _build_result_view_state(subsidiary_name: str, strategic_city_name: str) -> dict | None:
+    st.session_state["common_result_strategic_city_name"] = strategic_city_name
     jobs_df = _load_local_jobs(subsidiary_name, strategic_city_name)
     engineer_master_df = pd.DataFrame(
         _api_get(

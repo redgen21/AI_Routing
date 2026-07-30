@@ -4971,6 +4971,7 @@ def upload_artifact(
     selected_files: Iterable[str],
     config_path: str,
     typed_confirmation: str,
+    expected_remote_checksums: Mapping[str, str | None] | None = None,
     dry_run: bool = True,
     progress_callback: Callable[[int, int, str, str], None] | None = None,
 ) -> dict[str, Any]:
@@ -5013,23 +5014,23 @@ def upload_artifact(
     compensation_succeeded = False
     completed_files = 0
     total_files = len(chosen)
+    expected_remote_checksums = {
+        _safe_relative(path): (str(checksum).lower() if checksum else None)
+        for path, checksum in (expected_remote_checksums or {}).items()
+    }
     try:
         with _remote_session_factory(profile) as remote:
             with remote.deployment_lock(str(profile["remote_root"]), deployment_id):
                 try:
-                    for relative, checksum in sorted(manifest_files.items()):
-                        if relative in selected_names:
-                            continue
-                        target = _remote_target(item, relative)
-                        if remote.sha256(target) != checksum:
-                            raise RuntimeError(
-                                "Unselected remote manifest file does not match the artifact: "
-                                + relative
-                            )
                     for relative, checksum, local in chosen:
                         target = _remote_target(item, relative)
                         existed = remote.exists(target)
                         previous_checksum = remote.sha256(target) if existed else None
+                        if relative in expected_remote_checksums and previous_checksum != expected_remote_checksums[relative]:
+                            raise RuntimeError(
+                                "Selected remote file changed after preview; upload aborted: "
+                                + relative
+                            )
                         if existed and (
                             not previous_checksum
                             or not re.fullmatch(r"[0-9a-f]{64}", previous_checksum)
@@ -5064,19 +5065,20 @@ def upload_artifact(
                                 progress_callback(
                                     completed_files, total_files, relative, "verified"
                                 )
-                    verified_files = []
-                    for relative, checksum in sorted(manifest_files.items()):
-                        target = _remote_target(item, relative)
-                        if remote.sha256(target) != checksum:
-                            raise RuntimeError(
-                                "Remote manifest verification failed after upload: " + relative
+                    if selected_full_manifest:
+                        verified_files = []
+                        for relative, checksum in sorted(manifest_files.items()):
+                            target = _remote_target(item, relative)
+                            if remote.sha256(target) != checksum:
+                                raise RuntimeError(
+                                    "Remote manifest verification failed after upload: " + relative
+                                )
+                            verified_files.append(
+                                {"path": relative, "target": target, "sha256": checksum}
                             )
-                        verified_files.append(
-                            {"path": relative, "target": target, "sha256": checksum}
-                        )
-                    remote_manifest_verified = True
-                    complete_manifest = True
-                    service_eligible = item.kind == "runtime"
+                        remote_manifest_verified = True
+                        complete_manifest = True
+                        service_eligible = item.kind == "runtime"
                 except Exception as upload_error:
                     compensation_errors: list[str] = []
                     for change in reversed(attempted):
@@ -7439,7 +7441,13 @@ def _allowed_services(environment: str) -> dict[str, str]:
     return dict(SERVICE_SPECS[_require_environment(environment)])
 
 
-def _observe(remote: Any, environment: str, units: Iterable[str] | None = None) -> list[dict[str, Any]]:
+def _observe(
+    remote: Any,
+    environment: str,
+    units: Iterable[str] | None = None,
+    *,
+    detailed: bool = True,
+) -> list[dict[str, Any]]:
     allowed = _allowed_services(environment)
     selected = list(units or allowed)
     if any(unit not in allowed for unit in selected):
@@ -7447,20 +7455,24 @@ def _observe(remote: Any, environment: str, units: Iterable[str] | None = None) 
     rows: list[dict[str, Any]] = []
     for unit in selected:
         active_code, active_out, _ = remote.execute(f"systemctl is-active {unit}")
-        enabled_code, enabled_out, _ = remote.execute(f"systemctl is-enabled {unit}")
         health_code, _, _ = remote.execute(
             f"curl --silent --show-error --fail --max-time 5 {allowed[unit]} >/dev/null"
         )
-        journal_code, journal_out, _ = remote.execute(
-            f"journalctl -u {unit} -n 40 --no-pager --output=short-iso"
-        )
+        enabled_code = enabled_out = 0
+        journal_code = 0
+        journal_out = ""
+        if detailed:
+            enabled_code, enabled_out, _ = remote.execute(f"systemctl is-enabled {unit}")
+            journal_code, journal_out, _ = remote.execute(
+                f"journalctl -u {unit} -n 40 --no-pager --output=short-iso"
+            )
         rows.append(
             {
                 "unit": unit,
                 "active": active_code == 0 and active_out.strip() == "active",
-                "enabled": enabled_code == 0 and "enabled" in enabled_out,
+                "enabled": (enabled_code == 0 and "enabled" in enabled_out) if detailed else None,
                 "health_ok": health_code == 0,
-                "journal_tail": _redact(journal_out) if journal_code == 0 else "",
+                "journal_tail": _redact(journal_out) if detailed and journal_code == 0 else "",
             }
         )
     return rows
@@ -7635,7 +7647,10 @@ def run_service_action(
                             f"systemd {action} failed for allowlisted unit {unit}."
                         )
                     audit["completed_units"].append(unit)
-                observations = _observe(remote, environment, ordered)
+                # systemd ExecStartPost already waits for the unit health
+                # endpoint.  Use a lightweight post-action check here and
+                # reserve enabled/journal collection for Monitoring.
+                observations = _observe(remote, environment, ordered, detailed=False)
         audit["observations"] = [
             {
                 "unit": row["unit"],

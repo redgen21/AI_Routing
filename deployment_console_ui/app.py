@@ -1269,6 +1269,11 @@ def _render_artifact_tab(
                     "upload_artifact",
                     inspection=inspection,
                     selected_files=selected_files,
+                    expected_remote_checksums={
+                        str(_mapping(row).get("path")): _mapping(row).get("remote_sha256")
+                        for row in (preview if isinstance(preview, list) else [])
+                        if str(_mapping(row).get("path", "")) in set(selected_files)
+                    },
                     config_path=config_path,
                     typed_confirmation=phrase,
                     dry_run=False,
