@@ -2374,6 +2374,70 @@ def _save_force_assignment_preview(preview: dict[str, str]) -> None:
         st.session_state.pop(FORCE_ASSIGN_PREVIEW_KEY, None)
 
 
+def _resequence_force_assigned_routes(result_payload: dict, affected_employee_codes: set[str]) -> dict:
+    """Re-optimize every affected technician's complete stop sequence.
+
+    Force assignment used to append a stop after the solver sequence.  The map
+    then displayed a route that was valid but often unnecessarily long.  Use
+    the OSRM table-backed ordered route for the complete affected route and
+    write the resulting order back to the assignment payload.
+    """
+    if not affected_employee_codes:
+        return result_payload
+    payload = st.session_state.get("common_vrp_payload") or {}
+    city_name = str(payload.get("strategic_city_name", "")).strip()
+    if not city_name:
+        return result_payload
+    assignments = list(result_payload.get("assignments", []))
+    job_lookup = {
+        str(job.get("receipt_no", "") or job.get("salesforce_id", "")).strip(): job
+        for job in list(payload.get("jobs", []))
+    }
+    try:
+        route_client = get_route_client(city_name)
+    except Exception:
+        return result_payload
+
+    for employee_code in affected_employee_codes:
+        route_items = [
+            item for item in assignments
+            if str(item.get("employee_code", "")).strip() == employee_code
+        ]
+        coord_items: list[tuple[dict, tuple[float, float]]] = []
+        for item in route_items:
+            receipt_no = str(item.get("receipt_no", "") or item.get("salesforce_id", "")).strip()
+            location = job_lookup.get(receipt_no, {}).get("location") or {}
+            try:
+                lat = float(location.get("lat"))
+                lon = float(location.get("lng"))
+            except (TypeError, ValueError):
+                continue
+            coord_items.append((item, (lon, lat)))
+        if len(coord_items) < 2:
+            continue
+        try:
+            route = route_client.build_ordered_route([coord for _, coord in coord_items])
+            ordered_coords = list(route.get("ordered_coords", []))
+        except Exception:
+            continue
+        remaining = list(coord_items)
+        ordered_items: list[dict] = []
+        for coord in ordered_coords:
+            match_index = min(
+                range(len(remaining)),
+                key=lambda index: (remaining[index][1][0] - float(coord[0])) ** 2
+                + (remaining[index][1][1] - float(coord[1])) ** 2,
+            )
+            ordered_items.append(remaining.pop(match_index)[0])
+        ordered_items.extend(item for item, _ in remaining)
+        for sequence, item in enumerate(ordered_items, start=1):
+            item["sequence"] = sequence
+            item["route_resequenced"] = True
+            item["planned_start"] = ""
+            item["planned_end"] = ""
+    return result_payload
+
+
 def _apply_force_assignments_to_result_payload(result_payload: dict, force_assignments: dict[str, str]) -> dict:
     result_payload = copy.deepcopy(result_payload or {})
     if not isinstance(result_payload, dict) or not force_assignments:
@@ -2388,6 +2452,7 @@ def _apply_force_assignments_to_result_payload(result_payload: dict, force_assig
         return result_payload
 
     force_receipts = set(clean_force_assignments)
+    affected_employee_codes = set(clean_force_assignments.values())
     assignments = [
         dict(item)
         for item in result_payload.get("assignments", [])
@@ -2423,6 +2488,7 @@ def _apply_force_assignments_to_result_payload(result_payload: dict, force_assig
         )
 
     result_payload["assignments"] = assignments
+    result_payload = _resequence_force_assigned_routes(result_payload, affected_employee_codes)
     result_payload["unassigned"] = [
         dict(item)
         for item in result_payload.get("unassigned", [])

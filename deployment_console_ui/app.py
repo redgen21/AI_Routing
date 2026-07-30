@@ -35,7 +35,6 @@ BUILD_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 UI_ASSETS = Path(__file__).with_name("assets")
 
 NAVIGATION = (
-    ("dashboard", "Dashboard", "Dashboard"),
     ("monitoring", "Monitoring", "Monitoring"),
     ("package-development", "Package Management", "Development"),
     ("package-production", "Package Management", "Production"),
@@ -114,17 +113,17 @@ def _environment_for_route(route: str) -> str:
 
 
 def _route_label(route: str) -> str:
-    return next((label for key, _, label in NAVIGATION if key == route), "Dashboard")
+    return next((label for key, _, label in NAVIGATION if key == route), "Monitoring")
 
 
 def _render_navigation() -> str:
     """Render keyboard-accessible menu buttons, retaining a primitive route only."""
 
     route_key = "console-route"
-    route = str(st.session_state.get(route_key) or "dashboard")
+    route = str(st.session_state.get(route_key) or "monitoring")
     valid_routes = {key for key, _, _ in NAVIGATION}
     if route not in valid_routes:
-        route = "dashboard"
+        route = "monitoring"
         st.session_state[route_key] = route
 
     with st.sidebar:
@@ -3528,9 +3527,6 @@ def render_app(backend: object | None = None) -> None:
     route = _render_navigation()
     _render_top_toolbar(route)
 
-    if route == "dashboard":
-        _render_dashboard(adapter, server_config_path)
-        return
     if route == "monitoring":
         _render_monitor_tab(adapter, server_config_path)
         return
