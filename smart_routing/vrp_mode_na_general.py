@@ -1014,6 +1014,115 @@ def _build_routing_diagnostics(
     }
 
 
+CO_LOCATION_WORK_LIMIT_MIN = 540
+
+
+def _build_co_location_bundles(
+    service_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, list[dict[str, Any]]]]:
+    """Collapse compatible same-stop jobs for the VRP model only.
+
+    The request and response keep one row per receipt.  A bundle is an internal
+    solver stop: its service time is the sum of its member jobs, while its
+    routing slot is one so a co-located bundle may exceed the normal job-count
+    cap when the 540-minute work limit still permits it.
+    """
+    if service_df.empty:
+        return service_df, {}
+    working = service_df.copy()
+    working["_location_key"] = list(
+        zip(
+            working["service_date_key"].astype(str),
+            working["latitude"].round(6),
+            working["longitude"].round(6),
+        )
+    )
+    bundle_members: dict[str, list[dict[str, Any]]] = {}
+    output_rows: list[pd.Series] = []
+    for _, group in working.groupby("_location_key", sort=False):
+        group = group.drop(columns=["_location_key"], errors="ignore")
+        if len(group) < 2:
+            output_rows.extend(group.to_dict("records"))
+            continue
+        eligible_sets = []
+        compatible = True
+        fixed_codes = set()
+        time_windows = set()
+        for _, row in group.iterrows():
+            codes = row.get("eligible_employee_codes")
+            if isinstance(codes, list):
+                eligible_sets.append(set(str(code).strip() for code in codes if str(code).strip()))
+            fixed_code = str(row.get("current_employee_code", "")).strip() if _coerce_bool_value(row.get("fixed", False)) else ""
+            if fixed_code:
+                fixed_codes.add(fixed_code)
+            time_windows.add((str(row.get("time_window_start", "")), str(row.get("time_window_end", ""))))
+        if len(fixed_codes) > 1 or len(time_windows) > 1:
+            compatible = False
+        if len(eligible_sets) != len(group):
+            compatible = False
+        elif eligible_sets:
+            common_codes = set.intersection(*eligible_sets)
+            if fixed_codes and not fixed_codes.issubset(common_codes):
+                compatible = False
+            if not common_codes:
+                compatible = False
+        service_total = float(pd.to_numeric(group["service_time_min"], errors="coerce").fillna(45).sum())
+        if service_total > CO_LOCATION_WORK_LIMIT_MIN:
+            compatible = False
+        if not compatible:
+            output_rows.extend(group.to_dict("records"))
+            continue
+        receipts = [str(value).strip() for value in group["GSFS_RECEIPT_NO"].tolist()]
+        bundle_id = "__COLOC__" + "_".join(receipts)
+        first = group.iloc[0].copy()
+        first["GSFS_RECEIPT_NO"] = bundle_id
+        first["salesforce_id"] = bundle_id
+        first["service_time_min"] = service_total
+        first["job_slot_count"] = 1
+        first["co_location_bundle"] = True
+        first["co_location_bundle_count"] = len(group)
+        first["co_location_bundle_receipts"] = receipts
+        first["fixed"] = bool(fixed_codes)
+        first["current_employee_code"] = next(iter(fixed_codes), "")
+        if eligible_sets:
+            first["eligible_employee_codes"] = sorted(set.intersection(*eligible_sets))
+        output_rows.append(first.to_dict())
+        bundle_members[bundle_id] = group.to_dict("records")
+    result = pd.DataFrame(output_rows).drop(columns=["_location_key"], errors="ignore")
+    return result.reset_index(drop=True), bundle_members
+
+
+def _expand_co_location_schedule(
+    schedule_df: pd.DataFrame,
+    bundle_members: dict[str, list[dict[str, Any]]],
+) -> pd.DataFrame:
+    if schedule_df.empty or not bundle_members:
+        return schedule_df
+    rows: list[dict[str, Any]] = []
+    for _, row in schedule_df.iterrows():
+        bundle_id = str(row.get("GSFS_RECEIPT_NO", "")).strip()
+        members = bundle_members.get(bundle_id)
+        if not members:
+            rows.append(row.to_dict())
+            continue
+        base_sequence = int(pd.to_numeric(pd.Series([row.get("vrp_visit_seq", row.get("visit_seq", 1))]), errors="coerce").fillna(1).iloc[0])
+        elapsed = 0.0
+        for offset, member in enumerate(members):
+            expanded = row.to_dict()
+            expanded.update(member)
+            expanded["GSFS_RECEIPT_NO"] = member.get("GSFS_RECEIPT_NO", member.get("salesforce_id", ""))
+            expanded["salesforce_id"] = member.get("salesforce_id", expanded["GSFS_RECEIPT_NO"])
+            expanded["service_time_min"] = float(member.get("service_time_min", 45) or 45)
+            expanded["job_slot_count"] = int(member.get("job_slot_count", 1) or 1)
+            expanded["vrp_visit_seq"] = base_sequence + offset
+            expanded["visit_seq"] = base_sequence + offset
+            expanded["co_location_bundle"] = True
+            expanded["co_location_bundle_id"] = bundle_id
+            rows.append(expanded)
+            elapsed += expanded["service_time_min"]
+    return pd.DataFrame(rows)
+
+
 def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
     from smart_routing.production_assign_atlanta_vrp import (
         VRP_APPROVED_BOUNDARY_OVERFLOW_PENALTY_COST,
@@ -1024,6 +1133,7 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
     region_zip_df, reference_engineer_region_df, reference_home_df = _load_reference_inputs(request_payload)
     region_lookup = _build_region_lookup(region_zip_df)
     service_df = _build_service_frame_from_payload(request_payload, region_lookup)
+    solver_service_df, co_location_bundles = _build_co_location_bundles(service_df)
     region_centers = _build_region_centers_from_service_df(service_df)
     engineer_region_df, home_df = _build_engineer_frames_from_payload(
         request_payload,
@@ -1061,6 +1171,9 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
         else "not_applicable"
     )
     diagnostics["solver_seed"] = "ortools_default"
+    diagnostics["co_location_bundle_count"] = len(co_location_bundles)
+    diagnostics["co_location_bundle_job_count"] = sum(len(items) for items in co_location_bundles.values())
+    diagnostics["co_location_work_limit_min"] = CO_LOCATION_WORK_LIMIT_MIN
     if service_df.empty:
         return _build_response_payload(request_payload, pd.DataFrame(), pd.DataFrame(), diagnostics=diagnostics)
     if engineer_region_df.empty or home_df.empty:
@@ -1121,7 +1234,7 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
     assignment_df, summary_df, schedule_df = build_atlanta_production_assignment_vrp_from_frames(
         engineer_region_df=engineer_region_df,
         home_df=home_df,
-        service_df=service_df,
+        service_df=solver_service_df,
         attendance_limited=False,
         time_limit_seconds=time_limit_seconds,
         respect_fixed_jobs=respect_fixed_jobs,
@@ -1147,4 +1260,5 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
         schedule_df["visit_seq"] = pd.to_numeric(schedule_df["visit_seq"], errors="coerce").fillna(0).astype(int)
         schedule_df["visit_start_time"] = schedule_df.get("visit_start_time", "")
         schedule_df["visit_end_time"] = schedule_df.get("visit_end_time", "")
+    schedule_df = _expand_co_location_schedule(schedule_df, co_location_bundles)
     return _build_response_payload(request_payload, summary_df, schedule_df, diagnostics=diagnostics)

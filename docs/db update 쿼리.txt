@@ -1,0 +1,23 @@
+psql -h 127.0.0.1 -p 5432 -U vrp_agent -d vrp_db_dev
+
+
+BEGIN;
+
+UPDATE common_technician_capability_master
+SET
+    heavy_repair_allowed = TRUE,
+    updated_at = NOW()
+WHERE employee_code = 'AI105115'
+  AND heavy_repair_allowed IS NOT TRUE;
+
+SELECT
+    subsidiary_name,
+    strategic_city_name,
+    employee_code,
+    product_group_code,
+    product_code,
+    heavy_repair_allowed
+FROM common_technician_capability_master
+WHERE employee_code = 'AI105115';
+
+COMMIT;
