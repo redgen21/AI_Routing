@@ -2379,7 +2379,7 @@ def _resequence_force_assigned_routes(result_payload: dict, affected_employee_co
 
     Force assignment used to append a stop after the solver sequence.  The map
     then displayed a route that was valid but often unnecessarily long.  Use
-    the OSRM table-backed ordered route for the complete affected route and
+    the Actual-style OSRM ordered route for ``home -> all stops -> home`` and
     write the resulting order back to the assignment payload.
     """
     if not affected_employee_codes:
@@ -2400,6 +2400,11 @@ def _resequence_force_assigned_routes(result_payload: dict, affected_employee_co
     request_job_lookup = {
         str(job.get("receipt_no", "") or job.get("salesforce_id", "")).strip(): job
         for job in list(request_payload.get("jobs", []))
+    }
+    request_technician_lookup = {
+        str(technician.get("employee_code", "")).strip(): technician
+        for technician in list(request_payload.get("technicians", []))
+        if str(technician.get("employee_code", "")).strip()
     }
     try:
         route_client = get_route_client(city_name)
@@ -2424,10 +2429,31 @@ def _resequence_force_assigned_routes(result_payload: dict, affected_employee_co
             coord_items.append((item, (lon, lat)))
         if len(coord_items) < 2:
             continue
+        technician = request_technician_lookup.get(employee_code, {})
+        start_location = technician.get("start_location") or technician.get("end_location") or {}
         try:
-            route = route_client.build_ordered_route([coord for _, coord in coord_items])
+            home_coord = (float(start_location.get("lng")), float(start_location.get("lat")))
+        except (AttributeError, TypeError, ValueError):
+            home_coord = None
+        route_coords = [coord for _, coord in coord_items]
+        if home_coord is not None:
+            route_coords = [home_coord] + route_coords
+        try:
+            route = route_client.build_ordered_route(
+                route_coords,
+                preserve_first=home_coord is not None,
+            )
             ordered_coords = list(route.get("ordered_coords", []))
         except Exception:
+            continue
+        if home_coord is not None and ordered_coords:
+            first_coord = ordered_coords[0]
+            if (
+                round(float(first_coord[0]), 6) == round(float(home_coord[0]), 6)
+                and round(float(first_coord[1]), 6) == round(float(home_coord[1]), 6)
+            ):
+                ordered_coords = ordered_coords[1:]
+        if len(ordered_coords) != len(coord_items):
             continue
         remaining = list(coord_items)
         ordered_items: list[dict] = []

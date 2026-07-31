@@ -34,6 +34,20 @@ class _UnitMatrixClient:
         return matrix, matrix
 
 
+class _AddOnLimitMatrixClient:
+    cfg = SimpleNamespace(osrm_url="", fallback_osrm_url="")
+
+    def get_distance_duration_matrix(self, coords):
+        size = len(coords)
+        # Every route leg is 70 minutes.  The first add-on remains under the
+        # 600-minute hard limit; adding the second one after it does not.
+        matrix = [
+            [0.0 if row == col else 70.0 for col in range(size)]
+            for row in range(size)
+        ]
+        return matrix, matrix
+
+
 def _engineers() -> pd.DataFrame:
     return pd.DataFrame(
         [
@@ -153,6 +167,59 @@ class Atlanta6SolverPolicyTests(unittest.TestCase):
         )
         self.assertTrue(assignment_df.empty)
         self.assertTrue(schedule_df.empty)
+
+    def test_add_on_inserts_first_job_but_rejects_next_job_over_600_minutes(self) -> None:
+        engineer = _engineers().copy()
+        engineer.loc[0, "SVC_ENGINEER_CODE"] = "AI105115"
+        engineer.loc[0, "Name"] = "Jason Patterson"
+        engineer.loc[0, "SVC_CENTER_TYPE"] = "DMS2"
+        jobs = pd.concat(
+            [
+                _job(
+                    GSFS_RECEIPT_NO="RNN260725044485",
+                    eligible_employee_codes=["AI105115"],
+                ),
+                _job(
+                    GSFS_RECEIPT_NO="RNN260727054150",
+                    eligible_employee_codes=["AI105115"],
+                ),
+                # These two jobs are made optional to the primary DMS2 route
+                # so the test exercises the post-solver insertion pass.
+                _job(
+                    GSFS_RECEIPT_NO="RNN260725043216",
+                    eligible_employee_codes=["AI105115"],
+                    service_time_min=90,
+                    area_type="DMS",
+                    enforce_area_type_center_match=True,
+                ),
+                _job(
+                    GSFS_RECEIPT_NO="RNN260725043692",
+                    eligible_employee_codes=["AI105115"],
+                    service_time_min=100,
+                    area_type="DMS",
+                    enforce_area_type_center_match=True,
+                ),
+            ],
+            ignore_index=True,
+        )
+        assignment_df, _, _ = _solve_vrp_day(
+            jobs,
+            engineer,
+            _AddOnLimitMatrixClient(),
+            {},
+            time_limit_seconds=1,
+        )
+
+        assigned_receipts = set(assignment_df["GSFS_RECEIPT_NO"].astype(str))
+        self.assertIn("RNN260725043216", assigned_receipts)
+        self.assertNotIn("RNN260725043692", assigned_receipts)
+        self.assertEqual(
+            assignment_df.loc[
+                assignment_df["GSFS_RECEIPT_NO"].eq("RNN260725043216"),
+                "assigned_sm_code",
+            ].iloc[0],
+            "AI105115",
+        )
 
     def test_equal_travel_prefers_primary_candidate_over_penalized_overflow(self) -> None:
         assignment_df, _, _ = _solve_vrp_day(

@@ -1236,7 +1236,13 @@ def _solve_vrp_day(
         )
         current_assigned_count = int(assignment_df["GSFS_RECEIPT_NO"].dropna().astype(str).nunique())
         if relaxed_assigned_count > current_assigned_count:
-            return relaxed_assignment_df, relaxed_summary_df, relaxed_schedule_df
+            # Keep the better relaxed solution as the working assignment, but
+            # do not return here.  The add-on repair pass below must still see
+            # every job dropped by this retry and try to insert it into an
+            # existing route.  Returning here used to bypass that pass, which
+            # made the feature appear to do nothing whenever the relaxed
+            # solver assigned even one additional job.
+            assignment_df = relaxed_assignment_df.copy()
 
     if priority_load_enabled:
         engineer_config = {
@@ -1606,6 +1612,334 @@ def _solve_vrp_day(
             _move_assignment(int(move_idx), receiver_code, engineer_config[receiver_code])
             assignment_df.at[int(move_idx), "vrp_visit_seq"] = _best_receiver_visit_seq(receiver_code)
 
+    # Keep the primary Git routing result intact.  Only jobs dropped by that
+    # result are repaired here, by testing every insertion position in each
+    # eligible technician's existing route.
+    assigned_receipts = set(
+        assignment_df["GSFS_RECEIPT_NO"].astype(str).str.strip()
+    )
+    fixed_flags = (
+        service_day_df["fixed"].map(_coerce_bool_value)
+        if "fixed" in service_day_df.columns
+        else pd.Series(False, index=service_day_df.index)
+    )
+    repair_rows = service_day_df[
+        ~service_day_df["GSFS_RECEIPT_NO"].astype(str).str.strip().isin(assigned_receipts)
+        & ~fixed_flags
+    ].copy()
+
+    def _repair_slots(row: pd.Series) -> int:
+        value = pd.to_numeric(
+            pd.Series([row.get("job_slot_count", 1)]), errors="coerce"
+        ).fillna(1).iloc[0]
+        return max(1, int(value))
+
+    def _repair_job_indices(rows_df: pd.DataFrame) -> list[int]:
+        if rows_df.empty or "_vrp_job_idx" not in rows_df.columns:
+            return []
+        ordered = rows_df.sort_values(["vrp_visit_seq", "GSFS_RECEIPT_NO"])
+        return [
+            int(value)
+            for value in pd.to_numeric(
+                ordered["_vrp_job_idx"], errors="coerce"
+            ).dropna().tolist()
+        ]
+
+    repair_actual_route_cache: dict[
+        tuple[str, tuple[int, ...]], tuple[float, float]
+    ] = {}
+
+    def _repair_actual_route_metrics(
+        engineer_code: str,
+        rows_df: pd.DataFrame,
+    ) -> tuple[float, float]:
+        """Return actual OSRM distance/time for home -> stops -> home."""
+        code = str(engineer_code).strip()
+        vehicle_idx = vehicle_index_by_code.get(code)
+        job_indices = tuple(_repair_job_indices(rows_df))
+        if vehicle_idx is None or not job_indices:
+            return 0.0, 0.0
+        cache_key = (code, job_indices)
+        cached = repair_actual_route_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        engineer_row = engineer_df.iloc[vehicle_idx]
+        start_coord = engineer_row.get("start_coord")
+        stop_coords = [
+            (
+                float(job_df.iloc[job_idx]["longitude"]),
+                float(job_df.iloc[job_idx]["latitude"]),
+            )
+            for job_idx in job_indices
+        ]
+        coord_chain = stop_coords
+        if start_coord is not None:
+            home_coord = (float(start_coord[0]), float(start_coord[1]))
+            coord_chain = [home_coord] + stop_coords + [home_coord]
+        distance_km, duration_min, _ = _build_route_geometry(
+            route_client,
+            coord_chain,
+        )
+        metrics = (float(distance_km), float(duration_min))
+        repair_actual_route_cache[cache_key] = metrics
+        return metrics
+
+    def _repair_route_cost(engineer_code: str, rows_df: pd.DataFrame) -> float:
+        job_indices = _repair_job_indices(rows_df)
+        if str(engineer_code).strip() not in vehicle_index_by_code:
+            return float("inf")
+        if not job_indices:
+            return 0.0
+        _, duration_min = _repair_actual_route_metrics(engineer_code, rows_df)
+        return float(duration_min)
+
+    def _actual_reorder_group(rows_df: pd.DataFrame) -> pd.DataFrame:
+        """Order stops with the same Actual-route OSRM logic used by Actual.
+
+        ``build_ordered_route`` keeps the home as the first point and uses the
+        OSRM table/route result to choose the visit order.  Rows at the same
+        coordinates are consumed in their existing order so co-located jobs
+        remain individually visible.  Fixed jobs retain their relative order;
+        all other jobs follow the Actual route order.
+        """
+        if rows_df.empty:
+            return rows_df.copy()
+        ordered = rows_df.sort_values(
+            ["vrp_visit_seq", "GSFS_RECEIPT_NO"]
+        ).reset_index(drop=True)
+        # A newly proposed add-on does not have a visit sequence yet.  Make
+        # the current order explicit before any fallback/route-client return.
+        ordered["vrp_visit_seq"] = range(1, len(ordered) + 1)
+        if not hasattr(route_client, "build_ordered_route"):
+            return ordered
+
+        first = ordered.iloc[0]
+        start_coord = None
+        if pd.notna(first.get("home_start_longitude")) and pd.notna(first.get("home_start_latitude")):
+            start_coord = (
+                float(first["home_start_longitude"]),
+                float(first["home_start_latitude"]),
+            )
+        stop_coords = [
+            (float(row["longitude"]), float(row["latitude"]))
+            for _, row in ordered.iterrows()
+        ]
+        coord_chain = [start_coord] + stop_coords if start_coord is not None else stop_coords
+        try:
+            route_payload = route_client.build_ordered_route(
+                coord_chain,
+                preserve_first=start_coord is not None,
+            )
+            actual_coords = list(route_payload.get("ordered_coords", []))
+        except Exception:
+            return ordered
+        if start_coord is not None and actual_coords:
+            first_coord = actual_coords[0]
+            if (
+                round(float(first_coord[0]), 6) == round(float(start_coord[0]), 6)
+                and round(float(first_coord[1]), 6) == round(float(start_coord[1]), 6)
+            ):
+                actual_coords = actual_coords[1:]
+        if len(actual_coords) != len(ordered):
+            return ordered
+
+        def _coord_key(coord: tuple[float, float]) -> tuple[float, float]:
+            return round(float(coord[1]), 6), round(float(coord[0]), 6)
+
+        rows_by_coord: dict[tuple[float, float], list[pd.Series]] = {}
+        for _, row in ordered.iterrows():
+            key = _coord_key((float(row["longitude"]), float(row["latitude"])))
+            rows_by_coord.setdefault(key, []).append(row.copy())
+        actual_rows: list[pd.Series] = []
+        for coord in actual_coords:
+            bucket = rows_by_coord.get(_coord_key((float(coord[0]), float(coord[1]))), [])
+            if not bucket:
+                return ordered
+            actual_rows.append(bucket.pop(0))
+        result = pd.DataFrame(actual_rows).reset_index(drop=True)
+
+        original_fixed = [
+            row.copy()
+            for _, row in ordered.iterrows()
+            if _coerce_bool_value(row.get("fixed", False))
+        ]
+        if original_fixed:
+            fixed_positions = [
+                idx
+                for idx, row in result.iterrows()
+                if _coerce_bool_value(row.get("fixed", False))
+            ]
+            if len(fixed_positions) == len(original_fixed):
+                for idx, fixed_row in zip(fixed_positions, original_fixed):
+                    result.iloc[idx] = fixed_row
+        result["vrp_visit_seq"] = range(1, len(result) + 1)
+        return result
+
+    def _repair_route_is_feasible(engineer_code: str, rows_df: pd.DataFrame) -> bool:
+        vehicle_idx = vehicle_index_by_code.get(str(engineer_code).strip())
+        job_indices = _repair_job_indices(rows_df)
+        if vehicle_idx is None or not job_indices:
+            return vehicle_idx is not None
+        home_to_job_limit = max_home_to_job_min_by_vehicle[vehicle_idx]
+        ordered = rows_df.sort_values(["vrp_visit_seq", "GSFS_RECEIPT_NO"])
+        if home_to_job_limit is not None:
+            first = ordered.iloc[0]
+            engineer_row = engineer_df.iloc[vehicle_idx]
+            start_coord = engineer_row.get("start_coord")
+            if start_coord is not None:
+                first_coord = (
+                    float(first["longitude"]),
+                    float(first["latitude"]),
+                )
+                _, first_leg_min, _ = _build_route_geometry(
+                    route_client,
+                    [
+                        (float(start_coord[0]), float(start_coord[1])),
+                        first_coord,
+                    ],
+                )
+                if first_leg_min > float(home_to_job_limit):
+                    return False
+        # Recalculate the complete candidate route with the actual routing
+        # engine, including the return home leg.  This is intentionally done
+        # after the route order has been optimized.
+        travel_km, travel_min = _repair_actual_route_metrics(
+            engineer_code,
+            ordered,
+        )
+        service_min = float(
+            pd.to_numeric(
+                ordered.get("service_time_min", pd.Series(0, index=ordered.index)),
+                errors="coerce",
+            ).fillna(0).sum()
+        )
+        # The primary Git solver may retain its historical DMS2/fixed-route
+        # exception, but a newly attached job must never extend a route beyond
+        # the explicit 600-minute add-on policy.
+        repair_hard_limit = min(
+            float(vehicle_hard_work_limits_min[vehicle_idx]),
+            float(VRP_ABSOLUTE_WORK_MIN),
+        )
+        if travel_min + service_min > repair_hard_limit + 1e-6:
+            return False
+        # The primary route's daily travel and single-leg caps are not reused
+        # for this pass.  The add-on policy is: preserve eligibility, home
+        # reachability, slots, and the actual 600-minute total-work hard limit.
+        return True
+
+    def _repair_adjust_row(row: pd.Series, engineer_code: str) -> pd.Series:
+        adjusted = row.copy()
+        vehicle_idx = vehicle_index_by_code[str(engineer_code).strip()]
+        engineer_row = engineer_df.iloc[vehicle_idx]
+        start_coord = engineer_row.get("start_coord")
+        adjusted["assigned_sm_code"] = str(engineer_code).strip()
+        adjusted["assigned_sm_name"] = str(engineer_row.get("Name", ""))
+        adjusted["assigned_center_type"] = str(
+            engineer_row.get("SVC_CENTER_TYPE", "")
+        )
+        adjusted["home_start_longitude"] = (
+            start_coord[0] if start_coord is not None else pd.NA
+        )
+        adjusted["home_start_latitude"] = (
+            start_coord[1] if start_coord is not None else pd.NA
+        )
+        job_idx = pd.to_numeric(
+            pd.Series([adjusted.get("_vrp_job_idx")]), errors="coerce"
+        ).iloc[0]
+        if pd.notna(job_idx) and 0 <= int(job_idx) < len(service_times):
+            adjusted["base_service_time_min"] = round(float(service_times[int(job_idx)]), 2)
+            adjusted["service_time_multiplier"] = round(
+                float(service_time_multiplier_by_vehicle[vehicle_idx]), 3
+            )
+            adjusted["service_time_min"] = round(
+                _adjusted_service_time(int(job_idx), vehicle_idx), 2
+            )
+        return adjusted
+
+    def _repair_reorder_candidate(
+        engineer_code: str,
+        rows_df: pd.DataFrame,
+    ) -> tuple[float, pd.DataFrame] | None:
+        """Re-optimize the complete candidate route before checking 600 min.
+
+        Insertion-only evaluation can reject a job because it preserves the
+        old order of the technician's stops.  Reuse the Actual route ordering
+        for the complete candidate route, then apply the 600-minute check to
+        that order.  Existing fixed jobs keep their relative order while
+        non-fixed stops may move around them.
+        """
+        if rows_df.empty:
+            return None
+        ordered = _actual_reorder_group(rows_df)
+        if not _repair_route_is_feasible(engineer_code, ordered):
+            return None
+        return _repair_route_cost(engineer_code, ordered), ordered
+
+    for _, repair_row in repair_rows.sort_values("GSFS_RECEIPT_NO").iterrows():
+        receipt = str(repair_row.get("GSFS_RECEIPT_NO", "")).strip()
+        matching = job_df.index[
+            job_df["GSFS_RECEIPT_NO"].astype(str).str.strip() == receipt
+        ].tolist()
+        if not matching:
+            continue
+        repair_row = repair_row.copy()
+        repair_row["_vrp_job_idx"] = int(matching[0])
+        candidate_df = base._candidate_engineers(repair_row, engineer_df)
+        candidate_codes = set(
+            candidate_df["SVC_ENGINEER_CODE"].astype(str).str.strip()
+        )
+        slots = _repair_slots(repair_row)
+        best: tuple[float, str, pd.Series] | None = None
+        for code in vehicle_codes:
+            code = str(code).strip()
+            if code not in candidate_codes:
+                continue
+            vehicle_idx = vehicle_index_by_code.get(code)
+            if vehicle_idx is None:
+                continue
+            current = assignment_df[
+                assignment_df["assigned_sm_code"].astype(str).eq(code)
+            ].sort_values(["vrp_visit_seq", "GSFS_RECEIPT_NO"])
+            current_slots = int(
+                pd.to_numeric(
+                    current.get("job_slot_count", pd.Series(1, index=current.index)),
+                    errors="coerce",
+                ).fillna(1).astype(int).clip(lower=1).sum()
+            )
+            if current_slots + slots > int(max_jobs_by_vehicle[vehicle_idx]):
+                continue
+            moved = _repair_adjust_row(repair_row, code)
+            candidate = pd.concat(
+                [current, pd.DataFrame([moved])],
+                ignore_index=True,
+            )
+            optimized = _repair_reorder_candidate(code, candidate)
+            if optimized is None:
+                continue
+            optimized_cost, optimized_candidate = optimized
+            score = (optimized_cost, code, optimized_candidate)
+            if best is None or score[:2] < best[:2]:
+                best = score
+        if best is None:
+            continue
+        _, code, candidate = best
+        moved = candidate[
+            candidate["GSFS_RECEIPT_NO"].astype(str).eq(receipt)
+        ].iloc[0].copy()
+        mask = assignment_df["assigned_sm_code"].astype(str).eq(code)
+        existing_seq = pd.to_numeric(
+            assignment_df["vrp_visit_seq"], errors="coerce"
+        ).fillna(0)
+        moved_seq = int(moved.get("vrp_visit_seq", 1))
+        shift_mask = mask & (existing_seq >= moved_seq)
+        assignment_df.loc[shift_mask, "vrp_visit_seq"] = existing_seq[shift_mask] + 1
+        assignment_df = pd.concat([assignment_df, pd.DataFrame([moved])], ignore_index=True)
+
+    # Preserve the morning Smart Routing optimizer for the primary solution.
+    # Actual-route ordering is used only while evaluating a newly attached
+    # unassigned job; applying it to every existing route changes the baseline
+    # assignment quality and can make already-good routes longer.
     def _route_order_cost(vehicle_idx: int, job_indices: list[int]) -> float:
         if not job_indices:
             return 0.0
@@ -1639,8 +1973,12 @@ def _solve_vrp_day(
                 best_cost = candidate_cost
                 best_order = candidate_list
         order_rank = {job_idx: rank for rank, job_idx in enumerate(best_order)}
-        ordered["_route_reorder_rank"] = ordered["_vrp_job_idx"].map(lambda value: order_rank.get(int(value), len(order_rank)))
-        ordered = ordered.sort_values(["_route_reorder_rank", "GSFS_RECEIPT_NO"]).drop(columns=["_route_reorder_rank"])
+        ordered["_route_reorder_rank"] = ordered["_vrp_job_idx"].map(
+            lambda value: order_rank.get(int(value), len(order_rank))
+        )
+        ordered = ordered.sort_values(
+            ["_route_reorder_rank", "GSFS_RECEIPT_NO"]
+        ).drop(columns=["_route_reorder_rank"])
         ordered["vrp_visit_seq"] = range(1, len(ordered) + 1)
         return ordered
 

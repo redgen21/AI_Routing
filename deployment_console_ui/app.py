@@ -1742,12 +1742,18 @@ def _render_service_controls(
         st.session_state.pop(notice_key, None)
         notice = {}
     if notice.get("status") == "completed":
+        adopted = str(notice.get("external_artifact_version", "")).strip()
         st.success(
             f"{str(notice.get('action', action)).title()} completed | "
             f"services: {notice.get('service_count', 0)}"
+            + (f" | FTP artifact adopted: {adopted}" if adopted else "")
         )
     elif notice.get("status") == "failed":
-        st.error(f"{action.title()} failed. Review service status and try again.")
+        detail = str(notice.get("error", "")).strip()
+        st.error(
+            f"{action.title()} failed"
+            + (f": {detail}" if detail else ". Review service status and try again.")
+        )
 
     action_area = st.empty()
     with action_area.container():
@@ -1782,13 +1788,20 @@ def _render_service_controls(
                     progress.update(label=f"{action.title()} failed", state="error")
                 else:
                     progress.update(label=f"{action.title()} completed", state="complete")
+        except Exception as exc:
+            report = {"status": "failed", "error": str(exc)}
+            st.error(f"{action.title()} failed: {str(exc)}")
         finally:
             st.session_state.pop(inflight_key, None)
         st.session_state[notice_key] = {
             "action_id": action_id,
-            "status": "completed" if report is not None else "failed",
+            "status": "completed" if _mapping(report).get("status") == "healthy" else "failed",
             "action": action,
             "service_count": len(selected),
+            "error": str(_mapping(report).get("error", "")) if report is not None else "",
+            "external_artifact_version": str(
+                _mapping(report).get("external_artifact_version", "")
+            ) if report is not None else "",
         }
         st.rerun()
 

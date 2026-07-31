@@ -7552,6 +7552,41 @@ def observe_platform(*, config_path: str) -> dict[str, Any]:
     }
 
 
+def _find_remote_matching_runtime_artifact(
+    remote: Any,
+    environment: str,
+) -> tuple[ArtifactInspection, list[dict[str, str]]] | None:
+    """Adopt a direct-FTP runtime only when its complete manifest matches.
+
+    This is deliberately a fallback for service control.  It never trusts the
+    FTP operation itself: every file in a fully validated local artifact must
+    match the current remote runtime before the artifact can be adopted.
+    """
+    candidates: list[ArtifactInspection] = []
+    for entry in list_artifacts(environment=environment, kind="runtime"):
+        try:
+            item = inspect_artifact(path=entry.path, kind="runtime", environment=environment)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if item.restricted_data or item.manifest.get("source_dirty") is True and environment == "production":
+            continue
+        candidates.append(item)
+    candidates.sort(key=lambda item: item.version, reverse=True)
+    for item in candidates:
+        files = _manifest_files(item.manifest)
+        verified: list[dict[str, str]] = []
+        matched = True
+        for relative, checksum in sorted(files.items()):
+            target = _remote_target(item, relative)
+            if remote.sha256(target) != checksum:
+                matched = False
+                break
+            verified.append({"path": relative, "target": target, "sha256": checksum})
+        if matched and verified:
+            return item, verified
+    return None
+
+
 def run_service_action(
     *,
     environment: str,
@@ -7617,16 +7652,17 @@ def run_service_action(
         "operator": os.environ.get("USERNAME") or os.environ.get("USER") or "local-console",
         "status": "running",
         "completed_units": [],
+        "external_artifact_adopted": False,
     }
     try:
         with _remote_session_factory(profile) as remote:
             with remote.deployment_lock(str(profile["remote_root"]), audit_id):
                 expected_root = PurePosixPath(f"/home/csda/AI_Routing/{environment}")
+                receipt_mismatch = False
                 for change in deployed_files:
                     if not isinstance(change, Mapping):
-                        raise RuntimeError(
-                            "Runtime deployment receipt contains an invalid file entry."
-                        )
+                        receipt_mismatch = True
+                        break
                     relative = _safe_relative(str(change.get("path", "")))
                     expected_target = (expected_root / PurePosixPath(relative)).as_posix()
                     checksum = str(change.get("sha256", "")).lower()
@@ -7635,9 +7671,19 @@ def run_service_action(
                         or not re.fullmatch(r"[0-9a-f]{64}", checksum)
                         or remote.sha256(expected_target) != checksum
                     ):
+                        receipt_mismatch = True
+                        break
+                if receipt_mismatch:
+                    adopted = _find_remote_matching_runtime_artifact(remote, environment)
+                    if adopted is None:
                         raise RuntimeError(
-                            "Remote runtime files no longer match the authorized deployment receipt."
+                            "Remote runtime files do not match the release receipt, "
+                            "and no complete local artifact matches the server."
                         )
+                    adopted_item, adopted_files = adopted
+                    deployed_files = adopted_files
+                    audit["external_artifact_adopted"] = True
+                    audit["external_artifact_version"] = adopted_item.version
                 for unit in ordered:
                     code, _, _ = remote.execute(
                         f"sudo -n systemctl {action} {unit}", timeout=90
@@ -7661,8 +7707,9 @@ def run_service_action(
         ]
         if not all(row["active"] and row["health_ok"] for row in observations):
             raise RuntimeError("Service action completed but health verification failed.")
-    except Exception:
+    except Exception as exc:
         audit["status"] = "failed"
+        audit["error"] = _redact(str(exc))
         audit["completed_at"] = _now()
         _append_history(audit)
         raise
@@ -7673,6 +7720,8 @@ def run_service_action(
         "status": "healthy",
         "action_id": audit_id,
         "release_id": release_id,
+        "external_artifact_adopted": audit.get("external_artifact_adopted", False),
+        "external_artifact_version": audit.get("external_artifact_version", ""),
         "environment": environment,
         "action": action,
         "units": ordered,
