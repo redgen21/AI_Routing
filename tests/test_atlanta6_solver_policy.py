@@ -234,7 +234,7 @@ class Atlanta6SolverPolicyTests(unittest.TestCase):
         )
         self.assertEqual(assignment_df.iloc[0]["assigned_sm_code"], "T1")
 
-    def test_unavailable_fixed_technician_is_never_reassigned(self) -> None:
+    def test_unavailable_fixed_technician_is_reassigned_to_eligible_candidate(self) -> None:
         assignment_df, _, schedule_df = _solve_vrp_day(
             _job(fixed=True, current_employee_code="MISSING", eligible_employee_codes=["T1"]),
             _engineers(),
@@ -242,8 +242,8 @@ class Atlanta6SolverPolicyTests(unittest.TestCase):
             {2: (-84.38, 33.76)},
             time_limit_seconds=1,
         )
-        self.assertTrue(assignment_df.empty)
-        self.assertTrue(schedule_df.empty)
+        self.assertEqual(assignment_df.iloc[0]["assigned_sm_code"], "T1")
+        self.assertFalse(schedule_df.empty)
 
     def test_fixed_technician_outside_active_plan_releases_only_fixed_constraint(self) -> None:
         job_df = _job(

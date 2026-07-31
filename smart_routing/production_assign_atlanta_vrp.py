@@ -964,16 +964,23 @@ def _solve_vrp_day(
             and _coerce_bool_value(row.get("reschedule", False))
             and not _coerce_bool_value(row.get("fixed", False))
         )
-        # Fixed work whose available technician is outside the active plan is
-        # deliberately not hard-mandatory.  It keeps the reschedule drop
-        # penalty across retries and never widens its eligible/capable region set.
-        released_fixed_priority_job = is_fixed_outside_active_plan
+        # Fixed work whose technician is outside the active plan, or absent
+        # from the selected roster, is deliberately soft-mandatory.  In the
+        # latter case the original technician constraint is released, but the
+        # job's existing eligible/capable candidate set remains unchanged.
+        released_fixed_priority_job = is_fixed_outside_active_plan or is_unavailable_fixed_job
         is_reschedule_like_priority_job = is_reschedule_job or released_fixed_priority_job
         is_hard_mandatory_job = is_respected_fixed_job
         is_distance_protected_job = is_hard_mandatory_job or is_reschedule_like_priority_job
         has_explicit_hard_candidates = _hard_eligible_employee_codes(row) is not None
         if is_unavailable_fixed_job:
-            allowed_vehicle_indices = []
+            candidates_df = base._candidate_engineers(row, engineer_df)
+            allowed_codes = set(candidates_df["SVC_ENGINEER_CODE"].astype(str).tolist())
+            allowed_vehicle_indices = [
+                int(vehicle_idx)
+                for vehicle_idx, code in enumerate(vehicle_codes)
+                if code in allowed_codes
+            ]
         elif is_respected_fixed_job:
             allowed_vehicle_indices = [fixed_vehicle_idx]
         else:
