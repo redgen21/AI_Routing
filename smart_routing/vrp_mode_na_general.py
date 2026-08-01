@@ -1234,6 +1234,7 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
     )
     stage_timings["primary_solver_pipeline_ms"] = round((time.perf_counter() - primary_started) * 1000.0, 2)
     diagnostics["matrix_telemetry"] = route_client.get_matrix_telemetry()
+    diagnostics["adaptive_objective"] = getattr(route_client, "_vrp_objective_diagnostics", {})
     diagnostics["assignment_frame_count"] = int(len(assignment_df)) if assignment_df is not None else 0
     diagnostics["summary_frame_count"] = int(len(summary_df)) if summary_df is not None else 0
     diagnostics["schedule_frame_count"] = int(len(schedule_df)) if schedule_df is not None else 0

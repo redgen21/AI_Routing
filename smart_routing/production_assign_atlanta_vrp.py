@@ -23,6 +23,18 @@ VRP_OVERTIME_PENALTY_PER_UNIT = 500
 # not add priority/load bias, target-slot balancing penalties, or priority
 # minimums.
 VRP_ENABLE_PRIORITY_LOAD_OBJECTIVE = True
+# Adaptive objective tuning knobs. Defaults preserve the current policy.
+VRP_ADAPTIVE_CAPACITY_LOW_THRESHOLD = 0.75
+VRP_ADAPTIVE_CAPACITY_HIGH_THRESHOLD = 0.90
+VRP_ADAPTIVE_TARGET_MULTIPLIER_LOW = 0.35
+VRP_ADAPTIVE_TARGET_MULTIPLIER_MID = 0.70
+VRP_ADAPTIVE_TARGET_MULTIPLIER_HIGH = 1.00
+VRP_ADAPTIVE_FIXED_LOAD_THRESHOLD = 0.50
+VRP_ADAPTIVE_FIXED_LOAD_MULTIPLIER = 1.15
+VRP_ADAPTIVE_COLOCATION_GROUP_4_MULTIPLIER = 1.50
+VRP_ADAPTIVE_COLOCATION_GROUP_8_MULTIPLIER = 1.50
+VRP_ADAPTIVE_COLOCATION_RATIO_THRESHOLD = 0.25
+VRP_ADAPTIVE_COLOCATION_RATIO_MULTIPLIER = 1.25
 VRP_TARGET_LOAD_PENALTY_PER_JOB = 4_000
 # Soft cohesion cost for jobs at the same stop.  The value is in the same
 # integer objective units as the duration arc cost (100 units = 1 minute).
@@ -435,19 +447,6 @@ def _solve_vrp_day(
         for group_indices in co_location_groups.values()
         for job_idx in group_indices
     }
-    # Prefer keeping co-located jobs on one technician, without collapsing
-    # them into a hard bundle. Pairwise soft constraints make a 6/4 split
-    # preferable to a 5/5 split when both are feasible, while still allowing
-    # per-job feasibility constraints to split the group when necessary.
-    for group_indices in co_location_groups.values():
-        if len(group_indices) < 2:
-            continue
-        node_indices = [manager.NodeToIndex(job_idx) for job_idx in group_indices]
-        for left_index, right_index in itertools.combinations(node_indices, 2):
-            routing.AddSoftSameVehicleConstraint(
-                [left_index, right_index],
-                int(VRP_CO_LOCATION_SPLIT_PENALTY),
-            )
     total_slot_capacity = max(1, int(sum(job_slots)))
     area_types_by_job = (
         job_df.get("area_type", pd.Series("", index=job_df.index))
@@ -605,6 +604,64 @@ def _solve_vrp_day(
             ):
                 reschedule_like_priority_job_nodes.add(int(reschedule_job_idx))
     protected_job_nodes = fixed_job_nodes | reschedule_like_priority_job_nodes
+
+    # Adapt only soft objective weights to this day's input. Hard slot,
+    # skill, fixed-job, and work-time constraints remain unchanged.
+    total_capacity = max(1, int(sum(max_jobs_by_vehicle)))
+    capacity_utilization = float(total_slot_count) / float(total_capacity)
+    group_sizes = [len(items) for items in co_location_groups.values() if len(items) >= 2]
+    co_location_job_count = sum(group_sizes)
+    co_location_ratio = float(co_location_job_count) / float(max(1, total_slot_count))
+    largest_group_size = max(group_sizes or [0])
+
+    if capacity_utilization < VRP_ADAPTIVE_CAPACITY_LOW_THRESHOLD:
+        adaptive_target_penalty_multiplier = VRP_ADAPTIVE_TARGET_MULTIPLIER_LOW
+    elif capacity_utilization < VRP_ADAPTIVE_CAPACITY_HIGH_THRESHOLD:
+        adaptive_target_penalty_multiplier = VRP_ADAPTIVE_TARGET_MULTIPLIER_MID
+    else:
+        adaptive_target_penalty_multiplier = VRP_ADAPTIVE_TARGET_MULTIPLIER_HIGH
+
+    fixed_load_ratio_by_vehicle = {
+        int(vehicle_idx): float(fixed_slots) / float(max(1, max_jobs_by_vehicle[int(vehicle_idx)]))
+        for vehicle_idx, fixed_slots in fixed_slots_by_vehicle.items()
+        if 0 <= int(vehicle_idx) < len(max_jobs_by_vehicle)
+    }
+    if fixed_load_ratio_by_vehicle and max(fixed_load_ratio_by_vehicle.values()) >= VRP_ADAPTIVE_FIXED_LOAD_THRESHOLD:
+        adaptive_target_penalty_multiplier *= VRP_ADAPTIVE_FIXED_LOAD_MULTIPLIER
+
+    adaptive_co_location_multiplier = 1.0
+    if largest_group_size >= 4:
+        adaptive_co_location_multiplier *= VRP_ADAPTIVE_COLOCATION_GROUP_4_MULTIPLIER
+    if largest_group_size >= 8:
+        adaptive_co_location_multiplier *= VRP_ADAPTIVE_COLOCATION_GROUP_8_MULTIPLIER
+    if co_location_ratio >= VRP_ADAPTIVE_COLOCATION_RATIO_THRESHOLD:
+        adaptive_co_location_multiplier *= VRP_ADAPTIVE_COLOCATION_RATIO_MULTIPLIER
+    adaptive_co_location_split_penalty = int(round(
+        float(VRP_CO_LOCATION_SPLIT_PENALTY) * adaptive_co_location_multiplier
+    ))
+    setattr(route_client, "_vrp_objective_diagnostics", {
+        "capacity_utilization": round(capacity_utilization, 4),
+        "co_location_ratio": round(co_location_ratio, 4),
+        "largest_co_location_group_size": int(largest_group_size),
+        "target_penalty_multiplier": round(adaptive_target_penalty_multiplier, 4),
+        "co_location_split_penalty": int(adaptive_co_location_split_penalty),
+        "fixed_load_ratio_by_vehicle": {
+            str(key): round(value, 4) for key, value in fixed_load_ratio_by_vehicle.items()
+        },
+    })
+
+    # Prefer keeping co-located jobs on one technician, without collapsing
+    # them into a hard bundle. Pairwise soft constraints still allow a split
+    # when per-job feasibility requires it.
+    for group_indices in co_location_groups.values():
+        if len(group_indices) < 2:
+            continue
+        node_indices = [manager.NodeToIndex(job_idx) for job_idx in group_indices]
+        for left_index, right_index in itertools.combinations(node_indices, 2):
+            routing.AddSoftSameVehicleConstraint(
+                [left_index, right_index],
+                adaptive_co_location_split_penalty,
+            )
 
     def _travel_minutes(from_node: int, to_node: int) -> float:
         if from_node in end_nodes:
@@ -983,6 +1040,15 @@ def _solve_vrp_day(
                 int(priority_group_by_vehicle[vehicle_idx]),
                 VRP_TARGET_LOAD_PENALTY_PER_JOB,
             )
+            lower_penalty = int(round(
+                float(lower_penalty) * adaptive_target_penalty_multiplier
+            ))
+            fixed_load_ratio = fixed_load_ratio_by_vehicle.get(vehicle_idx, 0.0)
+            upper_penalty = int(round(
+                float(VRP_PRIORITY_UPPER_TARGET_PENALTY)
+                * adaptive_target_penalty_multiplier
+                * (1.0 + min(fixed_load_ratio, 1.0))
+            ))
             slot_count_dimension.SetCumulVarSoftLowerBound(
                 routing.End(vehicle_idx),
                 target_slots,
@@ -991,7 +1057,7 @@ def _solve_vrp_day(
             slot_count_dimension.SetCumulVarSoftUpperBound(
                 routing.End(vehicle_idx),
                 target_slots,
-                VRP_PRIORITY_UPPER_TARGET_PENALTY,
+                upper_penalty,
             )
 
     def non_co_location_slot_count_callback(from_index: int, to_index: int) -> int:
