@@ -18,7 +18,17 @@ VRP_ABSOLUTE_WORK_MIN = 600
 VRP_OVERTIME_ALLOWANCE_MIN = 60
 VRP_FIXED_WORK_BUFFER_MIN = 30
 VRP_OVERTIME_PENALTY_PER_UNIT = 500
+# Toggle technician workload-balancing objectives.  When disabled, routing
+# still enforces per-job hard constraints and co-location cohesion, but does
+# not add priority/load bias, target-slot balancing penalties, or priority
+# minimums.
+VRP_ENABLE_PRIORITY_LOAD_OBJECTIVE = True
 VRP_TARGET_LOAD_PENALTY_PER_JOB = 4_000
+# Soft cohesion cost for jobs at the same stop.  The value is in the same
+# integer objective units as the duration arc cost (100 units = 1 minute).
+# This remains soft; all per-job feasibility constraints stay hard.
+VRP_CO_LOCATION_SPLIT_PENALTY = 2_000
+VRP_CO_LOCATION_EXTRA_SLOTS = 2
 VRP_PRIORITY_JOB_BIAS = {3: 0, 2: 500, 1: 1_500}
 VRP_PRIORITY_FIXED_COST = {3: 0, 2: 0, 1: 0}
 VRP_PRIORITY_LOWER_TARGET_PENALTY = {3: 2_500, 2: 1_500, 1: 1_000}
@@ -414,6 +424,30 @@ def _solve_vrp_day(
     start_nodes = set(range(job_count, job_count + vehicle_count))
     service_times = pd.to_numeric(job_df["service_time_min"], errors="coerce").fillna(45).tolist()
     job_slots = pd.to_numeric(job_df.get("job_slot_count", pd.Series(1, index=job_df.index)), errors="coerce").fillna(1).astype(int).clip(lower=1).tolist()
+    co_location_groups: dict[str, list[int]] = {}
+    if "co_location_group_id" in job_df.columns:
+        for job_idx, value in enumerate(job_df["co_location_group_id"].tolist()):
+            group_id = str(value or "").strip()
+            if group_id and group_id.lower() != "nan":
+                co_location_groups.setdefault(group_id, []).append(int(job_idx))
+    co_location_job_indices = {
+        int(job_idx)
+        for group_indices in co_location_groups.values()
+        for job_idx in group_indices
+    }
+    # Prefer keeping co-located jobs on one technician, without collapsing
+    # them into a hard bundle. Pairwise soft constraints make a 6/4 split
+    # preferable to a 5/5 split when both are feasible, while still allowing
+    # per-job feasibility constraints to split the group when necessary.
+    for group_indices in co_location_groups.values():
+        if len(group_indices) < 2:
+            continue
+        node_indices = [manager.NodeToIndex(job_idx) for job_idx in group_indices]
+        for left_index, right_index in itertools.combinations(node_indices, 2):
+            routing.AddSoftSameVehicleConstraint(
+                [left_index, right_index],
+                int(VRP_CO_LOCATION_SPLIT_PENALTY),
+            )
     total_slot_capacity = max(1, int(sum(job_slots)))
     area_types_by_job = (
         job_df.get("area_type", pd.Series("", index=job_df.index))
@@ -495,7 +529,10 @@ def _solve_vrp_day(
         else:
             max_home_to_job_min_by_vehicle.append(None)
             max_single_leg_min_by_vehicle.append(None if relax_distance_caps_for_feasibility else float(max_single_leg_min) if max_single_leg_min is not None and float(max_single_leg_min) > 0 else None)
-    priority_load_enabled = any("priority_group" in col or col in {"target_jobs"} for col in engineer_df.columns)
+    priority_load_enabled = (
+        VRP_ENABLE_PRIORITY_LOAD_OBJECTIVE
+        and any("priority_group" in col or col in {"target_jobs"} for col in engineer_df.columns)
+    )
     total_slot_count = int(sum(job_slots))
     target_slots_by_vehicle = _allocate_priority_targets(priority_group_by_vehicle, max_jobs_by_vehicle, total_slot_count)
     minimum_slots_by_vehicle = (
@@ -929,28 +966,54 @@ def _solve_vrp_day(
         return int(job_slots[to_node]) if to_node < job_count else 0
 
     slot_count_callback_index = routing.RegisterTransitCallback(slot_count_callback)
-    max_route_slots = max(max_jobs_by_vehicle or [8])
+    max_route_slots = max(max_jobs_by_vehicle or [8]) + int(VRP_CO_LOCATION_EXTRA_SLOTS)
     routing.AddDimension(slot_count_callback_index, 0, int(max_route_slots), True, "SlotCount")
     slot_count_dimension = routing.GetDimensionOrDie("SlotCount")
     for vehicle_idx in range(vehicle_count):
         end_var = slot_count_dimension.CumulVar(routing.End(vehicle_idx))
-        end_var.SetMax(int(max_jobs_by_vehicle[vehicle_idx]))
+        # Permit at most two additional slots only when they are occupied by
+        # co-located jobs. The separate NonCoLocationSlotCount dimension
+        # below keeps ordinary work at the technician's original capacity.
+        end_var.SetMax(int(max_jobs_by_vehicle[vehicle_idx]) + int(VRP_CO_LOCATION_EXTRA_SLOTS))
         if enforce_priority_minimums and VRP_USE_HARD_PRIORITY_MINIMUMS and int(minimum_slots_by_vehicle[vehicle_idx]) > 0:
             end_var.SetMin(min(int(minimum_slots_by_vehicle[vehicle_idx]), int(max_jobs_by_vehicle[vehicle_idx])))
-        target_slots = min(int(target_slots_by_vehicle[vehicle_idx]), int(max_jobs_by_vehicle[vehicle_idx]))
-        lower_penalty = VRP_PRIORITY_LOWER_TARGET_PENALTY.get(
-            int(priority_group_by_vehicle[vehicle_idx]),
-            VRP_TARGET_LOAD_PENALTY_PER_JOB,
-        )
-        slot_count_dimension.SetCumulVarSoftLowerBound(
-            routing.End(vehicle_idx),
-            target_slots,
-            lower_penalty,
-        )
-        slot_count_dimension.SetCumulVarSoftUpperBound(
-            routing.End(vehicle_idx),
-            target_slots,
-            VRP_PRIORITY_UPPER_TARGET_PENALTY,
+        if priority_load_enabled:
+            target_slots = min(int(target_slots_by_vehicle[vehicle_idx]), int(max_jobs_by_vehicle[vehicle_idx]))
+            lower_penalty = VRP_PRIORITY_LOWER_TARGET_PENALTY.get(
+                int(priority_group_by_vehicle[vehicle_idx]),
+                VRP_TARGET_LOAD_PENALTY_PER_JOB,
+            )
+            slot_count_dimension.SetCumulVarSoftLowerBound(
+                routing.End(vehicle_idx),
+                target_slots,
+                lower_penalty,
+            )
+            slot_count_dimension.SetCumulVarSoftUpperBound(
+                routing.End(vehicle_idx),
+                target_slots,
+                VRP_PRIORITY_UPPER_TARGET_PENALTY,
+            )
+
+    def non_co_location_slot_count_callback(from_index: int, to_index: int) -> int:
+        to_node = manager.IndexToNode(to_index)
+        if to_node >= job_count or to_node in co_location_job_indices:
+            return 0
+        return int(job_slots[to_node])
+
+    non_co_location_slot_count_callback_index = routing.RegisterTransitCallback(
+        non_co_location_slot_count_callback
+    )
+    routing.AddDimension(
+        non_co_location_slot_count_callback_index,
+        0,
+        int(max(max_jobs_by_vehicle or [8])),
+        True,
+        "NonCoLocationSlotCount",
+    )
+    non_co_location_slot_dimension = routing.GetDimensionOrDie("NonCoLocationSlotCount")
+    for vehicle_idx in range(vehicle_count):
+        non_co_location_slot_dimension.CumulVar(routing.End(vehicle_idx)).SetMax(
+            int(max_jobs_by_vehicle[vehicle_idx])
         )
 
     engineer_lookup = {str(row["SVC_ENGINEER_CODE"]): row for _, row in engineer_df.iterrows()}
