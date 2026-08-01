@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import itertools
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -375,6 +376,15 @@ def _solve_vrp_day(
     enforce_reschedule_jobs: bool = True,
     relax_distance_caps_for_feasibility: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    stage_timings = getattr(route_client, "_vrp_stage_timings", None)
+    if not isinstance(stage_timings, dict):
+        stage_timings = {}
+        setattr(route_client, "_vrp_stage_timings", stage_timings)
+
+    def _record_stage(name: str, elapsed_seconds: float) -> None:
+        stage_timings[name] = round(float(stage_timings.get(name, 0.0)) + elapsed_seconds * 1000.0, 2)
+
+    stage_timings["solver_invocation_count"] = int(stage_timings.get("solver_invocation_count", 0))
     job_df = _dedupe_day_jobs(service_day_df)
     if job_df.empty or engineer_master_df.empty:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -394,7 +404,9 @@ def _solve_vrp_day(
     start_coords = [tuple(coord) for coord in engineer_df["start_coord"].tolist()]
     job_coords = [(float(row["longitude"]), float(row["latitude"])) for _, row in job_df.iterrows()]
     matrix_coords = start_coords + job_coords
+    matrix_started = time.perf_counter()
     distance_mat_km, duration_mat_min = route_client.get_distance_duration_matrix(matrix_coords)
+    _record_stage("matrix_ms", time.perf_counter() - matrix_started)
 
     manager = pywrapcp.RoutingIndexManager(job_count + (2 * vehicle_count), vehicle_count, list(range(job_count, job_count + vehicle_count)), list(range(job_count + vehicle_count, job_count + (2 * vehicle_count))))
     routing = pywrapcp.RoutingModel(manager)
@@ -1061,7 +1073,10 @@ def _solve_vrp_day(
     search_params.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PARALLEL_CHEAPEST_INSERTION
     search_params.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
     search_params.time_limit.FromSeconds(int(time_limit_seconds))
+    stage_timings["solver_invocation_count"] += 1
+    solver_started = time.perf_counter()
     solution = routing.SolveWithParameters(search_params)
+    _record_stage("solver_search_ms", time.perf_counter() - solver_started)
     if solution is None:
         if enforce_priority_minimums and any(int(value) > 0 for value in minimum_slots_by_vehicle):
             return _solve_vrp_day(
@@ -1883,6 +1898,7 @@ def _solve_vrp_day(
             return None
         return _repair_route_cost(engineer_code, ordered), ordered
 
+    repair_started = time.perf_counter()
     for _, repair_row in repair_rows.sort_values("GSFS_RECEIPT_NO").iterrows():
         receipt = str(repair_row.get("GSFS_RECEIPT_NO", "")).strip()
         matching = job_df.index[
@@ -1942,6 +1958,8 @@ def _solve_vrp_day(
         shift_mask = mask & (existing_seq >= moved_seq)
         assignment_df.loc[shift_mask, "vrp_visit_seq"] = existing_seq[shift_mask] + 1
         assignment_df = pd.concat([assignment_df, pd.DataFrame([moved])], ignore_index=True)
+
+    _record_stage("add_on_repair_ms", time.perf_counter() - repair_started)
 
     # Preserve the morning Smart Routing optimizer for the primary solution.
     # Actual-route ordering is used only while evaluating a newly attached

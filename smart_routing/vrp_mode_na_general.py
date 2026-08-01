@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -1222,6 +1223,11 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
         errors="coerce",
     ).iloc[0]
     route_client = _build_city_route_client(request_payload)
+    request_started = time.perf_counter()
+    stage_timings = getattr(route_client, "_vrp_stage_timings", None)
+    if not isinstance(stage_timings, dict):
+        stage_timings = {}
+        setattr(route_client, "_vrp_stage_timings", stage_timings)
     diagnostics["osrm_url"] = route_client.cfg.osrm_url
     diagnostics["osrm_profile"] = route_client.cfg.osrm_profile
     diagnostics["matrix_fallback"] = (
@@ -1231,6 +1237,7 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
         if route_client.cfg.mode == "osrm"
         else "haversine"
     )
+    primary_started = time.perf_counter()
     assignment_df, summary_df, schedule_df = build_atlanta_production_assignment_vrp_from_frames(
         engineer_region_df=engineer_region_df,
         home_df=home_df,
@@ -1249,6 +1256,7 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
         long_leg_penalty_multiplier=float(long_leg_penalty_multiplier) if pd.notna(long_leg_penalty_multiplier) and float(long_leg_penalty_multiplier) > 0 else None,
         route_client=route_client,
     )
+    stage_timings["primary_solver_pipeline_ms"] = round((time.perf_counter() - primary_started) * 1000.0, 2)
     diagnostics["matrix_telemetry"] = route_client.get_matrix_telemetry()
     diagnostics["assignment_frame_count"] = int(len(assignment_df)) if assignment_df is not None else 0
     diagnostics["summary_frame_count"] = int(len(summary_df)) if summary_df is not None else 0
@@ -1260,5 +1268,12 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
         schedule_df["visit_seq"] = pd.to_numeric(schedule_df["visit_seq"], errors="coerce").fillna(0).astype(int)
         schedule_df["visit_start_time"] = schedule_df.get("visit_start_time", "")
         schedule_df["visit_end_time"] = schedule_df.get("visit_end_time", "")
+    postprocess_started = time.perf_counter()
     schedule_df = _expand_co_location_schedule(schedule_df, co_location_bundles)
+    stage_timings["result_postprocess_ms"] = round((time.perf_counter() - postprocess_started) * 1000.0, 2)
+    stage_timings["total_request_ms"] = round((time.perf_counter() - request_started) * 1000.0, 2)
+    diagnostics["stage_timings_ms"] = {
+        key: value for key, value in stage_timings.items() if key != "solver_invocation_count"
+    }
+    diagnostics["solver_invocation_count"] = int(stage_timings.get("solver_invocation_count", 0))
     return _build_response_payload(request_payload, summary_df, schedule_df, diagnostics=diagnostics)

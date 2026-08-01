@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
@@ -39,6 +40,22 @@ class OSRMTripClient:
         self._matrix_source_counts: dict[str, int] = {}
         self._matrix_request_count = 0
         self._matrix_failure_count = 0
+        self._matrix_cache = {}
+        self._ordered_route_cache = {}
+        self._route_geometry_cache = {}
+        self._matrix_cache_hits = 0
+        self._ordered_route_cache_hits = 0
+        self._route_geometry_cache_hits = 0
+
+    def _routing_cache_signature(self):
+        return (
+            str(self.cfg.mode).strip().lower(),
+            str(self.cfg.osrm_url),
+            str(self.cfg.fallback_osrm_url or ""),
+            str(self.cfg.osrm_profile),
+            round(float(self.cfg.avoid_penalty_multiplier or 1.0), 6),
+            json.dumps(self.cfg.avoid_polygons or [], sort_keys=True, separators=(",", ":"), default=str),
+        )
 
     def get_matrix_telemetry(self) -> dict[str, Any]:
         """Return the latest matrix source plus cumulative fallback/error counters.
@@ -57,6 +74,9 @@ class OSRMTripClient:
             {
                 "request_count": self._matrix_request_count,
                 "failure_count": self._matrix_failure_count,
+                "matrix_cache_hits": self._matrix_cache_hits,
+                "ordered_route_cache_hits": self._ordered_route_cache_hits,
+                "route_geometry_cache_hits": self._route_geometry_cache_hits,
                 "source_counts": dict(self._matrix_source_counts),
                 "fallback_count": fallback_count,
                 "fallback_rate": fallback_count / self._matrix_request_count if self._matrix_request_count else 0.0,
@@ -123,17 +143,27 @@ class OSRMTripClient:
 
     def get_distance_duration_matrix(self, coords: Sequence[Coord]) -> tuple[list[list[float]], list[list[float]]]:
         normalized = [(float(lon), float(lat)) for lon, lat in coords]
+        cache_key = (self._routing_cache_signature(), tuple(normalized))
+        cached = self._matrix_cache.get(cache_key)
+        if cached is not None:
+            self._matrix_cache_hits += 1
+            return copy.deepcopy(cached)
         if len(normalized) <= 1:
             base = [[0.0] * len(normalized) for _ in range(len(normalized))]
             self._record_matrix_telemetry("trivial")
+            self._matrix_cache[cache_key] = (base, base)
             return base, base
         if str(self.cfg.mode).strip().lower() != "osrm":
             self._record_matrix_telemetry("haversine_configured")
-            return self._fallback_matrix(normalized)
+            result = self._fallback_matrix(normalized)
+            self._matrix_cache[cache_key] = result
+            return copy.deepcopy(result)
         try:
             distances_m, durations_s = self._request_table(self.cfg.osrm_url, normalized)
             self._record_matrix_telemetry("osrm_primary")
-            return self._apply_avoid_penalty_to_matrix(normalized, distances_m, durations_s)
+            result = self._apply_avoid_penalty_to_matrix(normalized, distances_m, durations_s)
+            self._matrix_cache[cache_key] = result
+            return copy.deepcopy(result)
         except Exception as primary_error:
             last_error: Exception = primary_error
             if self.cfg.fallback_osrm_url:
@@ -142,7 +172,9 @@ class OSRMTripClient:
                     self._record_matrix_telemetry(
                         "osrm_fallback", fallback_attempted=True, fallback_used=True
                     )
-                    return self._apply_avoid_penalty_to_matrix(normalized, distances_m, durations_s)
+                    result = self._apply_avoid_penalty_to_matrix(normalized, distances_m, durations_s)
+                    self._matrix_cache[cache_key] = result
+                    return copy.deepcopy(result)
                 except Exception as fallback_error:
                     last_error = fallback_error
             if self.cfg.fail_closed_on_osrm_error:
@@ -158,10 +190,17 @@ class OSRMTripClient:
                 fallback_used=True,
                 error=last_error,
             )
-            return self._fallback_matrix(normalized)
+            result = self._fallback_matrix(normalized)
+            self._matrix_cache[cache_key] = result
+            return copy.deepcopy(result)
 
     def build_ordered_route(self, coords: Sequence[Coord], preserve_first: bool = False) -> dict[str, object]:
         normalized = [(float(lon), float(lat)) for lon, lat in coords]
+        cache_key = (self._routing_cache_signature(), bool(preserve_first), tuple(normalized))
+        cached = self._ordered_route_cache.get(cache_key)
+        if cached is not None:
+            self._ordered_route_cache_hits += 1
+            return copy.deepcopy(cached)
         if not normalized:
             return {"ordered_coords": [], "distance_km": 0.0, "duration_min": 0.0, "geometry": []}
         if len(normalized) == 1:
@@ -189,13 +228,16 @@ class OSRMTripClient:
                     "duration_min": duration_min,
                     "geometry": geometry,
                 }
-                return payload
+                self._ordered_route_cache[cache_key] = payload
+                return copy.deepcopy(payload)
             except Exception as error:
                 last_error = error
                 continue
         if last_error is not None:
             self._raise_if_fail_closed("ordered-route request", last_error)
-        return self._fallback_ordered_route(normalized)
+        result = self._fallback_ordered_route(normalized)
+        self._ordered_route_cache[cache_key] = result
+        return copy.deepcopy(result)
 
     def build_route_in_order(self, coords: Sequence[Coord]) -> dict[str, object]:
         normalized = [(float(lon), float(lat)) for lon, lat in coords]
@@ -329,6 +371,12 @@ class OSRMTripClient:
         raise ValueError(json.dumps(data)[:300])
 
     def _request_route_geometry(self, base_url: str, coords: Sequence[Coord]) -> tuple[float, float, list[list[float]]]:
+        normalized = tuple((float(lon), float(lat)) for lon, lat in coords)
+        cache_key = (self._routing_cache_signature(), str(base_url), normalized)
+        cached = self._route_geometry_cache.get(cache_key)
+        if cached is not None:
+            self._route_geometry_cache_hits += 1
+            return copy.deepcopy(cached)
         coord_str = ";".join(f"{lon},{lat}" for lon, lat in coords)
         url = (
             f"{base_url}/route/v1/{self.cfg.osrm_profile}/{coord_str}"
@@ -349,7 +397,9 @@ class OSRMTripClient:
             multiplier = self._avoid_penalty_multiplier()
             distance_km *= multiplier
             duration_min *= multiplier
-        return distance_km, duration_min, geometry
+        result = (distance_km, duration_min, geometry)
+        self._route_geometry_cache[cache_key] = result
+        return copy.deepcopy(result)
 
     def _avoid_penalty_multiplier(self) -> float:
         try:
