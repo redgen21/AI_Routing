@@ -4,9 +4,11 @@ import colorsys
 import copy
 import io
 import json
+import math
 import os
 import re
 import uuid
+from datetime import date, datetime
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib import parse, request as urllib_request
@@ -1074,6 +1076,20 @@ def _to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "routing_result") -> byte
     return buffer.getvalue()
 
 
+def _to_multi_sheet_xlsx_bytes(sheets: dict[str, pd.DataFrame]) -> bytes:
+    """Build one workbook containing the period's source and result tables."""
+
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer) as writer:
+        if not sheets:
+            pd.DataFrame().to_excel(writer, index=False, sheet_name="Statistics")
+        for sheet_name, frame in sheets.items():
+            safe_name = str(sheet_name).strip()[:31] or "Sheet1"
+            output = frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame()
+            output.to_excel(writer, index=False, sheet_name=safe_name)
+    return buffer.getvalue()
+
+
 def _build_simple_assignment_export_df(
     schedule_df: pd.DataFrame,
     unassigned_df: pd.DataFrame,
@@ -1083,12 +1099,13 @@ def _build_simple_assignment_export_df(
         for _, row in schedule_df.iterrows():
             rows.append(
                 {
+                    "promise_date": str(row.get("promise_date", row.get("service_date_key", ""))).strip(),
                     "serviceReceiptNo": str(row.get("GSFS_RECEIPT_NO", "")).strip(),
                     "serviceEngineerCode": str(row.get("assigned_sm_code", "")).strip(),
                     "changeFlag": "Y" if _coerce_bool_value(row.get("changed", False)) else "N",
                 }
             )
-    return pd.DataFrame(rows, columns=["serviceReceiptNo", "serviceEngineerCode", "changeFlag"])
+    return pd.DataFrame(rows, columns=["promise_date", "serviceReceiptNo", "serviceEngineerCode", "changeFlag"])
 
 
 def _routing_status_progress(status_value: str) -> tuple[float, str]:
@@ -2088,6 +2105,8 @@ def _clear_common_runtime_state() -> None:
         "common_vrp_job_id",
         "common_vrp_job_status",
         "common_vrp_job_result",
+        "common_statistics_state",
+        "common_statistics_view_active",
         "common_job_dialog_open",
         "common_job_dialog_record_id",
     ]:
@@ -2328,6 +2347,127 @@ def _build_unassigned_job_display_df(
         display_df = display_df.merge(region_lookup, on="POSTAL_CODE", how="left")
         display_df = display_df.drop(columns=["POSTAL_CODE"], errors="ignore")
     return display_df
+
+
+def _build_unassigned_analysis_df(
+    unassigned_df: pd.DataFrame,
+    engineer_master_df: pd.DataFrame,
+    assignment_df: pd.DataFrame,
+    availability_by_date: dict[tuple[str, str], bool] | None = None,
+) -> pd.DataFrame:
+    columns = [
+        "promise_date", "receipt_no", "reason", "overall_diagnosis", "postal_code", "address_line1_info",
+        "latitude", "longitude", "rank", "technician_code", "technician_name",
+        "home_distance_km", "available", "assigned_slots", "max_slots",
+        "remaining_slots", "candidate_diagnosis",
+    ]
+    if unassigned_df.empty or engineer_master_df.empty:
+        return pd.DataFrame(columns=columns)
+
+    def _number(row: pd.Series, names: list[str], default: float | None = None) -> float | None:
+        for name in names:
+            if name in row.index and pd.notna(row.get(name)):
+                value = pd.to_numeric(pd.Series([row.get(name)]), errors="coerce").iloc[0]
+                if pd.notna(value):
+                    return float(value)
+        return default
+
+    def _coord(row: pd.Series, names: list[str]) -> float | None:
+        return _number(row, names)
+
+    def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        radius = 6371.0088
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        d_phi = math.radians(lat2 - lat1)
+        d_lambda = math.radians(lon2 - lon1)
+        value = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+        return radius * 2 * math.atan2(math.sqrt(value), math.sqrt(max(0.0, 1 - value)))
+
+    assigned_slots: dict[tuple[str, str], int] = {}
+    if not assignment_df.empty and "assigned_sm_code" in assignment_df.columns:
+        working_assignment = assignment_df.copy()
+        working_assignment["_slots"] = pd.to_numeric(working_assignment.get("job_slot_count", 1), errors="coerce").fillna(1)
+        working_assignment["_service_date_key"] = working_assignment.get("service_date_key", "").astype(str).str.strip()
+        working_assignment["_assigned_code"] = working_assignment["assigned_sm_code"].astype(str).str.strip()
+        grouped = working_assignment.groupby(["_service_date_key", "_assigned_code"])["_slots"].sum().astype(int)
+        assigned_slots = {(str(day), str(code)): int(value) for (day, code), value in grouped.items()}
+
+    candidates: list[dict[str, object]] = []
+    for _, row in engineer_master_df.drop_duplicates(subset=["employee_code"]).iterrows():
+        code = str(row.get("employee_code", "")).strip()
+        if not code:
+            continue
+        lat = _coord(row, ["home_latitude", "home_start_latitude", "latitude"])
+        lon = _coord(row, ["home_longitude", "home_start_longitude", "longitude"])
+        if lat is None or lon is None:
+            continue
+        available = _coerce_bool_value(row.get("available", row.get("active_flag", True)))
+        max_slots = int(_number(row, ["max_slots", "max_jobs", "slot_count"], 8) or 8)
+        candidates.append({
+            "code": code,
+            "name": str(row.get("employee_name", code)).strip() or code,
+            "lat": lat,
+            "lon": lon,
+            "available": available,
+            "max_slots": max_slots,
+            "assigned_slots": int(assigned_slots.get(code, 0)),
+        })
+
+    rows: list[dict[str, object]] = []
+    for _, job in unassigned_df.iterrows():
+        job_lat = _coord(job, ["latitude"])
+        job_lon = _coord(job, ["longitude"])
+        if job_lat is None or job_lon is None:
+            continue
+        job_date = str(job.get("service_date_key", job.get("promise_date", ""))).strip()
+        if len(job_date) == 8 and job_date.isdigit():
+            job_date = f"{job_date[:4]}-{job_date[4:6]}-{job_date[6:8]}"
+        ranked = sorted(
+            candidates,
+            key=lambda candidate: _haversine_km(job_lat, job_lon, candidate["lat"], candidate["lon"]),
+        )[:5]
+        candidate_rows: list[dict[str, object]] = []
+        for rank, candidate in enumerate(ranked, start=1):
+            assigned_for_day = int(assigned_slots.get((job_date, str(candidate["code"])), 0))
+            remaining = max(0, int(candidate["max_slots"]) - assigned_for_day)
+            available_for_day = bool((availability_by_date or {}).get((job_date, str(candidate["code"])), candidate["available"]))
+            if not available_for_day:
+                diagnosis = "UNAVAILABLE"
+            elif remaining <= 0:
+                diagnosis = "SLOT_FULL"
+            else:
+                diagnosis = "NO_FEASIBLE_ROUTE"
+            candidate_rows.append({
+                "promise_date": str(job.get("promise_date", job.get("service_date_key", ""))).strip(),
+                "receipt_no": str(job.get("receipt_no", "")).strip(),
+                "reason": str(job.get("reason", "")).strip(),
+                "postal_code": str(job.get("postal_code", "")).strip(),
+                "address_line1_info": str(job.get("address_line1_info", "")).strip(),
+                "latitude": job_lat,
+                "longitude": job_lon,
+                "rank": rank,
+                "technician_code": candidate["code"],
+                "technician_name": candidate["name"],
+                "home_distance_km": round(_haversine_km(job_lat, job_lon, candidate["lat"], candidate["lon"]), 2),
+                "available": available_for_day,
+                "assigned_slots": 0 if not available_for_day else assigned_for_day,
+                "max_slots": int(candidate["max_slots"]),
+                "remaining_slots": 0 if not available_for_day else remaining,
+                "candidate_diagnosis": diagnosis,
+            })
+        if candidate_rows:
+            if any(row["candidate_diagnosis"] == "NO_FEASIBLE_ROUTE" for row in candidate_rows):
+                overall = "NO_FEASIBLE_ROUTE"
+            elif all(row["candidate_diagnosis"] == "SLOT_FULL" for row in candidate_rows):
+                overall = "SLOT_FULL"
+            elif all(row["candidate_diagnosis"] == "UNAVAILABLE" for row in candidate_rows):
+                overall = "UNAVAILABLE"
+            else:
+                overall = str(job.get("reason", "UNKNOWN")).strip() or "UNKNOWN"
+            for row in candidate_rows:
+                row["overall_diagnosis"] = overall
+                rows.append(row)
+    return pd.DataFrame(rows, columns=columns)
 
 
 def _build_force_assign_technician_options(engineer_master_df: pd.DataFrame) -> tuple[list[str], dict[str, str]]:
@@ -2979,6 +3119,258 @@ def _build_result_view_state(subsidiary_name: str, strategic_city_name: str) -> 
         "selected_date": selected_date,
         "selected_region": selected_region,
     }
+
+
+def _parse_history_date(value: object) -> date | None:
+    text = str(value or "").strip().replace("-", "")
+    try:
+        return datetime.strptime(text, "%Y%m%d").date()
+    except ValueError:
+        return None
+
+
+def _load_period_statistics(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    start_date: date,
+    end_date: date,
+) -> dict[str, pd.DataFrame | list[str]]:
+    history_dates = _api_get(
+        DEFAULT_COMMON_SERVER_URL,
+        "/api/v1/common/routing/history-dates",
+        subsidiary_name=subsidiary_name,
+        strategic_city_name=strategic_city_name,
+    ).get("rows", [])
+    selected_dates = []
+    for raw_date in history_dates:
+        parsed = _parse_history_date(raw_date)
+        if parsed is not None and start_date <= parsed <= end_date:
+            selected_dates.append(parsed.strftime("%Y%m%d"))
+
+    jobs_store = _load_local_jobs(subsidiary_name, strategic_city_name)
+    engineer_master_df = pd.DataFrame(
+        _api_get(
+            DEFAULT_COMMON_SERVER_URL,
+            "/api/v1/common/engineers",
+            subsidiary_name=subsidiary_name,
+            strategic_city_name=strategic_city_name,
+        ).get("rows", [])
+    )
+    region_zip_df = _build_common_region_zip_df(subsidiary_name, strategic_city_name)
+    daily_rows: list[dict[str, object]] = []
+    technician_frames: list[pd.DataFrame] = []
+    job_frames: list[pd.DataFrame] = []
+    assignment_frames: list[pd.DataFrame] = []
+    unassigned_frames: list[pd.DataFrame] = []
+    availability_by_date: dict[tuple[str, str], bool] = {}
+    errors: list[str] = []
+
+    for promise_date in selected_dates:
+        try:
+            snapshot = _api_get(
+                DEFAULT_COMMON_SERVER_URL,
+                "/api/v1/common/routing/latest",
+                subsidiary_name=subsidiary_name,
+                strategic_city_name=strategic_city_name,
+                promise_date=promise_date,
+            ).get("snapshot") or {}
+            request_row = dict(snapshot.get("request") or {})
+            payload = None
+            payload_text = str(request_row.get("payload_json", "") or "").strip()
+            if payload_text:
+                payload = json.loads(payload_text)
+            if isinstance(payload, dict):
+                service_date_key = f"{promise_date[:4]}-{promise_date[4:6]}-{promise_date[6:8]}"
+                request_technicians = _api_get(
+                    DEFAULT_COMMON_SERVER_URL,
+                    "/api/v1/common/technicians",
+                    subsidiary_name=subsidiary_name,
+                    strategic_city_name=strategic_city_name,
+                    promise_date=promise_date,
+                ).get("rows", [])
+                for technician in list(payload.get("technicians", []) or []) + list(request_technicians or []):
+                    code = str(technician.get("employee_code", technician.get("SVC_ENGINEER_CODE", ""))).strip()
+                    if code:
+                        active = _coerce_bool_value(technician.get("active_flag", True))
+                        available = _coerce_bool_value(technician.get("available", active)) and active
+                        availability_by_date[(service_date_key, code)] = available
+            result_payload = snapshot.get("result") or {}
+            if not isinstance(result_payload, dict) or not result_payload:
+                continue
+            payload_jobs_df = _build_jobs_df_from_payload(payload) if isinstance(payload, dict) else pd.DataFrame()
+            if payload_jobs_df.empty and not jobs_store.empty and "promise_date" in jobs_store.columns:
+                payload_jobs_df = jobs_store[
+                    jobs_store["promise_date"].astype(str).str.replace("-", "", regex=False).eq(promise_date)
+                ].copy()
+            if payload_jobs_df.empty:
+                payload_jobs_df = pd.DataFrame()
+            payload_jobs_df["service_date_key"] = f"{promise_date[:4]}-{promise_date[4:6]}-{promise_date[6:8]}"
+            if not payload_jobs_df.empty:
+                job_frames.append(payload_jobs_df.copy())
+
+            assignment_df, schedule_df = _build_common_result_frames(
+                result_payload,
+                payload_jobs_df,
+                engineer_master_df,
+                region_zip_df,
+            )
+            if not assignment_df.empty:
+                assignment_df["service_date_key"] = f"{promise_date[:4]}-{promise_date[4:6]}-{promise_date[6:8]}"
+                schedule_df["service_date_key"] = assignment_df["service_date_key"]
+                assignment_frames.append(schedule_df.copy())
+            unassigned_df = _build_unassigned_job_display_df(result_payload, payload_jobs_df, region_zip_df)
+            if not unassigned_df.empty:
+                unassigned_df["service_date_key"] = f"{promise_date[:4]}-{promise_date[4:6]}-{promise_date[6:8]}"
+                unassigned_frames.append(unassigned_df.copy())
+
+            summary_df = pd.DataFrame(result_payload.get("engineer_summary", []))
+            if not summary_df.empty:
+                summary_df["service_date_key"] = summary_df.get(
+                    "service_date_key", f"{promise_date[:4]}-{promise_date[4:6]}-{promise_date[6:8]}"
+                )
+                technician_frames.append(summary_df.copy())
+            total_jobs = int(
+                (payload_jobs_df["GSFS_RECEIPT_NO"].dropna().astype(str).nunique()
+                 if "GSFS_RECEIPT_NO" in payload_jobs_df.columns and not payload_jobs_df.empty
+                 else (result_payload.get("summary") or {}).get("total_jobs", 0))
+            )
+            assigned_jobs = int(
+                assignment_df["GSFS_RECEIPT_NO"].dropna().astype(str).nunique()
+                if not assignment_df.empty and "GSFS_RECEIPT_NO" in assignment_df.columns
+                else (result_payload.get("summary") or {}).get("assigned_jobs", 0)
+            )
+            slot_count = int(
+                pd.to_numeric(payload_jobs_df.get("job_slot_count", pd.Series(dtype=float)), errors="coerce")
+                .fillna(1).sum()
+            ) if not payload_jobs_df.empty else 0
+            daily_rows.append(
+                {
+                    "service_date": f"{promise_date[:4]}-{promise_date[4:6]}-{promise_date[6:8]}",
+                    "jobs": total_jobs,
+                    "assigned_jobs": assigned_jobs,
+                    "unassigned_jobs": max(0, total_jobs - assigned_jobs),
+                    "slots": slot_count,
+                    "technicians": int(assignment_df["assigned_sm_code"].nunique()) if not assignment_df.empty else 0,
+                    "distance_km": float(pd.to_numeric(summary_df.get("route_distance_km", pd.Series(dtype=float)), errors="coerce").sum()) if not summary_df.empty else 0.0,
+                    "duration_min": float(pd.to_numeric(summary_df.get("route_duration_min", pd.Series(dtype=float)), errors="coerce").sum()) if not summary_df.empty else 0.0,
+                }
+            )
+        except Exception as exc:
+            errors.append(f"{promise_date}: {exc}")
+
+    jobs_period_df = pd.concat(job_frames, ignore_index=True) if job_frames else pd.DataFrame()
+    technicians_period_df = pd.concat(technician_frames, ignore_index=True) if technician_frames else engineer_master_df.copy()
+    assignments_period_df = pd.concat(assignment_frames, ignore_index=True) if assignment_frames else pd.DataFrame()
+    unassigned_period_df = pd.concat(unassigned_frames, ignore_index=True) if unassigned_frames else pd.DataFrame()
+    unassigned_analysis_df = _build_unassigned_analysis_df(
+        unassigned_period_df, engineer_master_df, assignments_period_df, availability_by_date
+    )
+    statistics_df = pd.DataFrame(daily_rows)
+    if not statistics_df.empty:
+        totals = {
+            "service_date": "TOTAL",
+            "jobs": int(statistics_df["jobs"].sum()),
+            "assigned_jobs": int(statistics_df["assigned_jobs"].sum()),
+            "unassigned_jobs": int(statistics_df["unassigned_jobs"].sum()),
+            "slots": int(statistics_df["slots"].sum()),
+            "technicians": int(
+                assignments_period_df["assigned_sm_code"].dropna().astype(str).nunique()
+                if not assignments_period_df.empty and "assigned_sm_code" in assignments_period_df.columns
+                else statistics_df["technicians"].sum()
+            ),
+            "distance_km": round(float(statistics_df["distance_km"].sum()), 2),
+            "duration_min": round(float(statistics_df["duration_min"].sum()), 2),
+        }
+        statistics_df = pd.concat([statistics_df, pd.DataFrame([totals])], ignore_index=True)
+    return {
+        "statistics": statistics_df,
+        "jobs": jobs_period_df,
+        "technicians": technicians_period_df,
+        "assignments": assignments_period_df,
+        "unassigned": unassigned_period_df,
+        "unassigned_analysis": unassigned_analysis_df,
+        "errors": errors,
+        "dates": selected_dates,
+    }
+
+
+def _render_statistics_tab(subsidiary_name: str, strategic_city_name: str) -> None:
+    st.subheader("Statistics")
+    history_dates = _api_get(
+        DEFAULT_COMMON_SERVER_URL,
+        "/api/v1/common/routing/history-dates",
+        subsidiary_name=subsidiary_name,
+        strategic_city_name=strategic_city_name,
+    ).get("rows", [])
+    parsed_dates = sorted([parsed for parsed in (_parse_history_date(value) for value in history_dates) if parsed])
+    if not parsed_dates:
+        st.info("No saved routing results for the selected city.")
+        return
+    start_col, end_col, button_col = st.columns([1, 1, 0.8])
+    start_date = start_col.date_input("Start Date", value=parsed_dates[0], min_value=parsed_dates[0], max_value=parsed_dates[-1], key="statistics_start_date")
+    end_date = end_col.date_input("End Date", value=parsed_dates[-1], min_value=parsed_dates[0], max_value=parsed_dates[-1], key="statistics_end_date")
+    if button_col.button("조회", type="primary", width="stretch", key="statistics_query_button"):
+        if start_date > end_date:
+            st.error("Start Date must be on or before End Date.")
+        else:
+            with st.spinner("Loading routing statistics..."):
+                statistics_state = _load_period_statistics(
+                    subsidiary_name, strategic_city_name, start_date, end_date
+                )
+                statistics_state["start_date"] = start_date.isoformat()
+                statistics_state["end_date"] = end_date.isoformat()
+                st.session_state["common_statistics_state"] = statistics_state
+                st.session_state["common_statistics_view_active"] = True
+    statistics_state = st.session_state.get("common_statistics_state")
+    if not statistics_state:
+        st.info("Select a period and click 조회.")
+        return
+
+
+def _render_statistics_panel() -> None:
+    st.subheader("Routing Statistics")
+    statistics_state = st.session_state.get("common_statistics_state")
+    if not statistics_state:
+        st.info("Select a period in the Statistics tab and click 조회.")
+        return
+    errors = statistics_state.get("errors", [])
+    if errors:
+        st.warning("Some dates could not be loaded: " + "; ".join(str(value) for value in errors[:3]))
+    statistics_df = statistics_state.get("statistics", pd.DataFrame())
+    if statistics_df.empty:
+        st.info("No routing results were found for the selected period.")
+        return
+    st.dataframe(statistics_df, width="stretch", hide_index=True)
+    analysis_df = statistics_state.get("unassigned_analysis", pd.DataFrame())
+    if not analysis_df.empty:
+        st.subheader("Unassigned Analysis")
+        diagnosis_df = analysis_df[
+            ["promise_date", "receipt_no", "reason", "overall_diagnosis", "postal_code", "address_line1_info"]
+        ].drop_duplicates("receipt_no")
+        st.dataframe(diagnosis_df, width="stretch", hide_index=True)
+        st.caption("Nearest five technicians by home-to-job straight-line distance")
+        st.dataframe(analysis_df, width="stretch", hide_index=True)
+    sheets = {
+        "Statistics": statistics_df,
+        "Jobs": statistics_state.get("jobs", pd.DataFrame()),
+        "Technicians": statistics_state.get("technicians", pd.DataFrame()),
+        "Assignment Result": _build_simple_assignment_export_df(
+            statistics_state.get("assignments", pd.DataFrame()),
+            statistics_state.get("unassigned", pd.DataFrame()),
+        ),
+        "Assignment CSV": statistics_state.get("assignments", pd.DataFrame()),
+        "Unassigned": statistics_state.get("unassigned", pd.DataFrame()),
+        "Unassigned Analysis": analysis_df,
+    }
+    start_text = str(statistics_state.get("start_date", "")).replace("-", "")
+    end_text = str(statistics_state.get("end_date", "")).replace("-", "")
+    st.download_button(
+        "Download Period Statistics XLSX",
+        data=_to_multi_sheet_xlsx_bytes(sheets),
+        file_name=f"routing_statistics_{start_text}_{end_text}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        width="stretch",
+    )
 
 
 def _render_result_summary(subsidiary_name: str, strategic_city_name: str) -> None:
@@ -4379,8 +4771,8 @@ def main() -> None:
             index=cities.index(DEFAULT_STRATEGIC_CITY_NAME) if DEFAULT_STRATEGIC_CITY_NAME in cities else 0,
         )
         _ensure_common_runtime_context(subsidiary_name, strategic_city_name)
-        jobs_tab, technicians_tab, avoid_area_tab, payload_tab, routing_result_tab = st.tabs(
-            ["Jobs", "Technicians", "Avoid Areas", "Routing Request", "Routing Result"]
+        jobs_tab, technicians_tab, avoid_area_tab, payload_tab, routing_result_tab, statistics_tab = st.tabs(
+            ["Jobs", "Technicians", "Avoid Areas", "Routing Request", "Routing Result", "Statistics"]
         )
         with jobs_tab:
             _render_jobs_tab(subsidiary_name, strategic_city_name)
@@ -4392,9 +4784,14 @@ def main() -> None:
             _render_payload_tab(subsidiary_name, strategic_city_name)
         with routing_result_tab:
             _render_routing_result_tab(subsidiary_name, strategic_city_name)
+        with statistics_tab:
+            _render_statistics_tab(subsidiary_name, strategic_city_name)
         _render_result_summary(subsidiary_name, strategic_city_name)
     with right_col:
-        _render_result_detail(subsidiary_name, strategic_city_name)
+        if st.session_state.get("common_statistics_view_active", False):
+            _render_statistics_panel()
+        else:
+            _render_result_detail(subsidiary_name, strategic_city_name)
 
 
 if __name__ == "__main__":
