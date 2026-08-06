@@ -2028,65 +2028,103 @@ def _solve_vrp_day(
         return _repair_route_cost(engineer_code, ordered), ordered
 
     repair_started = time.perf_counter()
-    for _, repair_row in repair_rows.sort_values("GSFS_RECEIPT_NO").iterrows():
-        receipt = str(repair_row.get("GSFS_RECEIPT_NO", "")).strip()
-        matching = job_df.index[
-            job_df["GSFS_RECEIPT_NO"].astype(str).str.strip() == receipt
-        ].tolist()
-        if not matching:
-            continue
-        repair_row = repair_row.copy()
-        repair_row["_vrp_job_idx"] = int(matching[0])
-        candidate_df = base._candidate_engineers(repair_row, engineer_df)
-        candidate_codes = set(
-            candidate_df["SVC_ENGINEER_CODE"].astype(str).str.strip()
-        )
-        slots = _repair_slots(repair_row)
-        best: tuple[float, str, pd.Series] | None = None
-        for code in vehicle_codes:
-            code = str(code).strip()
-            if code not in candidate_codes:
+    remaining_repair_rows = repair_rows.sort_values("GSFS_RECEIPT_NO").copy()
+    while not remaining_repair_rows.empty:
+        # Build a cheap proximity shortlist for every remaining job/technician
+        # pair.  This avoids running a full route reorder for every possible
+        # insertion.  The final selected pair is still checked with the actual
+        # route and the 600-minute hard limit below.
+        proximity_options: list[tuple[float, float, str, str, pd.Series]] = []
+        for _, original_row in remaining_repair_rows.iterrows():
+            receipt = str(original_row.get("GSFS_RECEIPT_NO", "")).strip()
+            matching = job_df.index[
+                job_df["GSFS_RECEIPT_NO"].astype(str).str.strip() == receipt
+            ].tolist()
+            if not matching:
                 continue
-            vehicle_idx = vehicle_index_by_code.get(code)
-            if vehicle_idx is None:
-                continue
+            repair_row = original_row.copy()
+            repair_row["_vrp_job_idx"] = int(matching[0])
+            candidate_df = base._candidate_engineers(repair_row, engineer_df)
+            candidate_codes = set(candidate_df["SVC_ENGINEER_CODE"].astype(str).str.strip())
+            slots = _repair_slots(repair_row)
+            job_idx = int(repair_row["_vrp_job_idx"])
+            for code in vehicle_codes:
+                code = str(code).strip()
+                if code not in candidate_codes:
+                    continue
+                vehicle_idx = vehicle_index_by_code.get(code)
+                if vehicle_idx is None:
+                    continue
+                current = assignment_df[
+                    assignment_df["assigned_sm_code"].astype(str).eq(code)
+                ].sort_values(["vrp_visit_seq", "GSFS_RECEIPT_NO"])
+                current_slots = int(
+                    pd.to_numeric(
+                        current.get("job_slot_count", pd.Series(1, index=current.index)),
+                        errors="coerce",
+                    ).fillna(1).astype(int).clip(lower=1).sum()
+                )
+                if current_slots + slots > int(max_jobs_by_vehicle[vehicle_idx]):
+                    continue
+                duration_anchors = [
+                    float(duration_mat_min[vehicle_idx][vehicle_count + job_idx])
+                ]
+                distance_anchors = [
+                    float(distance_mat_km[vehicle_idx][vehicle_count + job_idx])
+                ]
+                for _, assigned_row in current.iterrows():
+                    assigned_idx = pd.to_numeric(
+                        pd.Series([assigned_row.get("_vrp_job_idx")]), errors="coerce"
+                    ).iloc[0]
+                    if pd.isna(assigned_idx):
+                        continue
+                    assigned_idx = int(assigned_idx)
+                    duration_anchors.extend([
+                        float(duration_mat_min[vehicle_count + assigned_idx][vehicle_count + job_idx]),
+                        float(duration_mat_min[vehicle_count + job_idx][vehicle_count + assigned_idx]),
+                    ])
+                    distance_anchors.extend([
+                        float(distance_mat_km[vehicle_count + assigned_idx][vehicle_count + job_idx]),
+                        float(distance_mat_km[vehicle_count + job_idx][vehicle_count + assigned_idx]),
+                    ])
+                proximity_options.append((
+                    min(duration_anchors),
+                    min(distance_anchors),
+                    receipt,
+                    code,
+                    repair_row,
+                ))
+
+        if not proximity_options:
+            break
+        proximity_options.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
+        committed = False
+        for _, _, receipt, code, repair_row in proximity_options:
             current = assignment_df[
                 assignment_df["assigned_sm_code"].astype(str).eq(code)
             ].sort_values(["vrp_visit_seq", "GSFS_RECEIPT_NO"])
-            current_slots = int(
-                pd.to_numeric(
-                    current.get("job_slot_count", pd.Series(1, index=current.index)),
-                    errors="coerce",
-                ).fillna(1).astype(int).clip(lower=1).sum()
-            )
-            if current_slots + slots > int(max_jobs_by_vehicle[vehicle_idx]):
-                continue
             moved = _repair_adjust_row(repair_row, code)
-            candidate = pd.concat(
-                [current, pd.DataFrame([moved])],
-                ignore_index=True,
-            )
+            candidate = pd.concat([current, pd.DataFrame([moved])], ignore_index=True)
             optimized = _repair_reorder_candidate(code, candidate)
             if optimized is None:
                 continue
-            optimized_cost, optimized_candidate = optimized
-            score = (optimized_cost, code, optimized_candidate)
-            if best is None or score[:2] < best[:2]:
-                best = score
-        if best is None:
-            continue
-        _, code, candidate = best
-        moved = candidate[
-            candidate["GSFS_RECEIPT_NO"].astype(str).eq(receipt)
-        ].iloc[0].copy()
-        mask = assignment_df["assigned_sm_code"].astype(str).eq(code)
-        existing_seq = pd.to_numeric(
-            assignment_df["vrp_visit_seq"], errors="coerce"
-        ).fillna(0)
-        moved_seq = int(moved.get("vrp_visit_seq", 1))
-        shift_mask = mask & (existing_seq >= moved_seq)
-        assignment_df.loc[shift_mask, "vrp_visit_seq"] = existing_seq[shift_mask] + 1
-        assignment_df = pd.concat([assignment_df, pd.DataFrame([moved])], ignore_index=True)
+            _, optimized_candidate = optimized
+            moved = optimized_candidate[
+                optimized_candidate["GSFS_RECEIPT_NO"].astype(str).eq(receipt)
+            ].iloc[0].copy()
+            mask = assignment_df["assigned_sm_code"].astype(str).eq(code)
+            existing_seq = pd.to_numeric(assignment_df["vrp_visit_seq"], errors="coerce").fillna(0)
+            moved_seq = int(moved.get("vrp_visit_seq", 1))
+            shift_mask = mask & (existing_seq >= moved_seq)
+            assignment_df.loc[shift_mask, "vrp_visit_seq"] = existing_seq[shift_mask] + 1
+            assignment_df = pd.concat([assignment_df, pd.DataFrame([moved])], ignore_index=True)
+            remaining_repair_rows = remaining_repair_rows[
+                remaining_repair_rows["GSFS_RECEIPT_NO"].astype(str).str.strip().ne(receipt)
+            ].copy()
+            committed = True
+            break
+        if not committed:
+            break
 
     _record_stage("add_on_repair_ms", time.perf_counter() - repair_started)
 

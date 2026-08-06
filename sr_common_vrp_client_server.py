@@ -3066,6 +3066,43 @@ def _parse_history_date(value: object) -> date | None:
         return None
 
 
+def _build_actual_technician_summary_df(actual_schedule_df: pd.DataFrame, strategic_city_name: str) -> pd.DataFrame:
+    columns = ["Technician", "job_count", "slot_count", "route_distance_mile", "return_home_distance_mile", "service_time_min", "total_working_min", "total_day_duration_with_return_min"]
+    if actual_schedule_df.empty:
+        return pd.DataFrame(columns=columns)
+    rows: list[dict[str, object]] = []
+    for _, group in actual_schedule_df.groupby("assigned_sm_code", dropna=True):
+        group = group.sort_values("visit_seq").reset_index(drop=True)
+        units = group.drop_duplicates(subset=["assigned_sm_code", "GSFS_RECEIPT_NO"]).copy()
+        slots = _coerce_job_slot_count_series(units.get("job_slot_count", pd.Series(1, index=units.index)))
+        route = _build_route_groups(group, strategic_city_name)
+        route_payload = route[0]["route_payload"] if route else {}
+        route_distance_km = float(route_payload.get("distance_km", 0) or 0)
+        route_duration_min = float(route_payload.get("duration_min", 0) or 0)
+        return_distance_km = return_duration_min = 0.0
+        if route and route[0].get("home_coord") is not None and not group.empty:
+            home_coord = route[0]["home_coord"]
+            last_coord = (float(group.iloc[-1]["longitude"]), float(group.iloc[-1]["latitude"]))
+            return_payload = get_route_client(strategic_city_name).build_route_in_order((last_coord, home_coord))
+            return_distance_km = float(return_payload.get("distance_km", 0) or 0)
+            return_duration_min = float(return_payload.get("duration_min", 0) or 0)
+        service_time_min = float(sum(_estimate_service_time_min(row) for _, row in units.iterrows()))
+        name = str(group["assigned_sm_name"].iloc[0]).strip() if "assigned_sm_name" in group.columns else str(group["assigned_sm_code"].iloc[0])
+        rows.append({"Technician": name, "job_count": int(units["GSFS_RECEIPT_NO"].dropna().astype(str).nunique()), "slot_count": int(slots.sum()), "route_distance_mile": round(route_distance_km * KM_TO_MILES, 2), "return_home_distance_mile": round(return_distance_km * KM_TO_MILES, 2), "service_time_min": round(service_time_min, 2), "total_working_min": round(route_duration_min + service_time_min, 2), "total_day_duration_with_return_min": round(route_duration_min + service_time_min + return_duration_min, 2)})
+    return pd.DataFrame(rows, columns=columns).sort_values("Technician").reset_index(drop=True)
+
+
+def _build_combined_technician_summary_df(actual_df: pd.DataFrame, smart_df: pd.DataFrame, service_date: str) -> pd.DataFrame:
+    metrics = ["job_count", "slot_count", "route_distance_mile", "return_home_distance_mile", "service_time_min", "total_working_min", "total_day_duration_with_return_min"]
+    actual = actual_df.rename(columns={col: f"Actual_{col}" for col in metrics}) if not actual_df.empty else pd.DataFrame(columns=["Technician"])
+    smart = smart_df.rename(columns={col: f"Smart_Routing_{col}" for col in metrics}) if not smart_df.empty else pd.DataFrame(columns=["Technician"])
+    combined = actual.merge(smart, on="Technician", how="outer")
+    if combined.empty:
+        return combined
+    combined.insert(0, "service_date", service_date)
+    return combined.sort_values("Technician").reset_index(drop=True)
+
+
 def _load_period_statistics(
     subsidiary_name: str,
     strategic_city_name: str,
@@ -3096,6 +3133,7 @@ def _load_period_statistics(
     region_zip_df = _build_common_region_zip_df(subsidiary_name, strategic_city_name)
     daily_rows: list[dict[str, object]] = []
     technician_frames: list[pd.DataFrame] = []
+    technician_summary_frames: list[pd.DataFrame] = []
     job_frames: list[pd.DataFrame] = []
     assignment_frames: list[pd.DataFrame] = []
     unassigned_frames: list[pd.DataFrame] = []
@@ -3158,6 +3196,32 @@ def _load_period_statistics(
                     "service_date_key", f"{promise_date[:4]}-{promise_date[4:6]}-{promise_date[6:8]}"
                 )
                 technician_frames.append(summary_df.copy())
+            actual_assignment_df, actual_schedule_df = _build_common_actual_frames(
+                payload_jobs_df, engineer_master_df, region_zip_df
+            )
+            actual_summary_df = _build_actual_technician_summary_df(actual_schedule_df, strategic_city_name)
+            smart_summary_rows = []
+            for _, summary_row in summary_df.iterrows():
+                code = str(summary_row.get("SVC_ENGINEER_CODE", summary_row.get("employee_code", ""))).strip()
+                name = str(summary_row.get("SVC_ENGINEER_NAME", summary_row.get("employee_name", code))).strip() or code
+                if not code and not name:
+                    continue
+                smart_summary_rows.append({
+                    "Technician": name,
+                    "job_count": int(pd.to_numeric(pd.Series([summary_row.get("job_count", 0)]), errors="coerce").fillna(0).iloc[0]),
+                    "slot_count": int(pd.to_numeric(pd.Series([summary_row.get("slot_count", 0)]), errors="coerce").fillna(0).iloc[0]),
+                    "route_distance_mile": round(float(summary_row.get("route_distance_km", 0) or 0) * KM_TO_MILES, 2),
+                    "return_home_distance_mile": round(float(summary_row.get("return_home_distance_km", 0) or 0) * KM_TO_MILES, 2),
+                    "service_time_min": float(summary_row.get("service_time_min", 0) or 0),
+                    "total_working_min": float(summary_row.get("total_work_min", 0) or 0),
+                    "total_day_duration_with_return_min": float(summary_row.get("total_day_duration_with_return_min", 0) or 0),
+                })
+            technician_summary = _build_combined_technician_summary_df(
+                actual_summary_df, pd.DataFrame(smart_summary_rows),
+                f"{promise_date[:4]}-{promise_date[4:6]}-{promise_date[6:8]}",
+            )
+            if not technician_summary.empty:
+                technician_summary_frames.append(technician_summary)
             total_jobs = int(
                 payload_jobs_df["GSFS_RECEIPT_NO"].dropna().astype(str).nunique()
                 if "GSFS_RECEIPT_NO" in payload_jobs_df.columns and not payload_jobs_df.empty
@@ -3206,7 +3270,7 @@ def _load_period_statistics(
             }])],
             ignore_index=True,
         )
-    return {"statistics": statistics_df, "jobs": jobs_df, "technicians": technicians_df, "assignments": assignments_df, "unassigned": unassigned_df, "unassigned_analysis": unassigned_analysis_df, "errors": errors, "dates": selected_dates}
+    return {"statistics": statistics_df, "jobs": jobs_df, "technicians": technicians_df, "technician_summary": pd.concat(technician_summary_frames, ignore_index=True) if technician_summary_frames else pd.DataFrame(), "assignments": assignments_df, "unassigned": unassigned_df, "unassigned_analysis": unassigned_analysis_df, "errors": errors, "dates": selected_dates}
 
 
 def _render_statistics_tab(subsidiary_name: str, strategic_city_name: str) -> None:
@@ -3267,6 +3331,7 @@ def _render_statistics_panel() -> None:
         "Statistics": statistics_df,
         "Jobs": statistics_state.get("jobs", pd.DataFrame()),
         "Technicians": statistics_state.get("technicians", pd.DataFrame()),
+        "Technician Summary": statistics_state.get("technician_summary", pd.DataFrame()),
         "Assignment Result": _build_simple_assignment_export_df(statistics_state.get("assignments", pd.DataFrame()), statistics_state.get("unassigned", pd.DataFrame())),
         "Assignment CSV": statistics_state.get("assignments", pd.DataFrame()),
         "Unassigned": statistics_state.get("unassigned", pd.DataFrame()),
