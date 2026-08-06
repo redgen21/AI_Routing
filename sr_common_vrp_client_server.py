@@ -2120,6 +2120,15 @@ def _build_common_result_frames(
     if "receipt_no" not in assignments_df.columns:
         assignments_df["receipt_no"] = assignments_df.get("salesforce_id", "")
     assignments_df["receipt_no"] = assignments_df["receipt_no"].astype(str).str.strip()
+    # Keep routing-result values distinct from payload values before merge.
+    # This avoids relying on pandas' _x/_y suffix ordering for authoritative
+    # slot and service-time values.
+    assignments_df = assignments_df.rename(
+        columns={
+            "job_slot_count": "routing_job_slot_count",
+            "service_time_min": "routing_service_time_min",
+        }
+    )
 
     job_lookup = jobs_df.rename(
         columns={
@@ -2143,22 +2152,52 @@ def _build_common_result_frames(
         on="GSFS_RECEIPT_NO",
         how="inner",
     )
-    slot_candidates = [col for col in ["job_slot_count", "job_slot_count_x", "job_slot_count_y"] if col in merged.columns]
+    slot_candidates = [
+        col for col in ["routing_job_slot_count", "job_slot_count"]
+        if col in merged.columns
+    ]
     if slot_candidates:
         slot_series = pd.Series(pd.NA, index=merged.index)
         for col in slot_candidates:
             slot_series = slot_series.combine_first(merged[col])
         merged["job_slot_count"] = _coerce_job_slot_count_series(slot_series)
-        merged = merged.drop(columns=[col for col in ["job_slot_count_x", "job_slot_count_y"] if col in merged.columns], errors="ignore")
+        merged = merged.drop(
+            columns=[
+                col for col in [
+                    "routing_job_slot_count",
+                    "job_slot_count_x",
+                    "job_slot_count_y",
+                ]
+                if col in merged.columns
+            ],
+            errors="ignore",
+        )
     else:
         merged["job_slot_count"] = 1
-    service_candidates = [col for col in ["service_time_min_y", "service_time_min", "service_time_min_x", "service_minutes"] if col in merged.columns]
+    service_candidates = [
+        col for col in [
+            "routing_service_time_min",
+            "service_time_min",
+            "service_minutes",
+        ]
+        if col in merged.columns
+    ]
     if service_candidates:
         service_series = pd.Series(pd.NA, index=merged.index)
         for col in service_candidates:
             service_series = service_series.combine_first(merged[col])
         merged["service_time_min"] = pd.to_numeric(service_series, errors="coerce")
-        merged = merged.drop(columns=[col for col in ["service_time_min_x", "service_time_min_y"] if col in merged.columns], errors="ignore")
+        merged = merged.drop(
+            columns=[
+                col for col in [
+                    "routing_service_time_min",
+                    "service_time_min_x",
+                    "service_time_min_y",
+                ]
+                if col in merged.columns
+            ],
+            errors="ignore",
+        )
     engineer_lookup = engineer_master_df.rename(
         columns={
             "employee_code": "assigned_sm_code",
@@ -2228,6 +2267,21 @@ def _build_unassigned_job_display_df(
     if "receipt_no" not in unassigned_df.columns:
         unassigned_df["receipt_no"] = unassigned_df.get("salesforce_id", "")
     unassigned_df["receipt_no"] = unassigned_df["receipt_no"].astype(str).str.strip()
+    # The server result is authoritative, but older/merged responses can
+    # retain an unassigned row after the same receipt has been assigned.  Do
+    # not display such a stale item as Not Assigned.
+    assigned_receipts = {
+        str(row.get("receipt_no") or row.get("salesforce_id") or "").strip()
+        for row in (result_payload.get("assignments", []) or [])
+        if isinstance(row, dict)
+    }
+    assigned_receipts.discard("")
+    if assigned_receipts:
+        unassigned_df = unassigned_df[
+            ~unassigned_df["receipt_no"].isin(assigned_receipts)
+        ].copy()
+        if unassigned_df.empty:
+            return pd.DataFrame()
     display_df = unassigned_df[
         ["receipt_no"]
         + [
@@ -2840,7 +2894,9 @@ def _build_result_view_state(subsidiary_name: str, strategic_city_name: str) -> 
     base_result_payload = result_payload
     force_assign_preview = _get_force_assignment_preview()
     result_payload = _apply_force_assignments_to_result_payload(result_payload, force_assign_preview)
-    compare_mode = st.session_state.get("common_vrp_compare_mode", "Actual")
+    # Routing Result should show the newly computed Smart Routing result by
+    # default.  Actual remains available as an explicit comparison option.
+    compare_mode = st.session_state.get("common_vrp_compare_mode", "Smart Routing")
     region_zip_df = _build_common_region_zip_df(subsidiary_name, strategic_city_name)
     payload_jobs_df = _build_jobs_df_from_payload(payload)
     actual_jobs_df = _filter_jobs_df_for_payload(jobs_df, payload)
@@ -2904,6 +2960,23 @@ def _build_result_view_state(subsidiary_name: str, strategic_city_name: str) -> 
         if "SVC_ENGINEER_CODE" in filtered_home.columns:
             filtered_home = filtered_home[filtered_home["SVC_ENGINEER_CODE"].astype(str) == str(selected_engineer_code)].copy()
 
+    server_summary_df = pd.DataFrame(result_payload.get("engineer_summary", []))
+    server_summary_active = pd.DataFrame()
+    server_summary_code_col = ""
+    if compare_mode == "Smart Routing" and not server_summary_df.empty:
+        summary_code_col = "SVC_ENGINEER_CODE" if "SVC_ENGINEER_CODE" in server_summary_df.columns else "employee_code"
+        server_summary_code_col = summary_code_col
+        if summary_code_col in server_summary_df.columns:
+            server_summary_active = server_summary_df.copy()
+            server_summary_active[summary_code_col] = server_summary_active[summary_code_col].astype(str).str.strip()
+            server_summary_active["job_count"] = pd.to_numeric(server_summary_active.get("job_count", 0), errors="coerce").fillna(0).astype(int)
+            server_summary_active["slot_count"] = pd.to_numeric(server_summary_active.get("slot_count", 0), errors="coerce").fillna(0).astype(int)
+            server_summary_active = server_summary_active[server_summary_active["job_count"] > 0].copy()
+            if selected_engineer_code != "ALL":
+                server_summary_active = server_summary_active[
+                    server_summary_active[summary_code_col].eq(str(selected_engineer_code))
+                ].copy()
+
     route_groups = _build_route_groups(filtered_schedule, strategic_city_name)
     service_count = int(filtered_assignment["GSFS_RECEIPT_NO"].dropna().astype(str).nunique()) if not filtered_assignment.empty else 0
     unassigned_count = int(filtered_unassigned["receipt_no"].dropna().astype(str).nunique()) if not filtered_unassigned.empty and "receipt_no" in filtered_unassigned.columns else 0
@@ -2914,6 +2987,11 @@ def _build_result_view_state(subsidiary_name: str, strategic_city_name: str) -> 
     route_duration_series = pd.Series([float(group["route_payload"]["duration_min"]) for group in route_groups], dtype=float)
     avg_distance = float(route_distance_series.mean()) if not route_distance_series.empty else 0.0
     avg_duration = float(route_duration_series.mean()) if not route_duration_series.empty else 0.0
+    if not server_summary_active.empty and selected_region == "ALL":
+        server_distance = pd.to_numeric(server_summary_active.get("route_distance_km", 0), errors="coerce").fillna(0)
+        server_duration = pd.to_numeric(server_summary_active.get("route_duration_min", 0), errors="coerce").fillna(0)
+        avg_distance = float(server_distance.mean())
+        avg_duration = float(server_duration.mean())
     if not filtered_assignment.empty:
         job_units_df = filtered_assignment.copy()
         if "job_slot_count" not in job_units_df.columns:
@@ -2929,6 +3007,15 @@ def _build_result_view_state(subsidiary_name: str, strategic_city_name: str) -> 
     avg_slots_per_engineer = float(slots_per_engineer.mean()) if not slots_per_engineer.empty else 0.0
     jobs_std = float(jobs_per_engineer.std(ddof=0)) if not jobs_per_engineer.empty else 0.0
     slots_std = float(slots_per_engineer.std(ddof=0)) if not slots_per_engineer.empty else 0.0
+    if not server_summary_active.empty and selected_region == "ALL":
+        server_jobs = server_summary_active.set_index(server_summary_code_col)["job_count"]
+        server_slots = server_summary_active.set_index(server_summary_code_col)["slot_count"]
+        jobs_per_engineer = server_jobs
+        slots_per_engineer = server_slots
+        avg_jobs_per_engineer = float(server_jobs.mean()) if not server_jobs.empty else 0.0
+        avg_slots_per_engineer = float(server_slots.mean()) if not server_slots.empty else 0.0
+        jobs_std = float(server_jobs.std(ddof=0)) if not server_jobs.empty else 0.0
+        slots_std = float(server_slots.std(ddof=0)) if not server_slots.empty else 0.0
     assigned_slot_count = int(slots_per_engineer.sum()) if not slots_per_engineer.empty else 0
     capacity_lookup = _build_engineer_slot_capacity_lookup(engineer_master_df)
     for engineer_code, capacity in _build_result_slot_capacity_lookup(result_payload).items():
@@ -2959,6 +3046,30 @@ def _build_result_view_state(subsidiary_name: str, strategic_city_name: str) -> 
                 "jobs_std": float(center_jobs.std(ddof=0)) if not center_jobs.empty else 0.0,
                 "slots_std": float(center_slots.std(ddof=0)) if not center_slots.empty else 0.0,
             }
+    if not server_summary_active.empty and selected_region == "ALL" and "assigned_center_type" in server_summary_active.columns:
+        server_center_df = server_summary_active.copy()
+        server_center_df["assigned_center_type"] = server_center_df["assigned_center_type"].fillna("").astype(str).str.upper().replace("", "UNKNOWN")
+        for center_type, center_df in server_center_df.groupby("assigned_center_type", dropna=False):
+            center_jobs = center_df["job_count"]
+            center_slots = center_df["slot_count"]
+            center_capacity = sum(
+                capacity_lookup.get(str(code).strip(), 8)
+                for code in center_df[server_summary_code_col].astype(str)
+            )
+            center_type_stats[str(center_type)] = {
+                "engineer_count": int(len(center_df)),
+                "job_count": int(center_jobs.sum()),
+                "avg_jobs": float(center_jobs.mean()) if not center_jobs.empty else 0.0,
+                "avg_slots": float(center_slots.mean()) if not center_slots.empty else 0.0,
+                "assigned_slots": int(center_slots.sum()),
+                "slot_capacity": int(center_capacity),
+                "fill_rate": float(center_slots.sum() / center_capacity) if center_capacity > 0 else 0.0,
+                "jobs_std": float(center_jobs.std(ddof=0)) if not center_jobs.empty else 0.0,
+                "slots_std": float(center_slots.std(ddof=0)) if not center_slots.empty else 0.0,
+                "avg_distance": float(pd.to_numeric(center_df.get("route_distance_km", 0), errors="coerce").fillna(0).mean()),
+                "avg_duration": float(pd.to_numeric(center_df.get("route_duration_min", 0), errors="coerce").fillna(0).mean()),
+            }
+
     engineer_summary_rows: list[dict[str, object]] = []
     route_group_by_code = {str(group["engineer_code"]): group for group in route_groups}
     result_engineer_summary_df = pd.DataFrame(result_payload.get("engineer_summary", [])) if isinstance(result_payload, dict) else pd.DataFrame()
@@ -2998,6 +3109,30 @@ def _build_result_view_state(subsidiary_name: str, strategic_city_name: str) -> 
                 }
             )
     engineer_summary_df = pd.DataFrame(engineer_summary_rows).sort_values(["slot_count", "job_count", "Technician"], ascending=[False, False, True]) if engineer_summary_rows else pd.DataFrame()
+    # For Smart Routing, use the server-produced engineer summary as the
+    # authoritative route/KPI source.  Rebuilding it from the local payload
+    # and schedule can reintroduce pre-routing slot values or a different
+    # route calculation.  Actual remains calculated from the Actual frames.
+    if compare_mode == "Smart Routing" and result_summary_by_code:
+        smart_summary_rows: list[dict[str, object]] = []
+        for code, row in result_summary_by_code.items():
+            name = str(row.get("SVC_ENGINEER_NAME", row.get("employee_name", code))).strip() or code
+            smart_summary_rows.append(
+                {
+                    "Technician": name,
+                    "job_count": int(pd.to_numeric(pd.Series([row.get("job_count", 0)]), errors="coerce").fillna(0).iloc[0]),
+                    "slot_count": int(pd.to_numeric(pd.Series([row.get("slot_count", 0)]), errors="coerce").fillna(0).iloc[0]),
+                    "route_distance_mile": round(float(row.get("route_distance_km", 0) or 0) * KM_TO_MILES, 2),
+                    "return_home_distance_mile": round(float(row.get("return_home_distance_km", 0) or 0) * KM_TO_MILES, 2),
+                    "service_time_min": float(row.get("service_time_min", 0) or 0),
+                    "total_working_min": float(row.get("total_work_min", 0) or 0),
+                    "total_day_duration_with_return_min": float(row.get("total_day_duration_with_return_min", 0) or 0),
+                }
+            )
+        engineer_summary_df = pd.DataFrame(smart_summary_rows).sort_values(
+            ["slot_count", "job_count", "Technician"],
+            ascending=[False, False, True],
+        )
     if engineer_summary_rows and center_type_stats:
         for center_type, code_list in (
             filtered_assignment.dropna(subset=["assigned_sm_code"])

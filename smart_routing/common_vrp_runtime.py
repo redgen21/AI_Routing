@@ -5,6 +5,7 @@ import threading
 import uuid
 import copy
 import hashlib
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,7 @@ from .vrp_api_service import create_job_id, run_routing_request
 
 
 COMMON_JOB_ARCHIVE_ROOT = Path("260310/common_vrp_api_jobs")
+LOGGER = logging.getLogger(__name__)
 AREA_TYPE_DMS = {"DMS", "DMS_CORE", "DMS_ONLY"}
 AREA_TYPE_OVERLAP = {"OVERLAP", "OVERLAB"}
 AREA_TYPE_DMS2 = {"DMS2", "DMS2_EXCLUSIVE", "DMS2_ONLY"}
@@ -607,7 +609,7 @@ def _default_time_limit_seconds(job_count: int, technician_count: int) -> int:
     if job_count <= 30:
         return 15
     if job_count <= 60:
-        return 30
+        return 60
     if job_count <= 100:
         return 60
     if job_count <= 150:
@@ -879,6 +881,40 @@ def _write_common_job_archive(
         error_path.unlink()
 
 
+def _safe_write_common_job_archive(
+    routing_job_id: str,
+    *,
+    request_payload: dict[str, Any] | None = None,
+    status_payload: dict[str, Any] | None = None,
+    result_payload: dict[str, Any] | None = None,
+    error_message: str | None = None,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> bool:
+    """Write the optional archive without failing the routing transaction.
+
+    The database request/result is authoritative.  A missing or unwritable
+    archive directory must be observable in logs, but must not kill the worker
+    before it can persist the routing result.
+    """
+    try:
+        _write_common_job_archive(
+            routing_job_id,
+            request_payload=request_payload,
+            status_payload=status_payload,
+            result_payload=result_payload,
+            error_message=error_message,
+            config_path=config_path,
+        )
+        return True
+    except Exception:
+        LOGGER.exception(
+            "Common VRP job archive write failed; continuing without archive: job_id=%s config=%s",
+            routing_job_id,
+            config_path,
+        )
+        return False
+
+
 def _update_routing_request_status(
     request_row: dict[str, Any],
     status_payload: dict[str, Any],
@@ -917,7 +953,7 @@ def _process_common_routing_job(
     running_status["started_at"] = _utc_now_iso()
     running_status["updated_at"] = _utc_now_iso()
     _update_routing_request_status(request_row, running_status, config_path=config_path)
-    _write_common_job_archive(
+    _safe_write_common_job_archive(
         routing_job_id,
         request_payload=request_payload,
         status_payload=running_status,
@@ -952,7 +988,7 @@ def _process_common_routing_job(
             },
             config_path=config_path,
         )
-        _write_common_job_archive(
+        _safe_write_common_job_archive(
             routing_job_id,
             request_payload=request_payload,
             status_payload=completed_status,
@@ -966,7 +1002,7 @@ def _process_common_routing_job(
         failed_status["updated_at"] = _utc_now_iso()
         failed_status["error_message"] = str(exc)
         _update_routing_request_status(request_row, failed_status, config_path=config_path)
-        _write_common_job_archive(
+        _safe_write_common_job_archive(
             routing_job_id,
             request_payload=request_payload,
             status_payload=failed_status,
@@ -1573,7 +1609,7 @@ def submit_routing_from_payload(
         "status_json": json.dumps(initial_status, ensure_ascii=False),
     }
     upsert_routing_request(request_row, config_path=config_path)
-    _write_common_job_archive(
+    _safe_write_common_job_archive(
         routing_job_id,
         request_payload=enriched_payload,
         status_payload=initial_status,

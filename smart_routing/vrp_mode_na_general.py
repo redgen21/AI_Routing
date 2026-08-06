@@ -738,6 +738,33 @@ def _build_response_payload(
                 }
             )
 
+    # Keep the public technician summary consistent with the public
+    # assignments.  Both are derived from the same route internally, but
+    # schedule post-processing can otherwise leave a stale slot_count in the
+    # summary while assignments contain the normalized per-job slot values.
+    if assignments and not summary_df.empty and "SVC_ENGINEER_CODE" in summary_df.columns:
+        assignment_frame = pd.DataFrame(assignments)
+        assignment_frame["employee_code"] = assignment_frame["employee_code"].astype(str).str.strip()
+        assignment_frame["job_slot_count"] = pd.to_numeric(
+            assignment_frame["job_slot_count"], errors="coerce"
+        ).fillna(1).astype(int).clip(lower=1)
+        assignment_counts = (
+            assignment_frame.groupby("employee_code", dropna=False)
+            .agg(
+                job_count=("receipt_no", "nunique"),
+                slot_count=("job_slot_count", "sum"),
+            )
+            .reset_index()
+        )
+        summary_df = summary_df.drop(columns=["job_count", "slot_count"], errors="ignore").merge(
+            assignment_counts,
+            left_on="SVC_ENGINEER_CODE",
+            right_on="employee_code",
+            how="left",
+        ).drop(columns=["employee_code"], errors="ignore")
+        summary_df["job_count"] = pd.to_numeric(summary_df["job_count"], errors="coerce").fillna(0).astype(int)
+        summary_df["slot_count"] = pd.to_numeric(summary_df["slot_count"], errors="coerce").fillna(0).astype(int)
+
     diagnostics_payload["fixed_technician_outside_active_plan_relaxed_job_count"] = len(
         fixed_outside_active_plan_relaxed_receipts
     )
@@ -797,6 +824,11 @@ def _build_response_payload(
     diagnostics_payload["relaxations_applied"] = relaxations_applied
     diagnostics_payload["routing_condition_messages"] = messages
 
+    candidate_analysis_by_receipt = {
+        str(entry.get("receipt_no", "")).strip(): entry.get("candidates", [])
+        for entry in (diagnostics_payload.get("unassigned_candidate_analysis") or [])
+        if isinstance(entry, dict)
+    }
     unassigned: list[dict[str, Any]] = []
     for job in jobs:
         receipt_no = str(job.get("receipt_no", "") or job.get("salesforce_id", "")).strip()
@@ -835,6 +867,7 @@ def _build_response_payload(
                 "reschedule": reschedule,
                 "current_employee_code": current_employee_code,
                 "fixed_technician_outside_active_plan_relaxed": fixed_outside_active_plan_relaxed,
+                "candidate_analysis": candidate_analysis_by_receipt.get(receipt_no, []),
             }
         )
 
@@ -1235,6 +1268,21 @@ def run_mode(request_payload: dict[str, Any]) -> dict[str, Any]:
     stage_timings["primary_solver_pipeline_ms"] = round((time.perf_counter() - primary_started) * 1000.0, 2)
     diagnostics["matrix_telemetry"] = route_client.get_matrix_telemetry()
     diagnostics["adaptive_objective"] = getattr(route_client, "_vrp_objective_diagnostics", {})
+    unassigned_candidate_analysis = getattr(
+        route_client, "_vrp_unassigned_candidate_analysis", []
+    )
+    diagnostics["unassigned_candidate_analysis"] = (
+        unassigned_candidate_analysis
+        if isinstance(unassigned_candidate_analysis, list)
+        else []
+    )
+    if isinstance(diagnostics["adaptive_objective"], dict):
+        diagnostics["priority_load_objective_enabled"] = bool(
+            diagnostics["adaptive_objective"].get(
+                "priority_load_objective_enabled",
+                diagnostics.get("priority_load_objective_enabled", False),
+            )
+        )
     diagnostics["assignment_frame_count"] = int(len(assignment_df)) if assignment_df is not None else 0
     diagnostics["summary_frame_count"] = int(len(summary_df)) if summary_df is not None else 0
     diagnostics["schedule_frame_count"] = int(len(schedule_df)) if schedule_df is not None else 0
