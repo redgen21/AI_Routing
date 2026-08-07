@@ -4,8 +4,10 @@ import json
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
+from shapely.geometry import Point
 
 from .census_geocoder import CensusBatchGeocoder, build_address_key, load_geocode_cache, merge_service_with_geocodes
 from .data_catalog import na_data_path
@@ -13,7 +15,7 @@ from .google_geocoder import GoogleGeocoder
 from .here_geocoder import HereGeocoder
 from .us_geocode_cleaner import build_us_geocode_query_variants
 from . import production_atlanta as prod
-from .area_map import get_latest_geocoded_service_file
+from .area_map import _load_zcta_subset, get_latest_geocoded_service_file
 from .service_preprocess import normalize_service_df
 
 
@@ -25,6 +27,126 @@ FALLBACK_REGION_ZIP_PATH = Path("260310/production_input/atlanta_fixed_region_zi
 DEFAULT_ENGINEER_REGION_PATH = na_data_path("atlanta_engineer_region")
 DEFAULT_HOME_GEOCODE_PATH = na_data_path("atlanta_engineer_home")
 DEFAULT_HEAVY_REPAIR_LOOKUP_PATH = na_data_path("heavy_repair_lookup")
+DEFAULT_ZCTA_ZIP_PATH = na_data_path("zcta_geometry")
+_POSTAL_REFERENCE_CACHE: dict[tuple[str, tuple[str, ...]], dict[str, dict[str, Any]]] = {}
+
+
+def _postal_fallback_settings(config: dict) -> tuple[bool, Path]:
+    geocoding_cfg = config.get("geocoding", {})
+    enabled = geocoding_cfg.get("postal_fallback_enabled", True)
+    if isinstance(enabled, str):
+        enabled = enabled.strip().lower() in {"1", "true", "yes", "y", "on"}
+    configured_path = (
+        geocoding_cfg.get("postal_fallback_zcta_zip_file")
+        or geocoding_cfg.get("zcta_zip_file")
+        or (config.get("area_map_usa", {}) or {}).get("zcta_zip_file")
+        or (config.get("area_map", {}) or {}).get("zcta_zip_file")
+        or DEFAULT_ZCTA_ZIP_PATH
+    )
+    configured_zcta_path = Path(str(configured_path))
+    if not configured_zcta_path.exists() and DEFAULT_ZCTA_ZIP_PATH.exists():
+        configured_zcta_path = DEFAULT_ZCTA_ZIP_PATH
+    return bool(enabled), configured_zcta_path
+
+
+def _load_postal_reference(postal_codes: list[str], zcta_path: Path) -> dict[str, dict[str, Any]]:
+    normalized = tuple(sorted({str(value).strip().zfill(5) for value in postal_codes if str(value).strip()}))
+    if not normalized or not zcta_path.exists():
+        return {}
+    cache_key = (str(zcta_path.resolve()), normalized)
+    if cache_key in _POSTAL_REFERENCE_CACHE:
+        return _POSTAL_REFERENCE_CACHE[cache_key]
+    try:
+        zcta = _load_zcta_subset(zcta_path, list(normalized))
+    except Exception:
+        return {}
+    reference: dict[str, dict[str, Any]] = {}
+    for _, row in zcta.iterrows():
+        postal = str(row.get("POSTAL_CODE", "")).strip().zfill(5)
+        try:
+            lat = float(row.get("INTPTLAT20"))
+            lon = float(row.get("INTPTLON20"))
+        except (TypeError, ValueError):
+            continue
+        reference[postal] = {"latitude": lat, "longitude": lon, "geometry": row.get("geometry")}
+    _POSTAL_REFERENCE_CACHE[cache_key] = reference
+    return reference
+
+
+def _provider_coordinate_is_trusted(row: pd.Series) -> bool:
+    source = str(row.get("source", "")).strip().lower()
+    if source not in {"us_census_geocoder", "here_geocoding_api", "google_geocoding_api"}:
+        return True
+    matched = str(row.get("matched_address", "")).strip().upper()
+    match_type = str(row.get("match_type", "")).strip().upper()
+    postal = str(row.get("POSTAL_CODE", "")).strip().replace(".0", "").zfill(5)
+    city = str(row.get("CITY_NAME", "")).strip().upper()
+    if not matched or not postal or postal not in matched:
+        return False
+    if city and city not in matched:
+        return False
+    if any(token in match_type for token in ("APPROXIMATE", "GEOMETRIC_CENTER", "LOCALITY")):
+        return False
+    return True
+
+
+def _apply_postal_coordinate_fallback(df: pd.DataFrame, config: dict) -> pd.DataFrame:
+    """Reject off-postal/low-quality geocodes and use a ZCTA internal point.
+
+    The fallback is deliberately marked approximate. It prevents a provider's
+    road or locality result from sending a job to another ZIP/state while
+    preserving the fact that the job does not have an exact rooftop coordinate.
+    """
+    enabled, zcta_path = _postal_fallback_settings(config)
+    if not enabled or df.empty or "POSTAL_CODE" not in df.columns:
+        return df
+    output = df.copy()
+    postal_codes = output["POSTAL_CODE"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip().str.zfill(5).tolist()
+    references = _load_postal_reference(postal_codes, zcta_path)
+    if not references:
+        return output
+    for column, default in [
+        ("coordinate_quality", ""),
+        ("coordinate_source", ""),
+        ("coordinate_warning", False),
+        ("coordinate_warning_reason", ""),
+    ]:
+        if column not in output.columns:
+            output[column] = default
+
+    output["latitude"] = pd.to_numeric(output.get("latitude"), errors="coerce")
+    output["longitude"] = pd.to_numeric(output.get("longitude"), errors="coerce")
+    for index, row in output.iterrows():
+        postal = str(row.get("POSTAL_CODE", "")).strip().replace(".0", "").zfill(5)
+        reference = references.get(postal)
+        if reference is None:
+            continue
+        reasons: list[str] = []
+        if not _provider_coordinate_is_trusted(row):
+            reasons.append("LOW_QUALITY_OR_POSTAL_MISMATCH")
+        lat = row.get("latitude")
+        lon = row.get("longitude")
+        if pd.isna(lat) or pd.isna(lon):
+            reasons.append("MISSING_COORDINATE")
+        else:
+            try:
+                point = Point(float(lon), float(lat))
+                geometry = reference.get("geometry")
+                if geometry is not None and not (geometry.contains(point) or geometry.touches(point)):
+                    reasons.append("OUTSIDE_POSTAL_BOUNDARY")
+            except (TypeError, ValueError):
+                reasons.append("INVALID_COORDINATE")
+        if not reasons:
+            continue
+        output.at[index, "latitude"] = reference["latitude"]
+        output.at[index, "longitude"] = reference["longitude"]
+        output.at[index, "coordinate_quality"] = "POSTAL_CENTROID"
+        output.at[index, "coordinate_source"] = "zcta_intpt"
+        output.at[index, "coordinate_warning"] = True
+        output.at[index, "coordinate_warning_reason"] = ";".join(dict.fromkeys(reasons))
+        output.at[index, "geocode_status"] = "APPROXIMATE"
+        output.at[index, "source"] = "postal_centroid_fallback"
+    return output
 
 
 @dataclass
@@ -72,7 +194,23 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
     if latest_geocoded_service and latest_geocoded_service.exists() and "GSFS_RECEIPT_NO" in merged_input_df.columns:
         try:
             receipt_geo_df = pd.read_csv(latest_geocoded_service, encoding="utf-8-sig", low_memory=False)
-            keep_cols = [col for col in ["GSFS_RECEIPT_NO", "latitude", "longitude", "matched_address", "match_indicator", "match_type", "census_state_fips", "census_county_fips", "census_tract", "census_block", "geocoded_date", "source"] if col in receipt_geo_df.columns]
+            if "address_key" not in receipt_geo_df.columns:
+                def _receipt_address_key(row: pd.Series) -> str:
+                    def _pick(*names: str) -> str:
+                        for name in names:
+                            value = row.get(name, "")
+                            if pd.notna(value) and str(value).strip():
+                                return str(value).strip()
+                        return ""
+                    return build_address_key(
+                        _pick("ADDRESS_LINE1_INFO", "address_line1"),
+                        _pick("CITY_NAME", "city"),
+                        _pick("STATE_NAME", "state"),
+                        _pick("POSTAL_CODE", "postal_code"),
+                        _pick("COUNTRY_NAME", "country_name"),
+                    )
+                receipt_geo_df["address_key"] = receipt_geo_df.apply(_receipt_address_key, axis=1)
+            keep_cols = [col for col in ["GSFS_RECEIPT_NO", "address_key", "latitude", "longitude", "matched_address", "match_indicator", "match_type", "census_state_fips", "census_county_fips", "census_tract", "census_block", "geocoded_date", "source"] if col in receipt_geo_df.columns]
             if {"GSFS_RECEIPT_NO", "latitude", "longitude"}.issubset(keep_cols):
                 receipt_geo_df = (
                     receipt_geo_df[keep_cols]
@@ -82,6 +220,7 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
                 merged_input_df = merged_input_df.merge(
                     receipt_geo_df.rename(
                         columns={
+                            "address_key": "receipt_address_key",
                             "latitude": "receipt_latitude",
                             "longitude": "receipt_longitude",
                             "matched_address": "receipt_matched_address",
@@ -112,7 +251,11 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
     merged_df = merge_service_with_geocodes(merged_input_df, cache_df)
 
     if "receipt_latitude" in merged_df.columns and "receipt_longitude" in merged_df.columns:
-        receipt_mask = merged_df["receipt_latitude"].notna() & merged_df["receipt_longitude"].notna()
+        # Do not reuse coordinates by receipt number.  A receipt can retain
+        # stale or low-quality coordinates even when the job is edited (and
+        # the address itself may be unchanged).  Address-key cache/geocoding
+        # and postal fallback are the authoritative sources.
+        receipt_mask = pd.Series(False, index=merged_df.index)
         merged_df.loc[receipt_mask, "latitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_latitude"], errors="coerce")
         merged_df.loc[receipt_mask, "longitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_longitude"], errors="coerce")
         for source_col, target_col in [
@@ -159,7 +302,7 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
         cache_df = _combined_geocode_cache(census_cache_path, here_cache_path, google_cache_path)
         merged_df = merge_service_with_geocodes(merged_input_df, cache_df)
         if "receipt_latitude" in merged_df.columns and "receipt_longitude" in merged_df.columns:
-            receipt_mask = merged_df["receipt_latitude"].notna() & merged_df["receipt_longitude"].notna()
+            receipt_mask = pd.Series(False, index=merged_df.index)
             merged_df.loc[receipt_mask, "latitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_latitude"], errors="coerce")
             merged_df.loc[receipt_mask, "longitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_longitude"], errors="coerce")
             merged_df.loc[receipt_mask, "source"] = merged_df.get("receipt_source", pd.Series(index=merged_df.index)).fillna("receipt_lookup")
@@ -191,7 +334,7 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
         cache_df = _combined_geocode_cache(census_cache_path, here_cache_path, google_cache_path)
         merged_df = merge_service_with_geocodes(merged_input_df, cache_df)
         if "receipt_latitude" in merged_df.columns and "receipt_longitude" in merged_df.columns:
-            receipt_mask = merged_df["receipt_latitude"].notna() & merged_df["receipt_longitude"].notna()
+            receipt_mask = pd.Series(False, index=merged_df.index)
             merged_df.loc[receipt_mask, "latitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_latitude"], errors="coerce")
             merged_df.loc[receipt_mask, "longitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_longitude"], errors="coerce")
             merged_df.loc[receipt_mask, "source"] = merged_df.get("receipt_source", pd.Series(index=merged_df.index)).fillna("receipt_lookup")
@@ -270,7 +413,7 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
             cache_df = _combined_geocode_cache(census_cache_path, here_cache_path, google_cache_path)
             merged_df = merge_service_with_geocodes(merged_input_df, cache_df)
             if "receipt_latitude" in merged_df.columns and "receipt_longitude" in merged_df.columns:
-                receipt_mask = merged_df["receipt_latitude"].notna() & merged_df["receipt_longitude"].notna()
+                receipt_mask = pd.Series(False, index=merged_df.index)
                 merged_df.loc[receipt_mask, "latitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_latitude"], errors="coerce")
                 merged_df.loc[receipt_mask, "longitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_longitude"], errors="coerce")
                 merged_df.loc[receipt_mask, "source"] = merged_df.get("receipt_source", pd.Series(index=merged_df.index)).fillna("receipt_lookup")
@@ -300,11 +443,12 @@ def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
         cache_df = _combined_geocode_cache(census_cache_path, here_cache_path, google_cache_path)
         merged_df = merge_service_with_geocodes(merged_input_df, cache_df)
         if "receipt_latitude" in merged_df.columns and "receipt_longitude" in merged_df.columns:
-            receipt_mask = merged_df["receipt_latitude"].notna() & merged_df["receipt_longitude"].notna()
+            receipt_mask = pd.Series(False, index=merged_df.index)
             merged_df.loc[receipt_mask, "latitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_latitude"], errors="coerce")
             merged_df.loc[receipt_mask, "longitude"] = pd.to_numeric(merged_df.loc[receipt_mask, "receipt_longitude"], errors="coerce")
             merged_df.loc[receipt_mask, "source"] = merged_df.get("receipt_source", pd.Series(index=merged_df.index)).fillna("receipt_lookup")
 
+    merged_df = _apply_postal_coordinate_fallback(merged_df, config)
     merged_df = merged_df.drop(
         columns=[col for col in merged_df.columns if col.startswith("receipt_")],
         errors="ignore",

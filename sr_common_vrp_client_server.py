@@ -747,6 +747,26 @@ def _estimate_service_time_min(row: pd.Series) -> float:
     return 100.0 if is_heavy else 45.0
 
 
+def _normalize_heavy_repair_slots(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply the same minimum two-slot rule to Actual rows as Smart Routing."""
+    working = df.copy()
+    if "job_slot_count" not in working.columns:
+        working["job_slot_count"] = 1
+    working["job_slot_count"] = _coerce_job_slot_count_series(working["job_slot_count"])
+    heavy_mask = pd.Series(False, index=working.index)
+    if "is_heavy_repair" in working.columns:
+        heavy_mask = working["is_heavy_repair"].map(_coerce_bool_value)
+    # Some Actual payloads do not carry the heavy-repair flag, but retain the
+    # normalized service duration.  A 100-minute service is the same two-slot
+    # service convention used by Smart Routing.
+    if "service_time_min" in working.columns:
+        service_minutes = pd.to_numeric(working["service_time_min"], errors="coerce").fillna(0)
+        heavy_mask = heavy_mask | service_minutes.ge(100)
+    if heavy_mask.any():
+        working.loc[heavy_mask, "job_slot_count"] = working.loc[heavy_mask, "job_slot_count"].clip(lower=2)
+    return working
+
+
 def build_map(
     strategic_city_name: str,
     region_name: str,
@@ -2743,6 +2763,7 @@ def _build_common_actual_frames(
             "address_line1_info": "ADDRESS_LINE1_INFO",
         }
     ).copy()
+    actual_df = _normalize_heavy_repair_slots(actual_df)
     actual_df["service_date_key"] = actual_df["promise_date"].astype(str).map(
         lambda value: f"{value[:4]}-{value[4:6]}-{value[6:8]}" if len(str(value)) == 8 else str(value)
     )
@@ -3020,6 +3041,9 @@ def _build_result_view_state(subsidiary_name: str, strategic_city_name: str) -> 
     capacity_lookup = _build_engineer_slot_capacity_lookup(engineer_master_df)
     for engineer_code, capacity in _build_result_slot_capacity_lookup(result_payload).items():
         capacity_lookup.setdefault(str(engineer_code).strip(), int(capacity))
+    # Fill Rate denominator is the sum of the selected technicians' declared
+    # slot capacities.  Heavy-repair normalization belongs in the numerator;
+    # do not manufacture extra capacity in the denominator.
     assigned_slot_capacity = sum(capacity_lookup.get(str(engineer_code).strip(), 8) for engineer_code in slots_per_engineer.index)
     slot_occupancy_rate = float(assigned_slot_count / assigned_slot_capacity) if assigned_slot_capacity > 0 else 0.0
     center_type_stats: dict[str, dict[str, float | int]] = {}
@@ -4236,7 +4260,10 @@ def _direct_job_dialog(
             if edit_record is not None and not success_df.empty:
                 success_df.loc[:, "record_id"] = str(edit_record["record_id"])
             _save_local_jobs(subsidiary_name, strategic_city_name, _job_rows_to_df(_build_job_upsert_rows(success_df)))
-            _close_common_job_dialog()
+            # The existing payload may contain the pre-edit coordinates.  It
+            # must not survive an edit and be submitted again on the next
+            # routing run.
+            _clear_common_runtime_state()
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
@@ -4725,6 +4752,23 @@ def _render_payload_tab(subsidiary_name: str, strategic_city_name: str) -> None:
     if st.button("Build Payload", type="primary", width="stretch"):
         try:
             with st.spinner("Building payload..."):
+                # Refresh immediately before building.  The jobs tab can save
+                # edited coordinates while this Streamlit session still holds
+                # an older selected_jobs_df snapshot.
+                fresh_source_city_name, fresh_jobs_df, fresh_technicians_df = _load_payload_source_rows(
+                    subsidiary_name, strategic_city_name, str(selected_date)
+                )
+                fresh_technicians_df = _normalize_technician_rows(
+                    fresh_technicians_df,
+                    engineer_master_df,
+                    subsidiary_name,
+                    strategic_city_name,
+                    str(selected_date),
+                    default_source="manual_input",
+                )
+                fresh_capability_rows = _build_capability_rows_for_payload(
+                    strategic_city_name, fresh_technicians_df, fresh_jobs_df
+                )
                 response = _api_post(
                     DEFAULT_COMMON_SERVER_URL,
                     "/api/v1/common/routing/build-payload",
@@ -4732,9 +4776,9 @@ def _render_payload_tab(subsidiary_name: str, strategic_city_name: str) -> None:
                         subsidiary_name,
                         strategic_city_name,
                         str(selected_date),
-                        selected_jobs_df,
-                        technicians_df,
-                        capability_rows,
+                        fresh_jobs_df,
+                        fresh_technicians_df,
+                        fresh_capability_rows,
                     ),
                 )
             payload = response.get("payload")

@@ -50,6 +50,17 @@ Codex 작업일지. 새 작업은 맨 위에 추가한다.
 - Smart Routing 상단 KPI(평균 거리/시간, jobs·slots 평균/표준편차, DMS/DMS2 통계)가 로컬 route 재계산값을 사용하던 문제를 확인해 서버 `engineer_summary` 기준으로 통일함. Actual 및 region filter는 기존 별도 경로를 유지함.
 - Region Staffing은 Smart Routing 선택 시 서버 assignments에서 생성된 `filtered_assignment`를 사용하므로, 최신 assignment 기준 region별 인원/서비스 건수를 표시함.
 - 최신 UI 파일 SHA-256: `ca702f129f9049cf424e503423470d235a311c293e68f3d0b821d65142d416ca`; compile 및 관련 테스트 8개 통과.
+- Actual에도 Smart Routing과 동일한 heavy repair 최소 2슬롯 정규화를 적용하는 `_normalize_heavy_repair_slots()`를 추가하고 `_build_common_actual_frames()`에서 사용함.
+- 최신 UI 파일 SHA-256: `298b4d2ef0e7fc094a2cb950f688c50d0d687ac47cec6de5c8f38367a6f93c8e`; compile 및 관련 테스트 8개 통과.
+- Fill Rate 분모 보정: heavy-repair 정규화로 assigned slots가 raw technician capacity보다 커질 때 표시용 effective capacity를 `max(raw_capacity, assigned_slots)`로 사용하도록 수정. DMS/DMS2별 Fill Rate에도 동일 적용.
+- 최신 UI 파일 SHA-256: `5cd3ea6361c70817ac7d6017bdff0ea515de272c761bfaef8abad3728073f9d4`; compile 및 관련 테스트 8개 통과.
+- 사용자 요청에 따라 Fill Rate 분모를 다시 기사별 선언 `slot_count` 합계로 확정하고 effective-capacity 보정을 제거함. Heavy repair 정규화 슬롯은 분자에만 반영됨.
+- 최신 UI 파일 SHA-256: `f279edea3a886c2a4bf9ffdd28827e99b476a424ec6cde886992d96dadabb22a`; compile 및 관련 테스트 8개 통과.
+- Actual heavy-repair 보정이 flag 누락 payload에서 적용되지 않던 문제를 추가 수정함. `is_heavy_repair=true` 또는 `service_time_min >= 100`인 Actual job은 최소 2슬롯으로 정규화.
+- 최신 UI 파일 SHA-256: `a2917a06577e83740156b43d22e36195d6c064e028fd42727d70883436ab4211`; compile 및 관련 테스트 8개 통과.
+- `routing_statistics_20260729_20260806.xlsx` 분석: 8/4 제외. 8/5는 65 jobs/91 input slots, 20 fixed jobs/33 fixed slots, 11 technicians이며 Smart Routing 64 assigned/1 unassigned, 92 normalized assigned slots, total route 934.22 mile, average 84.93 mile, RUDY/Richard/Frank 등 장거리 및 Frank 629.96분이 확인됨.
+- 8/5 미배정은 `RNN260803084931` 1건이며 Jason은 잔여 1슬롯이나 `NO_FEASIBLE_ROUTE`, Richard/RUDY는 slot full, 두 후보는 unavailable. 따라서 단순 slot-balance 문제로 단정하지 않고, 고정 작업 지리 분산/후보 경로 제약이 원인으로 분류함.
+- 8/5만 개선하는 전역 objective 변경은 7/29·7/30·7/31·8/3·8/6 결과를 악화시킬 위험이 있어 아직 Solver 정책을 변경하지 않음.
 
 ## 2026-08-07 — Claude 변경사항 검토
 
@@ -85,3 +96,23 @@ Codex 작업일지. 새 작업은 맨 위에 추가한다.
 - 단일 구간 거리 제한은 여전히 km가 아니라 `max_single_leg_min` 시간 기준
 - 실제 서버 반영 여부는 배포 후 SHA-256과 diagnostics로 확인해야 함
 - 이번 턴에는 서버 업로드·재시작을 하지 않음
+- 8/5 fixed 분석: 전역 Solver 변경 없이 fixed 위치 분산과 후보 경로 제약을 진단함.
+
+## 2026-08-07 8/5 fixed 공간분산 및 후보경로 분석
+
+- 8/5 fixed 20건/33슬롯, 전체 65건/91슬롯을 확인함.
+- AI103264의 fixed 작업 중 ZIP 30047 두 건이 113.5km 떨어져 있음.
+- `4121 GA-78` 좌표 `(33.748902, -85.3644752)`는 같은 ZIP의 다른 fixed 좌표와 크게 이격되어 좌표 이상 후보로 기록함.
+- 날짜 전용 예외가 아닌 일반화 방향으로 fixed-anchor route lower bound, fixed 공간분산/시간부담 지표, 후보별 fixed 경로 증분 OSRM 비용을 자동 계산하는 정책을 제안함.
+- 2026-08-07 ZIP fallback geocoding: provider 좌표의 ZIP/도시 불일치 및 approximate 결과를 거부하고 ZCTA internal point를 POSTAL_CENTROID로 사용하도록 추가.
+- fallback에는 coordinate_warning, coordinate_warning_reason, geocode_status=APPROXIMATE 메타데이터를 기록.
+- 4121 GA-78 재현에서 잘못된 HERE 좌표가 30047 ZCTA 중심점으로 대체됨.
+- tests/test_live_atlanta_geocode_fallback.py 추가; 관련 테스트 17개 통과 및 compile 확인.
+- 7/29~8/6 Jobs 460건 검증: 정상 날짜(7/29, 7/30, 7/31, 8/3, 8/5, 8/6)는 fallback 0건.
+- 8/5 `RNN260720013325` 1건만 ZIP polygon 밖 좌표로 fallback.
+- 8/4는 별도 데이터 오류로 알려진 `RNN260727050862` 1건도 ZIP 밖으로 탐지됨.
+- 2026-08-07: Fixed receipt-based geocode reuse in `smart_routing/live_atlanta_runtime.py`. Existing coordinates are now reused only when the incoming address key matches the address stored with the receipt; edited addresses proceed through fresh geocoding/ZIP fallback. Python compile and `tests/test_live_atlanta_geocode_fallback.py` (2 tests) passed.
+- 2026-08-07: Verified `acc11f6b/request.json` still contained the stale `RNN260720013325` coordinate `(33.748902, -85.3644752)`. Disabled receipt-number coordinate reuse entirely in `live_atlanta_runtime.py`; edited jobs now rely on address geocoding/cache and postal fallback, preventing stale same-receipt coordinates from returning.
+- 2026-08-07: Found production fallback configuration could point to a missing relative ZCTA path, allowing the bad address-cache coordinate to survive. Added an automatic fallback to the active catalog-resolved `DEFAULT_ZCTA_ZIP_PATH` when the configured path does not exist.
+- 2026-08-07: Confirmed API job master stores `RNN260720013325` at `(33.8701249, -84.1123222)`. Updated `sr_common_vrp_client_server.py` so Build Payload refreshes jobs/technicians/capabilities from the API immediately before submission, preventing a stale Streamlit session snapshot from restoring old coordinates.
+- 2026-08-07: Fixed Edit Job session invalidation. After a successful job edit, the API row was updated correctly but the pre-edit `common_vrp_payload` remained in Streamlit session state. Edit save now clears payload, request, result, and statistics state before rerun.
