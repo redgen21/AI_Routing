@@ -1200,6 +1200,8 @@ def build_map(
     area_layer = _filter_area_type(area_layer, selected_area_types)
     zip_layer = _filter_area_type(zip_layer, selected_area_types)
     service_df = _filter_area_type(service_df, selected_area_types)
+    if "service_date" not in service_df.columns:
+        service_df["service_date"] = pd.NaT
     service_df["service_date_key"] = pd.to_datetime(service_df["service_date"]).dt.strftime("%Y-%m-%d")
     if not _is_all_area_selection(area_names):
         selected_area_set = {str(area).strip() for area in area_names if str(area).strip()}
@@ -1999,6 +2001,8 @@ def main():
             _, area_layer, service_df = _get_selected_frames(explorer_data, selected_region_count)
         service_df = service_df.copy()
         service_df = _apply_service_scope_filters(service_df, selected_subsidiary, selected_strategic_city)
+        if "service_date" not in service_df.columns:
+            service_df["service_date"] = pd.NaT
         service_df["service_date_key"] = pd.to_datetime(service_df["service_date"]).dt.strftime("%Y-%m-%d")
         service_df = _apply_center_bucket_rules(service_df, selected_region_count)
 

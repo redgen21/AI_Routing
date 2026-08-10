@@ -1,6 +1,6 @@
 {
   "schema": "north-america-routing-data-catalog/v1",
-  "data_root": "/home/csda/AI_Routing/shared/north_america",
+  "data_root": "data/north_america",
   "active": {
     "service_raw": "raw/service/202607101026/_SELECT_T21_CORP_STD1_NAME_AS_SUBSIDIARY_NAME_T19_STRATEGIC_CITY_202607101026.csv",
     "service_geocoded": "processed/service/202607071543/Service_202607071543_normalized_geocoded.csv",

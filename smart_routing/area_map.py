@@ -25,7 +25,7 @@ BUCKET_SIM_DRAFT_REGION_COUNT = -901
 AREA_TYPE_CLUSTER_REGION_COUNT = -902
 DEFAULT_CITY = "Atlanta, GA"
 ALL_CITIES = "ALL"
-CACHE_VERSION = "2026-07-15-fixed-region-cache-v16"
+CACHE_VERSION = "2026-08-07-fixed-region-cache-v17"
 ZIP_SIMPLIFY_TOLERANCE_M = 120
 AREA_SIMPLIFY_TOLERANCE_M = 180
 CONTEXT_SIMPLIFY_TOLERANCE_M = 250
@@ -95,7 +95,13 @@ def _configured_area_map_path(key: str, default_path: Path, config_section: str 
     config = _load_json_config(DEFAULT_CONFIG_FILE)
     area_map_cfg = config.get(config_section, {})
     value = str(area_map_cfg.get(key, "")).strip()
-    return Path(value) if value else default_path
+    if not value:
+        return default_path
+    configured_path = Path(value)
+    # The shared config is used by both local map tools and production.  A
+    # production absolute path may be present locally but cannot exist on the
+    # local OS; use the active local catalog artifact in that case.
+    return configured_path if configured_path.exists() else default_path
 
 
 def _is_asia_service_df(service_df: pd.DataFrame) -> bool:
@@ -512,6 +518,12 @@ def get_latest_geocoded_service_file(input_dir: Path = INPUT_DIR, config_section
     configured = _configured_service_file(config_section=config_section)
     if configured is not None:
         return configured
+    # The active catalog is authoritative for the runtime service source.
+    # This is especially important for the local map, where the area-map
+    # config may still contain a production-only absolute path.
+    catalog_service = na_data_path("service_geocoded")
+    if _is_valid_service_file(catalog_service):
+        return catalog_service
     candidates = sorted(input_dir.glob("Service_*_geocoded.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
     for candidate in candidates:
         if _is_valid_service_file(candidate):
@@ -601,16 +613,24 @@ def load_service_points(service_file: Path | None) -> pd.DataFrame:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     date_candidates = [
         "PROMISE_DATE",
+        "PROMISE_TIMESTAMP",
+        "FIRST_PROMISE_TIMESTAMP",
         "REPAIR_END_DATE_YYYYMMDD",
+        "REPAIR_END_TIMESTAMP",
         "REPAIR_RECEIPT_DATE_YYYYMMDD",
+        "REPAIR_RECEIPT_TIMESTAMP",
         "GERP_INPUT_DATE_YYYYMMDD_ID_LAST",
     ]
     for date_col in date_candidates:
         if date_col in df.columns:
             date_text = df[date_col].astype(str).str.replace(r"\.0+$", "", regex=True).str.strip()
             df["service_date"] = pd.to_datetime(date_text, format="%Y%m%d", errors="coerce")
+            if df["service_date"].isna().all():
+                df["service_date"] = pd.to_datetime(date_text, errors="coerce")
             if df["service_date"].notna().any():
                 break
+    if "service_date" not in df.columns:
+        df["service_date"] = pd.NaT
     if "source" in df.columns:
         df = df[df["source"].astype(str).str.strip().ne("failed")].copy()
     if {"latitude", "longitude"}.issubset(df.columns):
@@ -1159,6 +1179,19 @@ def _build_routing_clients(routing_cfg: dict) -> tuple[dict[str, OSRMTripClient]
 
 
 def _build_current_service_assignments(service_city: pd.DataFrame, zip_city: pd.DataFrame) -> pd.DataFrame:
+    service_city = service_city.copy()
+    if "POSTAL_CODE" not in service_city.columns:
+        # Older cached service frames may predate the canonical postal column.
+        # Keep the explorer usable and force the next cache rebuild through the
+        # cache version above instead of failing during the merge.
+        service_city["AREA_NAME"] = "Unassigned"
+        engineer_series = service_city["SVC_ENGINEER_CODE"] if "SVC_ENGINEER_CODE" in service_city.columns else pd.Series("", index=service_city.index)
+        service_city["assignment_unit_id"] = engineer_series.astype(str).str.strip()
+        service_city["assigned_sm_code"] = service_city["assignment_unit_id"]
+        service_city["scenario"] = "current"
+        service_city["display_region_name"] = service_city["AREA_NAME"]
+        service_city["display_region_seq"] = pd.NA
+        return service_city
     primary_area = _build_primary_area_assignment(zip_city)[["POSTAL_CODE", "AREA_NAME"]].copy()
     current_df = service_city.merge(primary_area, on="POSTAL_CODE", how="left")
     current_df["AREA_NAME"] = current_df["AREA_NAME"].fillna("Unassigned")

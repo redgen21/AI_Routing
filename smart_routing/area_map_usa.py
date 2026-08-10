@@ -59,7 +59,10 @@ def _load_json_config(config_file: Path = DEFAULT_CONFIG_FILE) -> dict:
 def _configured_area_map_path(key: str, default_path: Path) -> Path:
     area_map_cfg = _load_json_config(DEFAULT_CONFIG_FILE).get("area_map_usa", {})
     value = str(area_map_cfg.get(key, "")).strip()
-    return Path(value) if value else default_path
+    if not value:
+        return default_path
+    configured_path = Path(value)
+    return configured_path if configured_path.exists() else default_path
 
 
 @dataclass

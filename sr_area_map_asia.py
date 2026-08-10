@@ -287,7 +287,7 @@ def _marker_icon_size(center_bucket: object) -> tuple[int, int]:
 
 def _marker_icon_label(center_bucket: object, seq_label: str) -> str:
     bucket = _normalize_center_bucket(center_bucket)
-    if bucket.upper() in {"ASC", "DMS2", "DSC"} or "ASC" in bucket.upper():
+    if bucket.upper() in {"ASC", "DMS2"} or "ASC" in bucket.upper():
         return bucket
     return seq_label
 
@@ -921,6 +921,15 @@ def build_map(
     route_city_name = _route_city_name_for_scope(city_name, subsidiary_name, service_df)
     route_groups = _build_route_groups(service_df, route_city_name, selected_date, selected_sm)
     stop_order_lookup = _build_stop_order_lookup(route_groups)
+    # A route sequence may be unavailable when the selected date has no OSRM
+    # result.  Keep numbered job markers useful in that case by assigning a
+    # deterministic per-technician fallback order from the filtered rows.
+    fallback_stop_order_lookup: dict[tuple[str, str], int] = {}
+    for sm_code, group_df in service_df.groupby("assigned_sm_code", sort=True):
+        for fallback_seq, (_, job_row) in enumerate(group_df.reset_index(drop=True).iterrows(), start=1):
+            receipt_no = str(job_row.get("GSFS_RECEIPT_NO", "")).strip()
+            if receipt_no:
+                fallback_stop_order_lookup[(str(sm_code).strip(), receipt_no)] = fallback_seq
     route_color_map = _generate_color_map(service_df["assigned_sm_code"].dropna().astype(str).tolist())
 
     service_layer_map: dict[str, folium.FeatureGroup] = {}
@@ -966,6 +975,10 @@ def build_map(
                 )
                 coord_key = (sm_code, (round(float(row["longitude"]), 6), round(float(row["latitude"]), 6)))
                 seq = stop_order_lookup.get(coord_key)
+                if seq is None:
+                    seq = fallback_stop_order_lookup.get(
+                        (sm_code, str(row.get("GSFS_RECEIPT_NO", "")).strip())
+                    )
                 seq_label = str(seq) if seq is not None else "?"
                 marker_color = route_color_map.get(sm_code, "#dc2626")
                 popup_html = (

@@ -15,7 +15,7 @@ from .google_geocoder import GoogleGeocoder
 from .here_geocoder import HereGeocoder
 from .us_geocode_cleaner import build_us_geocode_query_variants
 from . import production_atlanta as prod
-from .area_map import _load_zcta_subset, get_latest_geocoded_service_file
+from .area_map import _load_zcta_subset
 from .service_preprocess import normalize_service_df
 
 
@@ -190,56 +190,6 @@ def _combined_geocode_cache(*cache_paths: Path) -> pd.DataFrame:
 
 def _merge_service_geocodes(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
     merged_input_df = raw_df.copy().reset_index(drop=True)
-    latest_geocoded_service = get_latest_geocoded_service_file()
-    if latest_geocoded_service and latest_geocoded_service.exists() and "GSFS_RECEIPT_NO" in merged_input_df.columns:
-        try:
-            receipt_geo_df = pd.read_csv(latest_geocoded_service, encoding="utf-8-sig", low_memory=False)
-            if "address_key" not in receipt_geo_df.columns:
-                def _receipt_address_key(row: pd.Series) -> str:
-                    def _pick(*names: str) -> str:
-                        for name in names:
-                            value = row.get(name, "")
-                            if pd.notna(value) and str(value).strip():
-                                return str(value).strip()
-                        return ""
-                    return build_address_key(
-                        _pick("ADDRESS_LINE1_INFO", "address_line1"),
-                        _pick("CITY_NAME", "city"),
-                        _pick("STATE_NAME", "state"),
-                        _pick("POSTAL_CODE", "postal_code"),
-                        _pick("COUNTRY_NAME", "country_name"),
-                    )
-                receipt_geo_df["address_key"] = receipt_geo_df.apply(_receipt_address_key, axis=1)
-            keep_cols = [col for col in ["GSFS_RECEIPT_NO", "address_key", "latitude", "longitude", "matched_address", "match_indicator", "match_type", "census_state_fips", "census_county_fips", "census_tract", "census_block", "geocoded_date", "source"] if col in receipt_geo_df.columns]
-            if {"GSFS_RECEIPT_NO", "latitude", "longitude"}.issubset(keep_cols):
-                receipt_geo_df = (
-                    receipt_geo_df[keep_cols]
-                    .dropna(subset=["GSFS_RECEIPT_NO"])
-                    .drop_duplicates(subset=["GSFS_RECEIPT_NO"], keep="first")
-                )
-                merged_input_df = merged_input_df.merge(
-                    receipt_geo_df.rename(
-                        columns={
-                            "address_key": "receipt_address_key",
-                            "latitude": "receipt_latitude",
-                            "longitude": "receipt_longitude",
-                            "matched_address": "receipt_matched_address",
-                            "match_indicator": "receipt_match_indicator",
-                            "match_type": "receipt_match_type",
-                            "census_state_fips": "receipt_census_state_fips",
-                            "census_county_fips": "receipt_census_county_fips",
-                            "census_tract": "receipt_census_tract",
-                            "census_block": "receipt_census_block",
-                            "geocoded_date": "receipt_geocoded_date",
-                            "source": "receipt_source",
-                        }
-                    ),
-                    on="GSFS_RECEIPT_NO",
-                    how="left",
-                )
-        except Exception:
-            pass
-
     geocoding_cfg = config.get("geocoding", {})
     census_cache_path = Path(str(geocoding_cfg.get("census_cache_file", "data/geocode_cache_us_census.csv")))
     here_cache_path = Path(str(geocoding_cfg.get("here_cache_file", "data/geocode_cache_here.csv")))
