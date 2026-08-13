@@ -1,0 +1,4 @@
+subsidiary_name,strategic_city_name,plan_id,region_id,region_seq,region_name,new_region_name,area_type,required_center_type
+LGEAI,"Washington, DC",legacy_75c5db57607c_v1,washington_dc_r01,1,DMS Region 1,DMS Region 1,DMS_CORE,
+LGEAI,"Washington, DC",legacy_75c5db57607c_v1,washington_dc_r02,2,Overlap Region 1,Overlap Region 1,OVERLAP,
+LGEAI,"Washington, DC",legacy_75c5db57607c_v1,washington_dc_r03,3,DMS2 Region 1,DMS2 Region 1,DMS2_EXCLUSIVE,

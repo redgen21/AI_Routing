@@ -23,6 +23,11 @@ from .helpers import (
     redact_text,
     safe_manifest_files,
 )
+from tools.data.region_plan_area_map import list_saved_region_plan_workbooks
+from smart_routing.routing_policy_catalog import (
+    routing_policy_description,
+    routing_policy_label,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -90,7 +95,11 @@ def _result_message(result: object) -> str:
 def _safe_backend_error(error: BaseException) -> str:
     message = " ".join(str(error or "").split())
     message = redact_text(redact_text(message))
-    return message[:500] or "Backend operation failed."
+    if len(message) > 500:
+        # Remote tracebacks start with runpy/import boilerplate and end with
+        # the actionable database or permission error. Preserve both ends.
+        message = message[:120] + " ... " + message[-360:]
+    return message or "Backend operation failed."
 
 
 def _load_console_styles() -> None:
@@ -287,6 +296,7 @@ def _diff_panels(rows: object) -> tuple[list[dict[str, Any]], list[dict[str, Any
             "sha256_12": _short_checksum(_mapping(row).get("remote_sha256")),
             "size_bytes": _mapping(row).get("remote_size_bytes"),
             "status": _mapping(row).get("status"),
+            "state_source": _mapping(row).get("remote_state_source", "remote_sftp"),
         }
         for row in values
     ]
@@ -1094,6 +1104,12 @@ def _render_artifact_tab(
         f"{info.get('archive_sha256', '')}:{target_id}"
     )
 
+    refresh_requested = st.button(
+        "Refresh server manifest from SSH/SFTP",
+        key="refresh-server-manifest-" + hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:16],
+        help="Re-check the selected server files and refresh the local manifest DB."
+    )
+
     def fetch_diff() -> Any | None:
         return _invoke(
             adapter,
@@ -1101,6 +1117,7 @@ def _render_artifact_tab(
             inspection=inspection,
             selected_files=files,
             config_path=config_path,
+            refresh_remote=refresh_requested,
         )
 
     refresh_diff_key = "refresh-remote-diff-" + hashlib.sha256(
@@ -1110,7 +1127,7 @@ def _render_artifact_tab(
         st.session_state,
         cache_key,
         fetch_diff,
-        force=st.session_state.pop(refresh_diff_key, False) is True,
+        force=st.session_state.pop(refresh_diff_key, False) is True or refresh_requested,
     )
     local_rows, remote_rows = _diff_panels(preview)
     left, right = st.columns(2)
@@ -1218,6 +1235,11 @@ def _render_artifact_tab(
                 st.warning(
                     "Development verification only: this dirty/non-promotable Admin Tools release cannot be used for Production."
                 )
+        if notice.get("remote_manifest_db_status") == "update_failed":
+            st.warning(
+                "Upload succeeded and the server checksum was verified, but the local remote manifest DB could not be updated. "
+                "Use 'Refresh server manifest from SSH/SFTP' before the next upload."
+            )
     elif notice.get("status") == "failed":
         st.error(
             "Upload failed. "
@@ -1274,6 +1296,13 @@ def _render_artifact_tab(
                         for row in (preview if isinstance(preview, list) else [])
                         if str(_mapping(row).get("path", "")) in set(selected_files)
                     },
+                    expected_remote_sources={
+                        str(_mapping(row).get("path")): str(
+                            _mapping(row).get("remote_state_source") or "remote_sftp"
+                        )
+                        for row in (preview if isinstance(preview, list) else [])
+                        if str(_mapping(row).get("path", "")) in set(selected_files)
+                    },
                     config_path=config_path,
                     typed_confirmation=phrase,
                     dry_run=False,
@@ -1323,6 +1352,9 @@ def _render_artifact_tab(
                     _safe_release_version(pin_data.get("version"))
                     if kind == "admin-tools"
                     else ""
+                ),
+                "remote_manifest_db_status": str(
+                    receipt.get("remote_manifest_db_status") or ""
                 ),
             }
             if (
@@ -3170,9 +3202,34 @@ def _render_region_plan_v2(adapter: BackendAdapter) -> None:
     registry_by_source = {str(item.get("source_city_id") or ""): item for item in registries if str(item.get("source_city_id") or "")}
     source_city_id = st.selectbox("Source city", list(registry_by_source), key="rp2-source-city")
     city = registry_by_source[source_city_id]
+    local_candidates = list_saved_region_plan_workbooks(PROJECT_ROOT / "data" / "region_plans")
+    local_labels = ["Manual workbook upload"] + [str(item["label"]) for item in local_candidates]
+    # A selected Area Map candidate owns these identifiers.  Sync them before
+    # rendering the widgets so the operator cannot accidentally bind an
+    # Atlanta source plan to an unrelated target such as LA_6area.
+    selected_local_state = str(st.session_state.get("rp2-local-candidate") or local_labels[0])
+    if selected_local_state != local_labels[0]:
+        selected_local_state_row = next(
+            (item for item in local_candidates if str(item["label"]) == selected_local_state),
+            None,
+        )
+        if selected_local_state_row:
+            local_manifest_state = selected_local_state_row.get("manifest") or {}
+            local_metadata_state = local_manifest_state.get("city_metadata") or {}
+            if (
+                str(local_metadata_state.get("subsidiary_id") or "") == subsidiary_id
+                and str(local_metadata_state.get("source_city_id") or "") == source_city_id
+            ):
+                st.session_state["rp2-target-city"] = str(local_metadata_state.get("target_city_id") or "").strip()
+                candidate_policy = str(local_metadata_state.get("policy_version") or local_manifest_state.get("policy_version") or "").strip()
+                if candidate_policy:
+                    st.session_state["rp2-policy"] = candidate_policy
+                candidate_overlap = str(local_metadata_state.get("overlap_policy") or local_manifest_state.get("overlap_policy") or "").strip()
+                if candidate_overlap:
+                    st.session_state["rp2-overlap"] = candidate_overlap
     target_city_id = st.text_input(
-        "Target city ID", placeholder="LA_6area", key="rp2-target-city",
-        help="New runtime scenario ID. Letters, numbers, dot, underscore, and hyphen only.",
+        "Target / policy city ID", placeholder="Atlanta_6area", key="rp2-target-city",
+        help="Area Map Plan을 선택하면 자동 입력됩니다. 정책 도시는 원본 roster 도시와 다를 수 있습니다.",
     ).strip()
     target_valid = bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", target_city_id))
     if target_city_id and not target_valid:
@@ -3182,10 +3239,16 @@ def _render_region_plan_v2(adapter: BackendAdapter) -> None:
         str(item.get("policy_version")): item for item in policies
         if str(item.get("policy_version") or "") and str(item.get("technician_policy_mode") or "")
     }
-    policy_version = st.selectbox("Policy", list(policy_by_version), key="rp2-policy")
+    policy_version = st.selectbox(
+        "Policy",
+        list(policy_by_version),
+        format_func=routing_policy_label,
+        key="rp2-policy",
+    )
     selected_policy = policy_by_version[policy_version]
     technician_policy_mode = str(selected_policy["technician_policy_mode"])
-    st.caption(f"Technician policy mode: {technician_policy_mode} (set by registry policy)")
+    st.info(routing_policy_description(policy_version))
+    st.caption("Technician assignment mode is determined by the selected policy.")
     overlap_options = selected_policy.get("allowed_overlap_policies") or city.get("allowed_overlap_policies") or ("registry_default", "explicit_workbook")
     overlap_policy = st.selectbox("Overlap policy", [str(value) for value in overlap_options], key="rp2-overlap")
     # Upload is deliberately candidate-only. Review and activation always need
@@ -3196,9 +3259,47 @@ def _render_region_plan_v2(adapter: BackendAdapter) -> None:
         for key in ("import", "adopt", "plan", "review", "preview", "activation", "candidates"):
             state.pop(key, None)
         state["selection_key"] = selection_key
-    workbook = st.file_uploader("Area + Technician workbook (.xlsx)", type=["xlsx"], key="rp2-workbook")
-    if st.button("Upload and validate", type="primary", disabled=workbook is None or not target_valid, key="rp2-upload"):
-        result = _invoke(adapter, "import_region_plan_v2_workbook", workbook_name=workbook.name, workbook_bytes=workbook.getvalue(), metadata={
+    selected_local_label = st.selectbox(
+        "Area Map에서 생성한 Region Plan",
+        local_labels,
+        key="rp2-local-candidate",
+        help="Area Map에서 저장한 검증 완료 workbook을 선택하면 별도 파일 선택 없이 같은 v2 API로 전송합니다.",
+    )
+    workbook_name = ""
+    workbook_bytes: bytes | None = None
+    local_binding_valid = True
+    if selected_local_label != local_labels[0]:
+        selected_local = next(item for item in local_candidates if str(item["label"]) == selected_local_label)
+        try:
+            workbook_path = Path(selected_local["path"]).resolve()
+            candidate_root = (PROJECT_ROOT / "data" / "region_plans").resolve()
+            if candidate_root not in workbook_path.parents:
+                raise ValueError("Local Region Plan path is outside the managed data root.")
+            workbook_name = workbook_path.name
+            workbook_bytes = workbook_path.read_bytes()
+            local_manifest = selected_local.get("manifest") or {}
+            local_metadata = local_manifest.get("city_metadata") or {}
+            local_binding_valid = (
+                str(local_metadata.get("subsidiary_id") or "") == subsidiary_id
+                and str(local_metadata.get("source_city_id") or "") == source_city_id
+                and str(local_metadata.get("target_city_id") or "") == target_city_id
+            )
+            st.info(
+                f"Area Map candidate: {local_manifest.get('plan_display_name') or '-'} | "
+                f"{local_metadata.get('source_city_id', '-')} → "
+                f"{local_metadata.get('target_city_id', '-')} | plan_id={local_manifest.get('plan_id', '-')}"
+            )
+            if not local_binding_valid:
+                st.warning("Area Map candidate의 법인/source 도시/target 도시와 현재 선택값이 다릅니다. 일치시킨 뒤 업로드하세요.")
+        except (OSError, ValueError, TypeError) as exc:
+            st.error(f"Area Map Region Plan 파일을 읽을 수 없습니다: {exc}")
+    else:
+        workbook = st.file_uploader("Area + Technician workbook (.xlsx)", type=["xlsx"], key="rp2-workbook")
+        if workbook is not None:
+            workbook_name = workbook.name
+            workbook_bytes = workbook.getvalue()
+    if st.button("Upload and validate", type="primary", disabled=not workbook_bytes or not target_valid or not local_binding_valid, key="rp2-upload"):
+        result = _invoke(adapter, "import_region_plan_v2_workbook", workbook_name=workbook_name, workbook_bytes=workbook_bytes, metadata={
             "subsidiary_id": subsidiary_id, "target_city_id": target_city_id, "source_city_id": source_city_id,
             "policy_version": policy_version, "technician_policy_mode": technician_policy_mode,
             "overlap_policy": overlap_policy, "activation_intent": intent,
@@ -3221,6 +3322,19 @@ def _render_region_plan_v2(adapter: BackendAdapter) -> None:
     candidates = [item for item in candidates if isinstance(item, Mapping)] if isinstance(candidates, list) else []
     candidate_ids = [str(item.get("plan_id")) for item in candidates if str(item.get("plan_id") or "")]
     selected_plan = st.selectbox("Candidate plan", candidate_ids or ["No candidate loaded"], disabled=not candidate_ids, key="rp2-candidate")
+    if adapter.has("retire_region_plan_v2") and candidate_ids:
+        st.caption("수정은 기존 Plan을 덮어쓰지 않고 새 Plan revision으로 생성합니다. 불필요한 비활성 Plan은 Retire 처리합니다.")
+        if st.button("Retire selected Plan", key="rp2-retire", type="secondary"):
+            result = _invoke(
+                adapter,
+                "retire_region_plan_v2",
+                subsidiary_id=subsidiary_id,
+                target_city_id=target_city_id,
+                plan_id=selected_plan,
+            )
+            state["retire"] = _mapping(result or {})
+            _render_region_plan_v2_receipt(result or {})
+            st.rerun()
     if adapter.has("adopt_region_plan_v2_candidate") and st.button("Adopt selected candidate", disabled=not candidate_ids, key="rp2-adopt"):
         result = _invoke(adapter, "adopt_region_plan_v2_candidate", subsidiary_id=subsidiary_id, target_city_id=target_city_id, plan_id=selected_plan)
         state["adopt"] = _mapping(result or {})

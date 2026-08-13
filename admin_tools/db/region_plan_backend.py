@@ -68,6 +68,8 @@ _TECH_ID_RE = re.compile(r"^AI\d{6}$")
 GENERIC_LIFECYCLE_CONTRACT = "region-plan-lifecycle-request/v1"
 GENERIC_POLICY_VERSION = "active_roster_area_type_fallback_region_soft/v1"
 GENERIC_POLICY_ALLOWLIST = frozenset({
+    "home_distance_only",
+    "preferred_region_soft",
     "active_roster_area_type_fallback_region_soft/v1",
     "active_roster_type_hard_region_soft/v1",
     "explicit_workbook_membership/v1",

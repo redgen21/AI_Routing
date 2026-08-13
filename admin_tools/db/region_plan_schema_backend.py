@@ -18,8 +18,18 @@ READINESS_SQL = """select to_regclass('public.common_region_plan') is not null,
   exists(select 1 from information_schema.columns where table_schema='public' and table_name='common_region_plan' and column_name='verified_by'),
   exists(select 1 from pg_constraint where conname='common_region_plan_verified_content_sha256_v2_check'),
   case when to_regclass('public.common_region_plan') is null then false
-       else has_table_privilege('vrp_agent','public.common_region_plan','INSERT') end"""
-READINESS_RESULT = (True, True, True, True, True, True, True)
+       else has_table_privilege('vrp_agent','public.common_region_plan','INSERT') end,
+  exists(select 1 from information_schema.columns where table_schema='public' and table_name='common_routing_config_master' and column_name='region_plan_id'),
+  exists(select 1 from information_schema.columns where table_schema='public' and table_name='common_routing_config_master' and column_name='region_plan_revision'),
+  exists(select 1 from information_schema.columns where table_schema='public' and table_name='common_routing_config_master' and column_name='region_plan_checksum'),
+  exists(select 1 from pg_constraint where conname='common_routing_config_master_region_plan_checksum_v2_check'),
+  to_regclass('public.common_region_set') is not null,
+  to_regclass('public.common_region_set_region') is not null,
+  to_regclass('public.common_region_set_postal') is not null,
+  to_regclass('public.common_routing_plan') is not null,
+  to_regclass('public.common_routing_plan_technician') is not null,
+  to_regclass('public.common_routing_plan_activation') is not null"""
+READINESS_RESULT = (True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True)
 
 def _sql() -> str:
     return BASE_SQL.read_text(encoding="utf-8") + "\n" + V2_SQL.read_text(encoding="utf-8")

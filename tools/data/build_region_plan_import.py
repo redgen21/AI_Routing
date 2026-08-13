@@ -14,10 +14,14 @@ import openpyxl
 
 SCHEMA = "region-workbook-import/v1"
 POLICY_EXPLICIT = "explicit_workbook_membership/v1"
+POLICY_ATLANTA_CURRENT = "own_region_with_approved_boundary_overflow/v2"
 POLICY_TYPE_HARD_REGION_SOFT = "active_roster_type_hard_region_soft/v1"
 POLICY_AREA_TYPE_FALLBACK_REGION_SOFT = "active_roster_area_type_fallback_region_soft/v1"
 POLICY_MODES = {
+    "home_distance_only": "home_distance_only",
+    "preferred_region_soft": "preferred_region_soft",
     POLICY_EXPLICIT: "assigned_region_boundary_spillover",
+    POLICY_ATLANTA_CURRENT: "assigned_region_boundary_spillover",
     POLICY_TYPE_HARD_REGION_SOFT: "active_roster_type_hard_region_soft",
     POLICY_AREA_TYPE_FALLBACK_REGION_SOFT: "active_roster_area_type_fallback_region_soft",
 }

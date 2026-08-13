@@ -27,6 +27,12 @@ from smart_routing.data_catalog import na_data_path
 from smart_routing.live_atlanta_runtime import _load_config as _load_runtime_config
 from smart_routing.live_atlanta_runtime import _merge_service_geocodes
 from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
+from smart_routing.routing_policy_catalog import (
+    ROUTING_POLICY_BY_VALUE,
+    ROUTING_POLICY_VALUES,
+    routing_policy_description,
+    routing_policy_label,
+)
 from services.api.common_vrp_config import (
     configured_api_url,
     load_and_validate_common_config,
@@ -66,7 +72,6 @@ STRATEGIC_CITY_BASE_ALIASES = {
 _CITY_CONTEXT_METADATA: dict[str, dict[str, object]] = {}
 DEFAULT_STRATEGIC_CITY_OPTIONS = [
     DEFAULT_STRATEGIC_CITY_NAME,
-    *ATLANTA_REGION_CITY_NAMES,
     "Los Angeles, CA",
 ]
 KM_TO_MILES = 0.621371
@@ -1605,7 +1610,11 @@ def _city_options_for_subsidiary(contexts: dict, subsidiary_name: str) -> list[s
         city_options = cities_by_subsidiary.get(str(subsidiary_name), []) or []
     if not city_options:
         city_options = contexts.get("cities", []) if isinstance(contexts, dict) else []
-    cleaned = [_clean_text(city) for city in city_options if _clean_text(city)]
+    cleaned = [
+        STRATEGIC_CITY_BASE_ALIASES.get(_clean_text(city), _clean_text(city))
+        for city in city_options
+        if _clean_text(city)
+    ]
     # Static choices are an offline fallback only.  An API response is the
     # authority for active region-plan contexts, including LA_6area.
     if cleaned:
@@ -1700,6 +1709,10 @@ def _read_uploaded_technician_master_csv(
         "zip_code": "home_postal_code",
         "postal_code": "home_postal_code",
         "home_postal_code": "home_postal_code",
+        "region": "assigned_region_name",
+        "region_name": "assigned_region_name",
+        "assigned_region": "assigned_region_name",
+        "assigned_region_name": "assigned_region_name",
     }
     rename_map: dict[str, str] = {}
     for column in raw_df.columns:
@@ -1747,6 +1760,7 @@ def _read_uploaded_technician_master_csv(
                 "home_postal_code": _clean_text(row.get("home_postal_code")),
                 "active_flag": True,
                 "priority_group": "A",
+                "assigned_region_name": _clean_text(row.get("assigned_region_name")),
             }
         )
     if not rows:
@@ -3825,6 +3839,7 @@ def _build_default_technician_rows_from_jobs(jobs_df: pd.DataFrame, engineer_mas
                 "start_location_address": _clean_text(master_row.get("home_address")),
                 "start_latitude": None,
                 "start_longitude": None,
+                "preferred_region_name": _clean_text(master_row.get("assigned_region_name")),
                 "source": "same_as_jobs",
             }
         )
@@ -3861,6 +3876,7 @@ def _build_default_technician_rows_from_master(engineer_master_df: pd.DataFrame,
                 "start_location_address": _clean_text(master_row.get("home_address")),
                 "start_latitude": None,
                 "start_longitude": None,
+                "preferred_region_name": _clean_text(master_row.get("assigned_region_name")),
                 "source": "all_technicians",
             }
         )
@@ -3877,6 +3893,29 @@ def _technician_master_dialog(subsidiary_name: str, strategic_city_name: str) ->
             strategic_city_name=strategic_city_name,
         ).get("rows", [])
     )
+    configured_plan: dict = {}
+    plan_regions_df = pd.DataFrame()
+    try:
+        configured_plan, _ = _load_region_plan_config_options(subsidiary_name, strategic_city_name)
+        plan_regions_df = pd.DataFrame(
+            _api_get(
+                DEFAULT_COMMON_SERVER_URL,
+                "/api/v1/common/configured-region-plan-regions",
+                subsidiary_name=subsidiary_name,
+                strategic_city_name=strategic_city_name,
+            ).get("rows", [])
+        )
+    except Exception as exc:
+        st.warning(f"Region assignment options are unavailable: {exc}")
+    region_plan_id = _clean_text(configured_plan.get("region_plan_id"))
+    region_name_to_seq: dict[str, int] = {}
+    if not plan_regions_df.empty:
+        for _, region_row in plan_regions_df.iterrows():
+            seq = pd.to_numeric(pd.Series([region_row.get("region_seq")]), errors="coerce").iloc[0]
+            name = _clean_text(region_row.get("region_name")) or f"Region {int(seq)}" if pd.notna(seq) else ""
+            if name and pd.notna(seq):
+                region_name_to_seq[name] = int(seq)
+    region_options = ["Unassigned", *region_name_to_seq.keys()]
     display_cols = [
         "employee_code",
         "employee_name",
@@ -3892,16 +3931,43 @@ def _technician_master_dialog(subsidiary_name: str, strategic_city_name: str) ->
         "home_to_job_relaxed",
         "max_home_to_job_min",
     ]
+    if region_plan_id:
+        display_cols.append("assigned_region_name")
     if engineer_master_df.empty:
         st.info("No technician master rows for the selected city.")
     else:
         for col in display_cols:
             if col not in engineer_master_df.columns:
-                engineer_master_df[col] = ""
+                engineer_master_df[col] = "Unassigned" if col == "assigned_region_name" else ""
+        if region_plan_id:
+            engineer_master_df["assigned_region_name"] = engineer_master_df["assigned_region_name"].fillna("Unassigned").replace({"": "Unassigned", "nan": "Unassigned"})
         engineer_master_df["priority_group"] = engineer_master_df["priority_group"].map(_coerce_priority_group_value)
         engineer_master_df["home_to_job_relaxed"] = pd.to_numeric(
             engineer_master_df["max_home_to_job_min"], errors="coerce"
         ).lt(0).fillna(False)
+        editor_column_config = {
+            "employee_code": st.column_config.TextColumn("technician_code"),
+            "employee_name": st.column_config.TextColumn("technician_name"),
+            "active_flag": st.column_config.CheckboxColumn("active_flag"),
+            "priority_group": st.column_config.SelectboxColumn(
+                "priority_group",
+                options=["A", "B", "C"],
+                help="A is highest priority, C is lowest.",
+            ),
+            "home_to_job_relaxed": st.column_config.CheckboxColumn(
+                "outer technician override",
+                help="Checked stores -1. Routing treats it as relaxed home-to-job and first-leg limits.",
+            ),
+            "home_latitude": st.column_config.NumberColumn("home_latitude", format="%.6f"),
+            "home_longitude": st.column_config.NumberColumn("home_longitude", format="%.6f"),
+            "max_home_to_job_min": st.column_config.NumberColumn(
+                "custom home-to-job min",
+                help="Blank uses city default. If outer technician override is checked, this is saved as -1.",
+                step=5,
+            ),
+        }
+        if region_plan_id:
+            editor_column_config["assigned_region_name"] = st.column_config.SelectboxColumn("Region", options=region_options, required=True)
         edited_master_df = st.data_editor(
             engineer_master_df[display_cols],
             width="stretch",
@@ -3909,29 +3975,9 @@ def _technician_master_dialog(subsidiary_name: str, strategic_city_name: str) ->
             disabled=[
                 col
                 for col in display_cols
-                if col not in {"active_flag", "priority_group", "home_to_job_relaxed", "max_home_to_job_min"}
+                if col not in {"active_flag", "priority_group", "home_to_job_relaxed", "max_home_to_job_min", "assigned_region_name"}
             ],
-            column_config={
-                "employee_code": st.column_config.TextColumn("technician_code"),
-                "employee_name": st.column_config.TextColumn("technician_name"),
-                "active_flag": st.column_config.CheckboxColumn("active_flag"),
-                "priority_group": st.column_config.SelectboxColumn(
-                    "priority_group",
-                    options=["A", "B", "C"],
-                    help="A is highest priority, C is lowest.",
-                ),
-                "home_to_job_relaxed": st.column_config.CheckboxColumn(
-                    "outer technician override",
-                    help="Checked stores -1. Routing treats it as relaxed home-to-job and first-leg limits.",
-                ),
-                "home_latitude": st.column_config.NumberColumn("home_latitude", format="%.6f"),
-                "home_longitude": st.column_config.NumberColumn("home_longitude", format="%.6f"),
-                "max_home_to_job_min": st.column_config.NumberColumn(
-                    "custom home-to-job min",
-                    help="Blank uses city default. If outer technician override is checked, this is saved as -1.",
-                    step=5,
-                ),
-            },
+            column_config=editor_column_config,
             key=f"technician_master_view::{subsidiary_name}::{strategic_city_name}",
         )
         if st.button("Save Master Changes", type="primary", width="stretch"):
@@ -3946,6 +3992,12 @@ def _technician_master_dialog(subsidiary_name: str, strategic_city_name: str) ->
                         override_value = pd.to_numeric(pd.Series([edited_row.get("max_home_to_job_min")]), errors="coerce").iloc[0]
                         update_row["max_home_to_job_min"] = int(override_value) if pd.notna(override_value) and int(override_value) >= 0 else None
                     update_row.pop("home_to_job_relaxed", None)
+                    if region_plan_id:
+                        region_name = _clean_text(edited_row.get("assigned_region_name")) or "Unassigned"
+                        if region_name == "Unassigned":
+                            raise ValueError("Every technician must have a Region in the selected Region Plan.")
+                        update_row["region_plan_id"] = region_plan_id
+                        update_row["assigned_region_seq"] = region_name_to_seq.get(region_name)
                     _api_post(DEFAULT_COMMON_SERVER_URL, "/api/v1/common/engineers/upsert", update_row)
                 st.cache_data.clear()
                 st.success("Technician master updated.")
@@ -3975,6 +4027,15 @@ def _technician_master_dialog(subsidiary_name: str, strategic_city_name: str) ->
                     subsidiary_name,
                     strategic_city_name,
                 )
+                if region_plan_id:
+                    for row_index, row in upload_master_df.iterrows():
+                        region_name = _clean_text(row.get("assigned_region_name"))
+                        if region_name not in region_name_to_seq:
+                            raise ValueError(
+                                f"CSV row {row_index + 2} must contain a valid Region name for {region_plan_id}."
+                            )
+                        upload_master_df.at[row_index, "region_plan_id"] = region_plan_id
+                        upload_master_df.at[row_index, "assigned_region_seq"] = region_name_to_seq[region_name]
                 saved_count = 0
                 for row in upload_master_df.to_dict("records"):
                     response = _api_post(DEFAULT_COMMON_SERVER_URL, "/api/v1/common/engineers/upsert", row)
@@ -4015,6 +4076,9 @@ def _technician_master_dialog(subsidiary_name: str, strategic_city_name: str) ->
     center_index = center_options.index(default_center_type) if default_center_type in center_options else 0
     priority_options = ["A", "B", "C"]
     priority_index = priority_options.index(default_priority_group) if default_priority_group in priority_options else 1
+    default_region_name = _clean_text(selected_row.get("assigned_region_name")) if selected_row is not None else ""
+    if default_region_name not in region_name_to_seq:
+        default_region_name = region_options[1] if len(region_options) > 1 else "Unassigned"
 
     with st.form(f"technician_master_upsert::{subsidiary_name}::{strategic_city_name}", clear_on_submit=False):
         code_col, name_col, center_col, priority_col = st.columns([1, 1.4, 0.8, 0.8])
@@ -4038,6 +4102,17 @@ def _technician_master_dialog(subsidiary_name: str, strategic_city_name: str) ->
         home_city = city_col.text_input("City", value=default_home_city)
         home_state = state_col.text_input("State", value=default_home_state)
         home_postal_code = zip_col.text_input("Zip", value=default_home_postal_code)
+        if region_plan_id:
+            assigned_region_name = st.selectbox(
+                f"Region ({region_plan_id})",
+                region_options[1:] if len(region_options) > 1 else region_options,
+                index=(region_options[1:] if len(region_options) > 1 else region_options).index(default_region_name)
+                if default_region_name in (region_options[1:] if len(region_options) > 1 else region_options)
+                else 0,
+            )
+        else:
+            assigned_region_name = ""
+            st.info("Select a Region Plan in Config before assigning a Region to a technician.")
         active_flag = st.checkbox("active_flag", value=default_active_flag)
         submitted = st.form_submit_button("Save Technician", type="primary", width="stretch")
     if submitted:
@@ -4050,10 +4125,7 @@ def _technician_master_dialog(subsidiary_name: str, strategic_city_name: str) ->
                 if pd.notna(parsed_max_home_to_job_min) and int(parsed_max_home_to_job_min) >= 0
                 else None
             )
-            _api_post(
-                DEFAULT_COMMON_SERVER_URL,
-                "/api/v1/common/engineers/upsert",
-                {
+            technician_payload = {
                     "subsidiary_name": subsidiary_name,
                     "strategic_city_name": strategic_city_name,
                     "employee_code": employee_code,
@@ -4067,7 +4139,18 @@ def _technician_master_dialog(subsidiary_name: str, strategic_city_name: str) ->
                     "active_flag": active_flag,
                     "priority_group": priority_group,
                     "max_home_to_job_min": max_home_to_job_override,
-                },
+            }
+            if region_plan_id:
+                technician_payload.update(
+                    {
+                        "region_plan_id": region_plan_id,
+                        "assigned_region_seq": region_name_to_seq.get(assigned_region_name),
+                    }
+                )
+            _api_post(
+                DEFAULT_COMMON_SERVER_URL,
+                "/api/v1/common/engineers/upsert",
+                technician_payload,
             )
             st.cache_data.clear()
             st.success("Technician master saved.")
@@ -4270,6 +4353,116 @@ def _direct_job_dialog(
     if close_clicked:
         _close_common_job_dialog()
         st.rerun()
+
+
+def _load_region_plan_config_options(subsidiary_name: str, strategic_city_name: str) -> tuple[dict, pd.DataFrame]:
+    response = _api_get(
+        DEFAULT_COMMON_SERVER_URL,
+        "/api/v1/common/configured-region-plans",
+        subsidiary_name=subsidiary_name,
+        strategic_city_name=strategic_city_name,
+    )
+    return dict(response.get("selected") or {}), pd.DataFrame(response.get("rows") or [])
+
+
+def _render_config_tab(subsidiary_name: str, strategic_city_name: str) -> None:
+    """City-level routing configuration, including the selected Region Plan."""
+    st.subheader("City Routing Config")
+    st.caption(
+        f"{strategic_city_name} is the operational city. Select its Region Plan here; "
+        "routing screens do not select a plan per request. Select the routing policy below."
+    )
+    config_response = _api_get(
+        DEFAULT_COMMON_SERVER_URL,
+        "/api/v1/common/routing-config",
+        subsidiary_name=subsidiary_name,
+        strategic_city_name=strategic_city_name,
+    )
+    config_row = dict(config_response.get("row") or {})
+    try:
+        selected, plans_df = _load_region_plan_config_options(subsidiary_name, strategic_city_name)
+    except Exception as exc:
+        st.error(f"Unable to load Region Plans: {exc}")
+        return
+    if plans_df.empty:
+        st.warning("No Region Plans are registered for this city yet. Import/review one in the development Region Plan workflow first.")
+        return
+    plans_df = plans_df.copy()
+    plans_df["plan_id"] = plans_df["plan_id"].astype(str).str.strip()
+    if "lifecycle" in plans_df.columns:
+        plans_df = plans_df[plans_df["lifecycle"].astype(str).str.lower().isin({"reviewed", "active"})].copy()
+    plans_df = plans_df[plans_df["plan_id"].ne("")].drop_duplicates("plan_id").reset_index(drop=True)
+    if plans_df.empty:
+        st.warning("No selectable Region Plans are available for this city.")
+        return
+    labels = {
+        str(row.get("plan_id")): (
+            f"{row.get('plan_id')} · "
+            f"{routing_policy_label(row.get('policy_version'))} · "
+            f"{row.get('lifecycle', '')}"
+        )
+        for row in plans_df.to_dict("records")
+    }
+    configured_plan_id = _clean_text(config_row.get("region_plan_id") or selected.get("region_plan_id"))
+    plan_ids = plans_df["plan_id"].tolist()
+    selected_plan_id = st.selectbox(
+        "Region Plan for this city",
+        plan_ids,
+        index=plan_ids.index(configured_plan_id) if configured_plan_id in plan_ids else 0,
+        format_func=lambda value: labels.get(str(value), str(value)),
+        key=f"city_region_plan::{subsidiary_name}::{strategic_city_name}",
+    )
+    selected_plan = plans_df[plans_df["plan_id"].eq(selected_plan_id)].iloc[0].to_dict()
+    selected_plan_policy = _clean_text(selected_plan.get("policy_version"))
+    configured_policy = _clean_text(config_row.get("region_policy"))
+    if configured_policy not in ROUTING_POLICY_BY_VALUE:
+        configured_policy = selected_plan_policy if selected_plan_policy in ROUTING_POLICY_BY_VALUE else "home_distance_only"
+    selected_policy = st.selectbox(
+        "Routing policy",
+        list(ROUTING_POLICY_VALUES),
+        index=list(ROUTING_POLICY_VALUES).index(configured_policy),
+        format_func=routing_policy_label,
+        key=f"city_routing_policy::{subsidiary_name}::{strategic_city_name}",
+        help="화면에는 설명용 이름을 표시하고, 저장 시에는 내부 정책 식별자를 사용합니다.",
+    )
+    st.info(routing_policy_description(selected_policy))
+    if selected_plan_policy and selected_plan_policy != selected_policy:
+        st.warning(
+            "선택한 Region Plan에는 고정 정책이 있습니다. "
+            f"이 Plan으로 실제 라우팅할 때는 {routing_policy_label(selected_plan_policy)}가 적용되며, "
+            "다른 정책을 사용하려면 해당 정책으로 생성된 Region Plan을 선택해야 합니다."
+        )
+    st.dataframe(
+        pd.DataFrame([{
+            "city": strategic_city_name,
+            "region_plan_id": selected_plan_id,
+            "revision": selected_plan.get("plan_revision"),
+            "routing_policy": routing_policy_label(selected_policy),
+            "region_plan_policy": routing_policy_label(selected_plan_policy),
+            "lifecycle": selected_plan.get("lifecycle"),
+            "plan_storage_city_name": selected_plan.get("plan_storage_city_name"),
+        }]),
+        width="stretch",
+        hide_index=True,
+    )
+    if st.button("Save City Config", type="primary", width="stretch"):
+        try:
+            config_row.update(
+                {
+                    "subsidiary_name": subsidiary_name,
+                    "strategic_city_name": strategic_city_name,
+                    "region_policy": selected_policy,
+                    "region_plan_id": selected_plan_id,
+                    "region_plan_revision": selected_plan.get("plan_revision"),
+                    "region_plan_checksum": selected_plan.get("checksum"),
+                }
+            )
+            _api_post(DEFAULT_COMMON_SERVER_URL, "/api/v1/common/routing-config/upsert", config_row)
+            st.cache_data.clear()
+            st.success(f"Saved {strategic_city_name} config with Region Plan {selected_plan_id}.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Failed to save city config: {exc}")
 
 
 def _render_jobs_tab(subsidiary_name: str, strategic_city_name: str) -> None:
@@ -4730,7 +4923,7 @@ def _render_payload_tab(subsidiary_name: str, strategic_city_name: str) -> None:
         default_source="manual_input",
     )
     capability_rows = _build_capability_rows_for_payload(strategic_city_name, technicians_df, selected_jobs_df)
-    st.caption(f"API source context: {source_city_name} → routing context: {strategic_city_name}")
+    st.caption(f"API source context: {source_city_name} ??routing context: {strategic_city_name}")
     st.caption(f"API source jobs for selected date: {len(selected_jobs_df)}")
     available_tech_count = int(technicians_df["available"].fillna(False).astype(bool).sum()) if not technicians_df.empty and "available" in technicians_df.columns else 0
     st.caption(f"Available API source technicians: {available_tech_count}")
@@ -4812,7 +5005,7 @@ def _render_payload_tab(subsidiary_name: str, strategic_city_name: str) -> None:
         region_plan = ((payload.get("options") or {}).get("region_plan") or {}) if isinstance(payload, dict) else {}
         policy_version = str(region_plan.get("policy_version", "")).strip()
         if policy_version:
-            st.caption(f"Active region policy: {policy_version} (distance: km; duration: minutes; slots: jobs)")
+            st.caption(f"Active routing policy: {routing_policy_label(policy_version)} (distance: km; duration: minutes; slots: jobs)")
         payload_debug = st.session_state.get("common_vrp_payload_debug") or {}
         for message in payload_debug.get("precheck_messages", []) or []:
             message_text = str(message).strip()
@@ -4953,13 +5146,15 @@ def main() -> None:
             index=cities.index(DEFAULT_STRATEGIC_CITY_NAME) if DEFAULT_STRATEGIC_CITY_NAME in cities else 0,
         )
         _ensure_common_runtime_context(subsidiary_name, strategic_city_name)
-        jobs_tab, technicians_tab, avoid_area_tab, payload_tab, routing_result_tab, statistics_tab = st.tabs(
-            ["Jobs", "Technicians", "Avoid Areas", "Routing Request", "Routing Result", "Statistics"]
+        jobs_tab, technicians_tab, config_tab, avoid_area_tab, payload_tab, routing_result_tab, statistics_tab = st.tabs(
+            ["Jobs", "Technicians", "Config", "Avoid Areas", "Routing Request", "Routing Result", "Statistics"]
         )
         with jobs_tab:
             _render_jobs_tab(subsidiary_name, strategic_city_name)
         with technicians_tab:
             _render_technicians_tab(subsidiary_name, strategic_city_name)
+        with config_tab:
+            _render_config_tab(subsidiary_name, strategic_city_name)
         with avoid_area_tab:
             _render_avoid_area_tab(subsidiary_name, strategic_city_name)
         with payload_tab:

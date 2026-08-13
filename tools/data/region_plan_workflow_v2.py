@@ -18,15 +18,40 @@ except ImportError:  # pragma: no cover
 
 SCHEMA_VERSION = "region-plan-workflow/v2"
 IMPORTER_VERSION = "region-plan-v2-data/1"
-AREA_COLUMNS = ("region_code", "region_name", "postal_code", "area_type", "required_center_type", "membership_rank", "is_primary", "overflow_allowed", "overflow_penalty_minutes", "overflow_reason")
+AREA_COLUMNS = ("region_code", "region_name", "region_seq", "postal_code", "area_type", "required_center_type", "membership_rank", "is_primary", "overflow_allowed", "overflow_penalty_minutes", "overflow_reason")
 TECHNICIAN_COLUMNS = ("technician_id", "region_code", "active", "policy_mode", "effective_from", "effective_to")
-POLICY_MODES = frozenset(("assigned_region_boundary_spillover", "active_roster_type_hard_region_soft", "active_roster_area_type_fallback_region_soft"))
+POLICY_MODES = frozenset((
+    "home_distance_only", "preferred_region_soft",
+    "assigned_region_boundary_spillover", "active_roster_type_hard_region_soft",
+    "active_roster_area_type_fallback_region_soft",
+))
 POLICY_VERSION_BY_MODE = {
+    "home_distance_only": "home_distance_only",
+    "preferred_region_soft": "preferred_region_soft",
     "assigned_region_boundary_spillover": "explicit_workbook_membership/v1",
     "active_roster_type_hard_region_soft": "active_roster_type_hard_region_soft/v1",
     "active_roster_area_type_fallback_region_soft": "active_roster_area_type_fallback_region_soft/v1",
 }
-_ALIASES = {"zipcode":"postal_code", "territory":"region_code", "area type":"area_type", "tech id":"technician_id", "assignment":"region_code", "tech name":"_ignored_pii"}
+POLICY_VERSIONS_BY_MODE = {
+    "home_distance_only": frozenset({"home_distance_only"}),
+    "preferred_region_soft": frozenset({"preferred_region_soft"}),
+    "assigned_region_boundary_spillover": frozenset({
+        "explicit_workbook_membership/v1",
+        "own_region_with_approved_boundary_overflow/v2",
+    }),
+    "active_roster_type_hard_region_soft": frozenset({"active_roster_type_hard_region_soft/v1"}),
+    "active_roster_area_type_fallback_region_soft": frozenset({"active_roster_area_type_fallback_region_soft/v1"}),
+}
+_ALIASES = {
+    "zipcode":"postal_code", "zip code":"postal_code", "territory":"region_code",
+    "region id":"region_code", "region seq":"region_seq", "area name":"region_name",
+    "new region name":"region_name", "area type":"area_type",
+    "required center type":"required_center_type", "membership rank":"membership_rank",
+    "is primary":"is_primary", "overflow allowed":"overflow_allowed",
+    "overflow penalty minutes":"overflow_penalty_minutes", "overflow reason":"overflow_reason",
+    "tech id":"technician_id", "assignment":"region_code", "tech name":"_ignored_pii",
+}
+_SAFE_CITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_ .,&()/-]{0,159}$")
 
 class RegionPlanV2ValidationError(ValueError):
     def __init__(self, code: str): self.code=code; super().__init__(code)
@@ -40,8 +65,11 @@ def _bool(value: str) -> bool:
     raise ValueError
 
 def _legacy_region_code(value: str) -> str:
-    """Stable compact code for legacy Territory labels; the original remains region_name."""
-    token=re.sub(r"[^A-Za-z0-9]", "", value).upper()
+    """Preserve supplied stable IDs and compact only display-only legacy labels."""
+    supplied = value.strip()
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", supplied):
+        return supplied
+    token=re.sub(r"[^A-Za-z0-9]", "", supplied).upper()
     if re.fullmatch(r"[A-Z0-9_-]{1,4}", token): return token
     return "R" + _sha(value.strip().casefold().encode())[:3].upper()
 
@@ -76,10 +104,10 @@ def canonicalize_workbook(workbook_bytes: bytes, city_metadata: Mapping[str,Any]
     """Validate an uploaded .xlsx and return an immutable, JSON-safe candidate payload."""
     required=("subsidiary_id","target_city_id","source_city_id","policy_version","technician_policy_mode")
     if any(not _value(city_metadata.get(k)) for k in required): raise RegionPlanV2ValidationError("CITY_METADATA_MISSING")
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", _value(city_metadata["subsidiary_id"])) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", _value(city_metadata["target_city_id"])):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", _value(city_metadata["subsidiary_id"])) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", _value(city_metadata["target_city_id"])):
         raise RegionPlanV2ValidationError("CITY_METADATA_INVALID")
     selected_mode=_value(city_metadata["technician_policy_mode"])
-    if selected_mode not in POLICY_MODES or _value(city_metadata["policy_version"]) != POLICY_VERSION_BY_MODE[selected_mode]:
+    if selected_mode not in POLICY_MODES or _value(city_metadata["policy_version"]) not in POLICY_VERSIONS_BY_MODE[selected_mode]:
         raise RegionPlanV2ValidationError("CITY_METADATA_MISMATCH")
     if not workbook_bytes.startswith(b"PK") or load_workbook is None: raise RegionPlanV2ValidationError("WORKBOOK_FORMAT_INVALID")
     try: wb=load_workbook(io.BytesIO(workbook_bytes), read_only=True, data_only=True)
@@ -101,7 +129,9 @@ def canonicalize_workbook(workbook_bytes: bytes, city_metadata: Mapping[str,Any]
             # display name and derive a short deterministic identifier.
             if not x["region_name"]: x["region_name"]=x["region_code"]
             x["region_code"]=_legacy_region_code(x["region_code"]); x["postal_code"]=x["postal_code"].zfill(5); x["area_type"]=x["area_type"].upper(); x["required_center_type"]=(x["required_center_type"] or x["area_type"]).upper()
-            if not re.fullmatch(r"[A-Za-z0-9_-]{1,4}",x["region_code"]) or not re.fullmatch(r"\d{5}",x["postal_code"]) or x["area_type"] not in ("DMS","DMS2") or x["required_center_type"] != x["area_type"]: raise ValueError
+            if x["region_seq"]:
+                x["region_seq"] = str(int(float(x["region_seq"])))
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}",x["region_code"]) or not re.fullmatch(r"\d{5}",x["postal_code"]) or x["area_type"] not in ("DMS","DMS2") or x["required_center_type"] != x["area_type"]: raise ValueError
             x["membership_rank"]=int(x["membership_rank"] or 1); x["is_primary"]=_bool(x["is_primary"] or "true"); x["overflow_allowed"]=_bool(x["overflow_allowed"] or "false")
             penalty=x["overflow_penalty_minutes"]
             if x["overflow_allowed"]:
@@ -111,9 +141,25 @@ def canonicalize_workbook(workbook_bytes: bytes, city_metadata: Mapping[str,Any]
             else:
                 if penalty: raise ValueError
                 x["overflow_penalty_minutes"]=None
-            if x["region_code"] in regions and regions[x["region_code"]] != (x["region_name"],x["area_type"],x["required_center_type"]): raise ValueError
-            regions[x["region_code"]]=(x["region_name"],x["area_type"],x["required_center_type"]); normalized_areas.append(x)
+            if x["region_code"] in regions and regions[x["region_code"]][:3] != (x["region_name"],x["area_type"],x["required_center_type"]): raise ValueError
+            if x["region_code"] in regions and x["region_seq"] and regions[x["region_code"]][3] not in {None, x["region_seq"]}: raise ValueError
+            regions[x["region_code"]]=(x["region_name"],x["area_type"],x["required_center_type"],x["region_seq"] or None); normalized_areas.append(x)
         except Exception: rejects.append({"sheet":"Area","row_number":row,"error_code":"AREA_ROW_INVALID"})
+    explicit_sequences = {value[3] for value in regions.values() if value[3] is not None}
+    if explicit_sequences and len(explicit_sequences) != len(regions):
+        plan_errors.append("REGION_SEQ_INCOMPLETE")
+    if explicit_sequences:
+        try:
+            sequence_values = sorted(int(value) for value in explicit_sequences)
+        except ValueError:
+            sequence_values = []
+        if sequence_values != list(range(1, len(regions) + 1)):
+            plan_errors.append("REGION_SEQ_INVALID")
+        sequence_by_code = {code: int(value[3]) for code, value in regions.items() if value[3] is not None}
+    else:
+        sequence_by_code = {code: index for index, code in enumerate(sorted(regions), 1)}
+    for item in normalized_areas:
+        item["region_seq"] = str(sequence_by_code.get(item["region_code"], ""))
     postal=Counter(a["postal_code"] for a in normalized_areas)
     for p,count in postal.items():
         members=[a for a in normalized_areas if a["postal_code"]==p]
@@ -127,6 +173,10 @@ def canonicalize_workbook(workbook_bytes: bytes, city_metadata: Mapping[str,Any]
     for row,x in techs:
         try:
             x={k:_value(x.get(k)) for k in TECHNICIAN_COLUMNS}; x["technician_id"]=x["technician_id"].upper(); x["region_code"]=_legacy_region_code(x["region_code"]) if x["region_code"] else ""
+            if x["region_code"] not in regions:
+                name_matches = [code for code, value in regions.items() if value[0] == x["region_code"]]
+                if len(name_matches) == 1:
+                    x["region_code"] = name_matches[0]
             if not x["technician_id"]: raise ValueError
             if not x["region_code"]: raise RegionPlanV2ValidationError("TECHNICIAN_ASSIGNMENT_BLANK")
             if x["technician_id"] in assigned or x["region_code"] not in regions: raise ValueError

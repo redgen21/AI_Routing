@@ -1,0 +1,1456 @@
+{
+  "schema": "area-map-region-plan-migration/v1/inventory",
+  "output_root": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans",
+  "source_root": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions",
+  "source_files": 22,
+  "ready_count": 0,
+  "needs_review_count": 22,
+  "plans": [
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Atlanta_6area",
+      "strategic_city_name": "Atlanta_6area",
+      "target_city_id": "Atlanta_6area",
+      "plan_id": "legacy_atlanta_6area_fixed_region_postal_atlanta_6area_6_dms_v2_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_atlanta_6area_6_dms_v2.csv",
+        "region_sha256": "27786ecae987fb8d302ec7f4a0e4f6fa67b92f9c5313e01c4ba71eb3eaf05fc9",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 297,
+        "accepted_region_rows": 297,
+        "regions": 6,
+        "postal_memberships": 297,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "POSTAL_CODE",
+          "STRATEGIC_CITY_NAME",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "new_region_name",
+          "area_type"
+        ],
+        "original_area_type_column_present": true
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\Atlanta_6area\\legacy_atlanta_6area_fixed_region_postal_atlanta_6area_6_dms_v2_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Atlanta_6area",
+      "strategic_city_name": "Atlanta_6area_new",
+      "target_city_id": "Atlanta_6area_new",
+      "plan_id": "legacy_5d6867211117_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_atlanta_6area_atlanta_6area_new_atl_buckets_20260721_v2.csv",
+        "region_sha256": "27786ecae987fb8d302ec7f4a0e4f6fa67b92f9c5313e01c4ba71eb3eaf05fc9",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 297,
+        "accepted_region_rows": 297,
+        "regions": 6,
+        "postal_memberships": 297,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "POSTAL_CODE",
+          "STRATEGIC_CITY_NAME",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "new_region_name",
+          "area_type"
+        ],
+        "original_area_type_column_present": true
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\Atlanta_6area_new\\legacy_5d6867211117_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Atlanta, GA",
+      "strategic_city_name": "Atlanta_GA",
+      "target_city_id": "Atlanta_GA",
+      "plan_id": "legacy_atlanta_ga_fixed_region_postal_atlanta_ga_2_60462daf_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_atlanta_ga_2.csv",
+        "region_sha256": "7a945ff2b6461b7a06faa22ab26f07f65d906ec6cb82dbd6cd46762658c672cb",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 184,
+        "accepted_region_rows": 184,
+        "regions": 2,
+        "postal_memberships": 184,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "baseline_service_file",
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "service_count",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": false
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\Atlanta_GA\\legacy_atlanta_ga_fixed_region_postal_atlanta_ga_2_60462daf_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Atlanta, GA",
+      "strategic_city_name": "Atlanta_GA",
+      "target_city_id": "Atlanta_GA",
+      "plan_id": "legacy_atlanta_ga_fixed_region_postal_atlanta_ga_3_068890fb_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_atlanta_ga_3.csv",
+        "region_sha256": "2b2c669c35ba79482a77c43fc085b6cfc404a7aa94eccf464f881b632c5c3d92",
+        "technician_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\db_input\\technicians\\atlanta_engineer_region_assignment.csv",
+        "technician_sha256": "6ab71dd76eea30b991e9a4ab70007565378c8d96ee518fd6e7fffae7a0c435d0"
+      },
+      "row_accounting": {
+        "source_region_rows": 199,
+        "accepted_region_rows": 199,
+        "regions": 3,
+        "postal_memberships": 199,
+        "technician_assignments": 15,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3"
+        ],
+        "technician_assignment_source_present": true,
+        "original_fields": [
+          "baseline_service_file",
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "service_count",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": false
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\Atlanta_GA\\legacy_atlanta_ga_fixed_region_postal_atlanta_ga_3_068890fb_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Atlanta, GA",
+      "strategic_city_name": "Atlanta_GA",
+      "target_city_id": "Atlanta_GA",
+      "plan_id": "legacy_atlanta_ga_fixed_region_postal_atlanta_ga_4_b3f12b5a_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_atlanta_ga_4.csv",
+        "region_sha256": "2075897d5b54e39fc3c372d8b180058f8afe10848a023a8802ad172875b9711d",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 184,
+        "accepted_region_rows": 184,
+        "regions": 4,
+        "postal_memberships": 184,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "baseline_service_file",
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "service_count",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": false
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\Atlanta_GA\\legacy_atlanta_ga_fixed_region_postal_atlanta_ga_4_b3f12b5a_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Atlanta, GA",
+      "strategic_city_name": "Atlanta_GA",
+      "target_city_id": "Atlanta_GA",
+      "plan_id": "legacy_atlanta_ga_fixed_region_postal_atlanta_ga_5_8bef345e_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_atlanta_ga_5.csv",
+        "region_sha256": "4d0e5720f9f454a219c29f5c43afc59d39c266f97a76a52ddaca04dbebbb3e33",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 184,
+        "accepted_region_rows": 184,
+        "regions": 5,
+        "postal_memberships": 184,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "baseline_service_file",
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "service_count",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": false
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\Atlanta_GA\\legacy_atlanta_ga_fixed_region_postal_atlanta_ga_5_8bef345e_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Los Angeles, CA",
+      "strategic_city_name": "Los_Angeles_CA",
+      "target_city_id": "Los_Angeles_CA",
+      "plan_id": "legacy_los_angeles_ca_fixed_region_postal_los_angeles_ca_2d5c0a92_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_los_angeles_ca_3.csv",
+        "region_sha256": "d8a0d0f43c628e05461d17e5dd00e3e0cecb87ae4e7177ae02ff703993acf29e",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 413,
+        "accepted_region_rows": 413,
+        "regions": 3,
+        "postal_memberships": 413,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "baseline_service_file",
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "service_count",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": false
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\Los_Angeles_CA\\legacy_los_angeles_ca_fixed_region_postal_los_angeles_ca_2d5c0a92_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Los Angeles, CA",
+      "strategic_city_name": "Los_Angeles_CA",
+      "target_city_id": "Los_Angeles_CA",
+      "plan_id": "legacy_los_angeles_ca_fixed_region_postal_los_angeles_ca_3922c5e0_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_los_angeles_ca_4.csv",
+        "region_sha256": "e82d71fe80d7525904b6984fecf159d3a12950aed968d6c5b1ce9763dde3b8db",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 413,
+        "accepted_region_rows": 413,
+        "regions": 4,
+        "postal_memberships": 413,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "baseline_service_file",
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "service_count",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": false
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\Los_Angeles_CA\\legacy_los_angeles_ca_fixed_region_postal_los_angeles_ca_3922c5e0_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Los Angeles, CA",
+      "strategic_city_name": "Los_Angeles_CA",
+      "target_city_id": "Los_Angeles_CA",
+      "plan_id": "legacy_los_angeles_ca_fixed_region_postal_los_angeles_ca_ef454e57_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_los_angeles_ca_5.csv",
+        "region_sha256": "38aa7d268d8044f5393e2d0723c03a63d831aaddb2be7bcc5ffac8b4e2a9bd1b",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 413,
+        "accepted_region_rows": 413,
+        "regions": 5,
+        "postal_memberships": 413,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "baseline_service_file",
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "service_count",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": false
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\Los_Angeles_CA\\legacy_los_angeles_ca_fixed_region_postal_los_angeles_ca_ef454e57_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Los Angeles, CA",
+      "strategic_city_name": "Los_Angeles_CA",
+      "target_city_id": "Los_Angeles_CA",
+      "plan_id": "legacy_los_angeles_ca_fixed_region_postal_los_angeles_ca_aa76fbaa_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_los_angeles_ca_6.csv",
+        "region_sha256": "16d623a29d4b7cae4aacf5dae4c5146b9159f8acf4697ffa7ca98f409073a34c",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 413,
+        "accepted_region_rows": 413,
+        "regions": 6,
+        "postal_memberships": 413,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "baseline_service_file",
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "service_count",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": false
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\Los_Angeles_CA\\legacy_los_angeles_ca_fixed_region_postal_los_angeles_ca_aa76fbaa_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Los Angeles, CA",
+      "strategic_city_name": "los_angeles_ca_Area_Type_Clusters",
+      "target_city_id": "los_angeles_ca_Area_Type_Clusters",
+      "plan_id": "legacy_337343cbc939_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_los_angeles_ca_6_area_type.csv",
+        "region_sha256": "05dfda18e3118e9e3ce8627aa8c06fdeea6173000bc9393e7385303b59a11a89",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 408,
+        "accepted_region_rows": 408,
+        "regions": 3,
+        "postal_memberships": 408,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "new_region_name",
+          "area_type",
+          "service_count",
+          "relevant_calls",
+          "dms_calls",
+          "dms2_calls",
+          "asc_calls",
+          "dms_share_zip",
+          "dms_fit_score",
+          "density_raw",
+          "dms_avg_distance_km",
+          "distance_to_density_center_km",
+          "nearest_dms_home_distance_km",
+          "nearest_dms_home_code",
+          "is_dms_home_anchor",
+          "density_center_latitude",
+          "density_center_longitude",
+          "density_center_postal_code",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": true
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\los_angeles_ca_Area_Type_Clusters\\legacy_337343cbc939_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Los Angeles, CA - Bucket Sim Draft",
+      "strategic_city_name": "Los_Angeles_CA_Bucket_Sim_Draft",
+      "target_city_id": "Los_Angeles_CA_Bucket_Sim_Draft",
+      "plan_id": "legacy_6d4faa9523db_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_los_angeles_ca_bucket_sim_draft.csv",
+        "region_sha256": "3e69cd8fe962d6dc76517fc5f33f150742763ff06ce30c94e553a71d892c60b8",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 687,
+        "accepted_region_rows": 687,
+        "regions": 9,
+        "postal_memberships": 687,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "POSTAL_CODE",
+          "STRATEGIC_CITY_NAME",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "new_region_name",
+          "area_type"
+        ],
+        "original_area_type_column_present": true
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\Los_Angeles_CA_Bucket_Sim_Draft\\legacy_6d4faa9523db_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "North Jersey, NJ",
+      "strategic_city_name": "North_Jersey_NJ",
+      "target_city_id": "North_Jersey_NJ",
+      "plan_id": "legacy_4ae7568dd231_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_north_jersey_nj_4.csv",
+        "region_sha256": "946dcd15275de4b8928b70e0423b36b29ae69c3150989741f4805551211b9698",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 486,
+        "accepted_region_rows": 486,
+        "regions": 4,
+        "postal_memberships": 486,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "baseline_service_file",
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "service_count",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": false
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\North_Jersey_NJ\\legacy_4ae7568dd231_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "North Jersey, NJ",
+      "strategic_city_name": "North_Jersey_NJ",
+      "target_city_id": "North_Jersey_NJ",
+      "plan_id": "legacy_7a0d2dcc29ee_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_north_jersey_nj_5.csv",
+        "region_sha256": "cb0dad6b7fff56d3254314b308c8ce53267c716ccfd42cb77f61a3a5a518c66f",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 486,
+        "accepted_region_rows": 486,
+        "regions": 5,
+        "postal_memberships": 486,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "baseline_service_file",
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "service_count",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": false
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\North_Jersey_NJ\\legacy_7a0d2dcc29ee_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "North Jersey, NJ",
+      "strategic_city_name": "north_jersey_nj_Area_Type_Clusters",
+      "target_city_id": "north_jersey_nj_Area_Type_Clusters",
+      "plan_id": "legacy_f46f9eb705a6_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_north_jersey_nj_5_area_type.csv",
+        "region_sha256": "9c9502e25c5e38977c6bb9b1a9cf3efbad246d243ba84b022db3e6c2e1e61578",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 482,
+        "accepted_region_rows": 482,
+        "regions": 3,
+        "postal_memberships": 482,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "new_region_name",
+          "area_type",
+          "service_count",
+          "relevant_calls",
+          "dms_calls",
+          "dms2_calls",
+          "asc_calls",
+          "dms_share_zip",
+          "dms_fit_score",
+          "density_raw",
+          "dms_avg_distance_km",
+          "distance_to_density_center_km",
+          "nearest_dms_home_distance_km",
+          "nearest_dms_home_code",
+          "is_dms_home_anchor",
+          "density_center_latitude",
+          "density_center_longitude",
+          "density_center_postal_code",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": true
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\north_jersey_nj_Area_Type_Clusters\\legacy_f46f9eb705a6_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "North Jersey, NJ",
+      "strategic_city_name": "North_Jersey_NJ",
+      "target_city_id": "North_Jersey_NJ",
+      "plan_id": "legacy_d9e2f23abe14_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_north_jersey_nj_6.csv",
+        "region_sha256": "e9bbccdba912cd015e012d94ef6f7e25a82b6403940537eaf36a1780b9341793",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 486,
+        "accepted_region_rows": 486,
+        "regions": 6,
+        "postal_memberships": 486,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "baseline_service_file",
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "service_count",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": false
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\North_Jersey_NJ\\legacy_d9e2f23abe14_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Philadelphia, PA",
+      "strategic_city_name": "Philadelphia_PA",
+      "target_city_id": "Philadelphia_PA",
+      "plan_id": "legacy_cc33abc88fac_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_philadelphia_pa_3.csv",
+        "region_sha256": "6baf72ee14d9a50ad409a7eb3396233c856b11741e51ac555173992e4ebdaa60",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 164,
+        "accepted_region_rows": 164,
+        "regions": 3,
+        "postal_memberships": 164,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "baseline_service_file",
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "service_count",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": false
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\Philadelphia_PA\\legacy_cc33abc88fac_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Philadelphia, PA",
+      "strategic_city_name": "philadelphia_pa_Area_Type_Clusters",
+      "target_city_id": "philadelphia_pa_Area_Type_Clusters",
+      "plan_id": "legacy_5eb9a83988b0_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_philadelphia_pa_3_area_type.csv",
+        "region_sha256": "1fa9358ef6abb686f49bc6b439da26f73c2692ad2576629496203c01f24ffb98",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 162,
+        "accepted_region_rows": 162,
+        "regions": 3,
+        "postal_memberships": 162,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "new_region_name",
+          "area_type",
+          "service_count",
+          "relevant_calls",
+          "dms_calls",
+          "dms2_calls",
+          "asc_calls",
+          "dms_share_zip",
+          "dms_fit_score",
+          "density_raw",
+          "dms_avg_distance_km",
+          "distance_to_density_center_km",
+          "nearest_dms_home_distance_km",
+          "nearest_dms_home_code",
+          "is_dms_home_anchor",
+          "density_center_latitude",
+          "density_center_longitude",
+          "density_center_postal_code",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": true
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\philadelphia_pa_Area_Type_Clusters\\legacy_5eb9a83988b0_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "San Diego, CA",
+      "strategic_city_name": "San_Diego_CA",
+      "target_city_id": "San_Diego_CA",
+      "plan_id": "legacy_022d90c898db_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_san_diego_ca_3.csv",
+        "region_sha256": "c179139bcf01ce76ca9721cebd7b8fe60662925169c9fc64cae531cc59e4d8f7",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 82,
+        "accepted_region_rows": 82,
+        "regions": 3,
+        "postal_memberships": 82,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "baseline_service_file",
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "service_count",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": false
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\San_Diego_CA\\legacy_022d90c898db_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "San Diego, CA",
+      "strategic_city_name": "san_diego_ca_Area_Type_Clusters",
+      "target_city_id": "san_diego_ca_Area_Type_Clusters",
+      "plan_id": "legacy_ecd39f6d5ee7_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_san_diego_ca_3_area_type.csv",
+        "region_sha256": "0aa08b14a1cba43ffa9dc84f3fd1a20de655bcba0a6added0a1b3994b02908df",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 82,
+        "accepted_region_rows": 82,
+        "regions": 3,
+        "postal_memberships": 82,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "new_region_name",
+          "area_type",
+          "service_count",
+          "relevant_calls",
+          "dms_calls",
+          "dms2_calls",
+          "asc_calls",
+          "dms_share_zip",
+          "dms_fit_score",
+          "density_raw",
+          "dms_avg_distance_km",
+          "distance_to_density_center_km",
+          "nearest_dms_home_distance_km",
+          "nearest_dms_home_code",
+          "is_dms_home_anchor",
+          "density_center_latitude",
+          "density_center_longitude",
+          "density_center_postal_code",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": true
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\san_diego_ca_Area_Type_Clusters\\legacy_ecd39f6d5ee7_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Washington, DC",
+      "strategic_city_name": "Washington_DC",
+      "target_city_id": "Washington_DC",
+      "plan_id": "legacy_6cea3e381012_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_washington_dc_3.csv",
+        "region_sha256": "b1db24ada38df6a56e9776148e9e516016ad0fd7ec84b9fc96d5728adf57500f",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 135,
+        "accepted_region_rows": 135,
+        "regions": 3,
+        "postal_memberships": 135,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "baseline_service_file",
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "service_count",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": false
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\Washington_DC\\legacy_6cea3e381012_v1"
+    },
+    {
+      "schema": "area-map-region-plan-migration/v1",
+      "layout": "data/region_plans/<subsidiary>/<target_city>/<plan_id>/",
+      "status": "needs_review",
+      "lifecycle_stage": "migration_candidate",
+      "legacy_source": true,
+      "subsidiary_name": "LGEAI",
+      "source_strategic_city_name": "Washington, DC",
+      "strategic_city_name": "washington_dc_Area_Type_Clusters",
+      "target_city_id": "washington_dc_Area_Type_Clusters",
+      "plan_id": "legacy_75c5db57607c_v1",
+      "source": {
+        "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_washington_dc_3_area_type.csv",
+        "region_sha256": "82a762f089cf2c8a29a89b073194307708b7a7f7df8ba33456b5555c7a2685ab",
+        "technician_file": null,
+        "technician_sha256": null
+      },
+      "row_accounting": {
+        "source_region_rows": 133,
+        "accepted_region_rows": 133,
+        "regions": 3,
+        "postal_memberships": 133,
+        "technician_assignments": 0,
+        "rejects": 0
+      },
+      "quality": {
+        "needs_review_reasons": [
+          "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+          "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+        ],
+        "missing_or_noncanonical_area_type_region_seq": [
+          "1",
+          "2",
+          "3"
+        ],
+        "technician_assignment_source_present": false,
+        "original_fields": [
+          "STRATEGIC_CITY_NAME",
+          "candidate_region_count",
+          "POSTAL_CODE",
+          "region_id",
+          "region_seq",
+          "AREA_NAME",
+          "new_region_name",
+          "area_type",
+          "service_count",
+          "relevant_calls",
+          "dms_calls",
+          "dms2_calls",
+          "asc_calls",
+          "dms_share_zip",
+          "dms_fit_score",
+          "density_raw",
+          "dms_avg_distance_km",
+          "distance_to_density_center_km",
+          "nearest_dms_home_distance_km",
+          "nearest_dms_home_code",
+          "is_dms_home_anchor",
+          "density_center_latitude",
+          "density_center_longitude",
+          "density_center_postal_code",
+          "latitude",
+          "longitude"
+        ],
+        "original_area_type_column_present": true
+      },
+      "artifacts": {
+        "regions": "normalized/regions.csv",
+        "region_postal": "normalized/region_postal.csv",
+        "technician_assignments": "normalized/technician_assignments.csv",
+        "area": "normalized/area.csv",
+        "technician": "normalized/technician.csv",
+        "canonical": "canonical.json",
+        "rejects": "rejects.csv",
+        "rejects_jsonl": "rejects.jsonl"
+      },
+      "path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\region_plans\\LGEAI\\washington_dc_Area_Type_Clusters\\legacy_75c5db57607c_v1"
+    }
+  ],
+  "copy_only": true,
+  "legacy_sources_deleted": false
+}

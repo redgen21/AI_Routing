@@ -24,7 +24,13 @@ class ActivationPreview:
 class ActivationResult: status: str; plan_id: str; activation_revision: int; preview_digest: str
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-POLICY_ALLOWLIST = frozenset({"explicit_workbook_membership/v1", "active_roster_type_hard_region_soft/v1", "active_roster_area_type_fallback_region_soft/v1"})
+POLICY_ALLOWLIST = frozenset({
+    "home_distance_only", "preferred_region_soft",
+    "explicit_workbook_membership/v1",
+    "own_region_with_approved_boundary_overflow/v2",
+    "active_roster_type_hard_region_soft/v1",
+    "active_roster_area_type_fallback_region_soft/v1",
+})
 @dataclass(frozen=True)
 class GenericPlanIdentity:
     subsidiary_name: str; strategic_city_name: str; source_strategic_city_name: str; plan_id: str; policy_version: str; source_sha256: str; manifest_sha256: str; bundle_sha256: str; region_count: int; postal_count: int; technician_count: int; boundary_resolution_count: int
@@ -146,8 +152,10 @@ class GenericRegionPlanLifecycleRepository:
                 if not plan[12] or content_digest != plan[12]: raise RegionPlanRepositoryError('PLAN_CONTENT_CHECKSUM_MISMATCH')
                 actual=_generic_preview_digest(identity,revision,activation,active_id,_generic_roster_digest(masters,caps),content_digest)
                 if revision != expected_plan or activation != expected_activation or actual != preview_digest: raise RegionPlanRepositoryError('ACTIVATION_PREVIEW_STALE')
-                c.execute("delete from common_region_master where subsidiary_name=%s and strategic_city_name=%s",(identity.subsidiary_name,identity.strategic_city_name)); c.execute("insert into common_region_master(subsidiary_name,strategic_city_name,postal_code,region_seq,region_name,area_type) select p.subsidiary_name,p.strategic_city_name,p.postal_code,p.region_seq,pr.region_name,p.area_type from common_region_plan_postal p join common_region_plan_region pr using(subsidiary_name,strategic_city_name,plan_id,region_seq) where p.subsidiary_name=%s and p.strategic_city_name=%s and p.plan_id=%s",(identity.subsidiary_name,identity.strategic_city_name,identity.plan_id))
-                if c.rowcount != identity.postal_count: raise RegionPlanRepositoryError('ACTIVATION_REGION_PROJECTION_INVALID')
+                # Region membership is read from the immutable Area Plan v2
+                # tables.  Do not project it into legacy common_region_master;
+                # that table previously made deleted/hardcoded regions appear
+                # active again.
                 c.execute("delete from common_technician_capability_master where subsidiary_name=%s and strategic_city_name=%s",(identity.subsidiary_name,identity.strategic_city_name)); c.execute("delete from common_technician_master where subsidiary_name=%s and strategic_city_name=%s",(identity.subsidiary_name,identity.strategic_city_name)); c.executemany("insert into common_technician_master(subsidiary_name,strategic_city_name,employee_code,employee_name,center_type,home_address,home_city,home_state,home_country,home_postal_code,home_latitude,home_longitude,active_flag,priority_group,max_home_to_job_min) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",[(identity.subsidiary_name,identity.strategic_city_name,*x) for x in masters])
                 if c.rowcount != identity.technician_count: raise RegionPlanRepositoryError('ACTIVATION_TECHNICIAN_PROJECTION_INVALID')
                 c.executemany("insert into common_technician_capability_master(subsidiary_name,strategic_city_name,employee_code,product_group_code,product_code,repair_allowed,heavy_repair_allowed,priority_score,effective_start_date,effective_end_date) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",[(identity.subsidiary_name,identity.strategic_city_name,*x) for x in caps])
@@ -157,6 +165,15 @@ class GenericRegionPlanLifecycleRepository:
                 c.execute("update common_city_context set activation_revision=%s,policy_version=%s,context_status='active' where subsidiary_name=%s and strategic_city_name=%s and activation_revision=%s",(next_rev,identity.policy_version,identity.subsidiary_name,identity.strategic_city_name,activation))
                 if c.rowcount != 1: raise RegionPlanRepositoryError('ACTIVATION_REVISION_CONFLICT')
                 c.execute("insert into common_region_plan_activation(subsidiary_name,strategic_city_name,activation_revision,plan_id,plan_revision,preview_digest,idempotency_key,activated_by,activation_reference) values(%s,%s,%s,%s,%s,%s,%s,%s,%s)",(identity.subsidiary_name,identity.strategic_city_name,next_rev,identity.plan_id,revision,preview_digest,r['idempotency_key'],r['activated_by'],r['activation_reference']))
+                c.execute("select to_regclass('public.common_routing_plan')")
+                if c.fetchone()[0] is not None:
+                    c.execute("select region_set_id from common_routing_plan where subsidiary_name=%s and strategic_city_name=%s and routing_plan_id=%s", (identity.subsidiary_name, identity.strategic_city_name, identity.plan_id))
+                    normalized_plan = c.fetchone()
+                    if normalized_plan:
+                        c.execute("update common_routing_plan_activation set active_flag=false where subsidiary_name=%s and strategic_city_name=%s and active_flag", (identity.subsidiary_name, identity.strategic_city_name))
+                        c.execute("update common_routing_plan set plan_status='superseded',revision=revision+1,updated_at=now() where subsidiary_name=%s and strategic_city_name=%s and plan_status='active' and routing_plan_id<>%s", (identity.subsidiary_name, identity.strategic_city_name, identity.plan_id))
+                        c.execute("update common_routing_plan set plan_status='active',revision=revision+1,updated_at=now() where subsidiary_name=%s and strategic_city_name=%s and routing_plan_id=%s", (identity.subsidiary_name, identity.strategic_city_name, identity.plan_id))
+                        c.execute("insert into common_routing_plan_activation(subsidiary_name,strategic_city_name,activation_revision,routing_plan_id,activated_by,activation_reference,active_flag) values(%s,%s,%s,%s,%s,%s,true)", (identity.subsidiary_name, identity.strategic_city_name, next_rev, identity.plan_id, r['activated_by'], r['activation_reference']))
             conn.commit(); return ActivationResult('activated',identity.plan_id,next_rev,preview_digest)
         except Exception: conn.rollback(); raise
         finally: conn.close()

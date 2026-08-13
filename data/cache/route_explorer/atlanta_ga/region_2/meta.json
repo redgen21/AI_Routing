@@ -1,18 +1,20 @@
 {
-  "cache_version": "2026-07-06-fixed-region-map-v1",
+  "cache_version": "2026-08-07-fixed-region-cache-v17",
   "city_name": "Atlanta, GA",
   "best_region_count": 5,
   "selected_region_count": 2,
-  "profile_path": "260310\\Top 10_DMS_DMS2_Profile_20260317.xlsx",
-  "profile_mtime_ns": 1783388585541289800,
-  "tech_list_path": "260310\\Top10 City Tech List.xlsx",
-  "tech_list_mtime_ns": 1783391128692538500,
-  "zcta_zip_path": ".",
-  "zcta_zip_mtime_ns": 1783324694139708000,
-  "service_file": "260310\\input\\Service_202605291521_normalized_geocoded.csv",
-  "service_file_mtime_ns": 1780978463957034000,
-  "config_file": "config.json",
-  "config_mtime_ns": 1783320405484920000,
+  "profile_path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\processed\\profile\\20260317\\Top 10_DMS_DMS2_Profile_20260317_production.xlsx",
+  "profile_mtime_ns": 1784104455421709000,
+  "tech_list_path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\processed\\technicians\\Top10_City_Tech_List_map.xlsx",
+  "tech_list_mtime_ns": 1784445735480371000,
+  "zcta_zip_path": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reference\\geospatial\\tl_2024_us_zcta520.zip",
+  "zcta_zip_mtime_ns": 1773807533319431000,
+  "service_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\processed\\service\\202607071543\\Service_202607071543_normalized_geocoded.csv",
+  "service_file_mtime_ns": 1783490357953124000,
+  "config_file": "config\\config.json",
+  "config_mtime_ns": 1786068184136571000,
+  "fixed_region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_atlanta_ga_2.csv",
+  "fixed_region_file_mtime_ns": 1781694238368428000,
   "routing_cfg": {
     "distance_backend": "city_osrm_else_haversine",
     "assignment_distance_backend": "haversine",
@@ -26,7 +28,10 @@
       "Atlanta, GA": "http://20.51.244.68:5002",
       "THAILAND": "http://20.51.244.68:5003",
       "INDONESIA": "http://20.51.244.68:5004",
-      "MALAYSIA": "http://20.51.244.68:5005"
+      "MALAYSIA": "http://20.51.244.68:5005",
+      "Northeast": "http://20.51.244.68:5006",
+      "San Diego, CA": "http://20.51.244.68:5008",
+      "Washington, DC": "http://20.51.244.68:5009"
     }
   }
 }

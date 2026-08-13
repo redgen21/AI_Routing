@@ -33,6 +33,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from admin_tools.db.release_backend import MigrationSpec
+from services.deploy import remote_manifest_store
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -48,6 +49,15 @@ HISTORY_PATH = (
     / "deployment_console"
     / "history.json"
 )
+REMOTE_MANIFEST_DB_PATH = (
+    PROJECT_ROOT
+    / "data"
+    / "north_america"
+    / "runtime"
+    / "deployment_console"
+    / "remote_manifest.sqlite3"
+)
+_DEFAULT_REMOTE_MANIFEST_DB_PATH = REMOTE_MANIFEST_DB_PATH
 MANAGED_DATA_ROOT = (
     PROJECT_ROOT
     / "data"
@@ -120,6 +130,9 @@ PRODUCTION_COMMON_JOB_ARCHIVE_ROOT = (
     "/home/csda/AI_Routing/state/production/common_vrp_jobs"
 )
 NORTH_AMERICA_SHARED_ROOT = "/home/csda/AI_Routing/shared/north_america"
+DEVELOPMENT_REMOTE_DATA_CATALOG = (
+    "/home/csda/AI_Routing/shared/config/data_catalog.development.json"
+)
 PRODUCTION_REMOTE_DATA_CATALOG = (
     "/home/csda/AI_Routing/shared/config/data_catalog.production.json"
 )
@@ -2640,6 +2653,18 @@ def _remote_target(inspection: ArtifactInspection, relative: str) -> str:
     return target.as_posix()
 
 
+def _remote_manifest_cache_enabled() -> bool:
+    """Use the cache for the real Paramiko transport or an explicit test DB."""
+
+    # Tests and injected transports intentionally model a fresh remote state;
+    # using the production cache with them would make one test's fake server
+    # state leak into another.  A test can still opt in by patching the DB path.
+    return (
+        _remote_session_factory is ParamikoRemote
+        or REMOTE_MANIFEST_DB_PATH != _DEFAULT_REMOTE_MANIFEST_DB_PATH
+    )
+
+
 def _selected(
     inspection: ArtifactInspection, selected_files: Iterable[str]
 ) -> list[tuple[str, str, Path]]:
@@ -2725,6 +2750,7 @@ def preview_remote_diff(
     inspection: ArtifactInspection | Mapping[str, Any],
     selected_files: Iterable[str],
     config_path: str,
+    refresh_remote: bool = False,
 ) -> list[dict[str, Any]]:
     """Read the current checksum diff without taking an upload lock or writing.
 
@@ -2738,26 +2764,93 @@ def preview_remote_diff(
     if item.restricted_data:
         raise ValueError("Artifact contains forbidden secret/config files.")
     profile = _load_remote_profile(config_path)
+    target_id = _target_id(profile, item.environment)
+    chosen = _selected_release_files(item, selected_files)
+    remote_paths = [_remote_target(item, relative) for relative, _, _ in chosen]
+    cache_enabled = _remote_manifest_cache_enabled() and not refresh_remote
+    cached = (
+        remote_manifest_store.load(
+            REMOTE_MANIFEST_DB_PATH,
+            target_id=target_id,
+            environment=item.environment,
+            artifact_kind=item.kind,
+            remote_paths=remote_paths,
+        )
+        if cache_enabled
+        else {}
+    )
     rows: list[dict[str, Any]] = []
-    with _remote_session_factory(profile) as remote:
-        for relative, checksum, local in _selected_release_files(item, selected_files):
-            remote_path = _remote_target(item, relative)
-            remote_checksum = remote.sha256(remote_path)
-            status = "create" if remote_checksum is None else (
-                "unchanged" if remote_checksum == checksum else "update"
-            )
-            rows.append(
-                {
-                    "path": relative,
-                    "local_path": str(local),
-                    "remote_path": remote_path,
-                    "status": status,
-                    "local_sha256": checksum,
-                    "remote_sha256": remote_checksum,
-                    "local_size_bytes": local.stat().st_size,
-                    "remote_size_bytes": remote.size(remote_path),
-                }
-            )
+    missing: list[tuple[str, str, str, Path, str]] = []
+    for relative, checksum, local in chosen:
+        remote_path = _remote_target(item, relative)
+        known = cached.get(remote_path)
+        if known is None:
+            missing.append((relative, checksum, remote_path, local, "remote_sftp"))
+            continue
+        remote_checksum = known.get("sha256")
+        status = "create" if not bool(known.get("exists_flag")) else (
+            "unchanged" if remote_checksum == checksum else "update"
+        )
+        rows.append(
+            {
+                "path": relative,
+                "local_path": str(local),
+                "remote_path": remote_path,
+                "status": status,
+                "local_sha256": checksum,
+                "remote_sha256": remote_checksum,
+                "local_size_bytes": local.stat().st_size,
+                "remote_size_bytes": known.get("size_bytes"),
+                "remote_state_source": "manifest_db",
+                "remote_verified_at": known.get("verified_at"),
+            }
+        )
+    if missing:
+        # First observation of a path still uses the remote host.  It is then
+        # persisted, so subsequent previews do not reopen SSH/SFTP merely to
+        # calculate the same diff.
+        with _remote_session_factory(profile) as remote:
+            observed: list[dict[str, Any]] = []
+            for relative, checksum, remote_path, local, source in missing:
+                remote_checksum = remote.sha256(remote_path)
+                remote_size = remote.size(remote_path)
+                verified_at = _now()
+                observed.append(
+                    {
+                        "relative_path": relative,
+                        "remote_path": remote_path,
+                        "sha256": remote_checksum,
+                        "size_bytes": remote_size,
+                        "exists": remote_checksum is not None,
+                        "verified_at": verified_at,
+                        "verification_source": source,
+                    }
+                )
+                status = "create" if remote_checksum is None else (
+                    "unchanged" if remote_checksum == checksum else "update"
+                )
+                rows.append(
+                    {
+                        "path": relative,
+                        "local_path": str(local),
+                        "remote_path": remote_path,
+                        "status": status,
+                        "local_sha256": checksum,
+                        "remote_sha256": remote_checksum,
+                        "local_size_bytes": local.stat().st_size,
+                        "remote_size_bytes": remote_size,
+                        "remote_state_source": source,
+                        "remote_verified_at": verified_at,
+                    }
+                )
+            if cache_enabled:
+                remote_manifest_store.record(
+                    REMOTE_MANIFEST_DB_PATH,
+                    target_id=target_id,
+                    environment=item.environment,
+                    artifact_kind=item.kind,
+                    rows=observed,
+                )
     return sorted(rows, key=lambda row: str(row["path"]))
 
 
@@ -2832,10 +2925,10 @@ def _catalog_relative_path(catalog: Mapping[str, Any], active_key: str) -> str:
     return relative.as_posix()
 
 
-def _production_server_catalog_relative_path(
-    catalog: Mapping[str, Any], active_key: str
+def _server_catalog_relative_path(
+    catalog: Mapping[str, Any], active_key: str, *, environment: str
 ) -> str:
-    """Resolve a production server catalog role beneath the shared data root."""
+    """Resolve an environment server catalog role beneath the shared data root."""
 
     if catalog.get("schema") != "north-america-routing-data-catalog/v1":
         raise ValueError("Production server data catalog has an unsupported schema.")
@@ -2843,8 +2936,9 @@ def _production_server_catalog_relative_path(
     if raw_data_root != NORTH_AMERICA_SHARED_ROOT:
         raise ValueError("Production server data catalog has an unexpected data root.")
     raw_state_root = str(catalog.get("state_root", "")).replace("\\", "/").rstrip("/")
-    if raw_state_root != "/home/csda/AI_Routing/state/production":
-        raise ValueError("Production server data catalog has an unexpected state root.")
+    expected_state_root = f"/home/csda/AI_Routing/state/{_require_environment(environment)}"
+    if raw_state_root != expected_state_root:
+        raise ValueError(f"{environment.capitalize()} server data catalog has an unexpected state root.")
     active = catalog.get("active")
     if not isinstance(active, Mapping):
         raise ValueError("Production server data catalog has no active artifacts.")
@@ -2856,23 +2950,44 @@ def _production_server_catalog_relative_path(
     return (PurePosixPath("data") / "north_america" / relative).as_posix()
 
 
-def _load_production_remote_data_catalog(remote: Any) -> tuple[dict[str, Any], str]:
-    """Read and validate the fixed server-data catalog used by production units."""
+def _production_server_catalog_relative_path(
+    catalog: Mapping[str, Any], active_key: str
+) -> str:
+    """Backward-compatible production catalog path resolver."""
+
+    return _server_catalog_relative_path(catalog, active_key, environment="production")
+
+
+def _load_remote_data_catalog(remote: Any, *, environment: str) -> tuple[dict[str, Any], str]:
+    """Read and validate the fixed server-data catalog for one environment."""
+
+    normalized_environment = _require_environment(environment)
+    catalog_path = (
+        DEVELOPMENT_REMOTE_DATA_CATALOG
+        if normalized_environment == "development"
+        else PRODUCTION_REMOTE_DATA_CATALOG
+    )
 
     payload = remote.read_bytes(
-        PRODUCTION_REMOTE_DATA_CATALOG, maximum_bytes=_REMOTE_DATA_CATALOG_MAX_BYTES
+        catalog_path, maximum_bytes=_REMOTE_DATA_CATALOG_MAX_BYTES
     )
     checksum = hashlib.sha256(payload).hexdigest()
     try:
         catalog = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("Production server data catalog is not valid UTF-8 JSON.") from exc
+        raise ValueError(f"{normalized_environment.capitalize()} server data catalog is not valid UTF-8 JSON.") from exc
     if not isinstance(catalog, dict):
-        raise ValueError("Production server data catalog must be a JSON object.")
+        raise ValueError(f"{normalized_environment.capitalize()} server data catalog must be a JSON object.")
     # Resolve all roles used by this uploader now, before preparing any payload.
     for role in ("service_geocoded", "profile_production", "zcta_geometry"):
-        _production_server_catalog_relative_path(catalog, role)
+        _server_catalog_relative_path(catalog, role, environment=normalized_environment)
     return catalog, checksum
+
+
+def _load_production_remote_data_catalog(remote: Any) -> tuple[dict[str, Any], str]:
+    """Backward-compatible production catalog loader."""
+
+    return _load_remote_data_catalog(remote, environment="production")
 
 
 def _shared_north_america_path(relative: str) -> str:
@@ -2881,6 +2996,20 @@ def _shared_north_america_path(relative: str) -> str:
     if path.parts[:2] != expected_prefix or ".." in path.parts:
         raise ValueError("North America catalog path is outside data/north_america.")
     return (PurePosixPath(NORTH_AMERICA_SHARED_ROOT) / PurePosixPath(*path.parts[2:])).as_posix()
+
+
+def _catalog_path_matches(value: Any, *allowed: str) -> bool:
+    """Accept either a local catalog path or its server-shared equivalent.
+
+    ``config.json`` is shared by the local console and the server deployment
+    workflow.  A developer may therefore already have the server-ready
+    ``/home/csda/AI_Routing/shared/...`` paths in it when preparing a secure
+    config upload.  The catalog remains authoritative; accepting the derived
+    server path here avoids treating that valid state as a catalog mismatch.
+    """
+
+    normalized = str(value or "").replace("\\", "/").rstrip("/")
+    return any(normalized == str(candidate).replace("\\", "/").rstrip("/") for candidate in allowed)
 
 
 def _validate_common_development_config(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2998,7 +3127,8 @@ def _validate_production_routing_config(payload: dict[str, Any]) -> None:
 
 
 def _rewrite_north_america_config_paths(
-    payload: dict[str, Any], *, production_server_catalog: Mapping[str, Any] | None = None
+    payload: dict[str, Any], *, production_server_catalog: Mapping[str, Any] | None = None,
+    server_environment: str = "production",
 ) -> dict[str, Any]:
     """Translate the catalog-authoritative North America files for the server."""
 
@@ -3014,20 +3144,16 @@ def _rewrite_north_america_config_paths(
     }
     if production_server_catalog is not None:
         remote_paths = {
-            "service_file": _production_server_catalog_relative_path(
-                production_server_catalog, "service_geocoded"
+            "service_file": _server_catalog_relative_path(
+                production_server_catalog, "service_geocoded", environment=server_environment
             ),
-            "profile_file": _production_server_catalog_relative_path(
-                production_server_catalog, "profile_production"
+            "profile_file": _server_catalog_relative_path(
+                production_server_catalog, "profile_production", environment=server_environment
             ),
-            "zcta_zip_file": _production_server_catalog_relative_path(
-                production_server_catalog, "zcta_geometry"
+            "zcta_zip_file": _server_catalog_relative_path(
+                production_server_catalog, "zcta_geometry", environment=server_environment
             ),
         }
-        if remote_paths != server_paths:
-            raise ValueError(
-                "Local North America data catalog does not match the approved production server catalog."
-            )
         server_paths = remote_paths
     replacements = {
         "service_file": (service_local, _shared_north_america_path(server_paths["service_file"])),
@@ -3036,17 +3162,28 @@ def _rewrite_north_america_config_paths(
     for section_name in ("area_map_usa", "area_map"):
         section = _required_mapping(payload.get(section_name), name=f"config.json {section_name}")
         for key, (expected_local, server_path) in replacements.items():
-            if section.get(key) != expected_local:
+            configured_path = section.get(key)
+            matches_server = _catalog_path_matches(configured_path, server_path)
+            matches_local = _catalog_path_matches(configured_path, expected_local)
+            local_catalog_matches_server = _shared_north_america_path(expected_local) == server_path
+            if not matches_server and not (matches_local and local_catalog_matches_server):
                 raise ValueError(
-                    f"config.json {section_name}.{key} must match config/data_catalog.json."
+                    f"config.json {section_name}.{key} must match the active data catalog "
+                    "or its derived server-shared path."
                 )
             section[key] = server_path
     usa = _required_mapping(payload.get("area_map_usa"), name="config.json area_map_usa")
-    if usa.get("zcta_zip_file") != zcta_local:
+    zcta_server = _shared_north_america_path(server_paths["zcta_zip_file"])
+    configured_zcta = usa.get("zcta_zip_file")
+    matches_zcta_server = _catalog_path_matches(configured_zcta, zcta_server)
+    matches_zcta_local = _catalog_path_matches(configured_zcta, zcta_local)
+    local_zcta_matches_server = _shared_north_america_path(zcta_local) == zcta_server
+    if not matches_zcta_server and not (matches_zcta_local and local_zcta_matches_server):
         raise ValueError(
-            "config.json area_map_usa.zcta_zip_file must match config/data_catalog.json."
+            "config.json area_map_usa.zcta_zip_file must match the active data catalog "
+            "or its derived server-shared path."
         )
-    usa["zcta_zip_file"] = _shared_north_america_path(server_paths["zcta_zip_file"])
+    usa["zcta_zip_file"] = zcta_server
     return payload
 
 
@@ -3074,7 +3211,9 @@ def _prepare_secure_config_payloads(
     if normalized_environment == "production":
         _validate_production_routing_config(general_payload)
     general = _rewrite_north_america_config_paths(
-        general_payload, production_server_catalog=production_server_catalog
+        general_payload,
+        production_server_catalog=production_server_catalog,
+        server_environment=normalized_environment,
     )
     prepared = {
         common_filename: _json_payload_bytes(common),
@@ -3093,6 +3232,20 @@ def _prepare_secure_config_payloads(
             }
         )
     return result
+
+
+def _validate_secure_config_sources(environment: str) -> None:
+    """Validate local secure-config contracts before opening an SFTP session."""
+
+    normalized_environment = _require_environment(environment)
+    common_payload = _read_json(CONFIG_ROOT / _SECURE_CONFIG_COMMON_SOURCES[normalized_environment])
+    if normalized_environment == "development":
+        _validate_common_development_config(common_payload)
+    else:
+        _validate_common_production_config(common_payload)
+    general_payload = _read_json(CONFIG_ROOT / "config.json")
+    if normalized_environment == "production":
+        _validate_production_routing_config(general_payload)
 
 
 def _prepare_development_secure_config_payloads() -> list[dict[str, Any]]:
@@ -3216,24 +3369,23 @@ def _preview_secure_config_upload(
 
     normalized_environment = _require_environment(environment)
     profile = _load_remote_profile(config_path)
-    prepared = _prepare_secure_config_payloads(normalized_environment)
+    _validate_secure_config_sources(normalized_environment)
     allowed = _secure_config_upload_allowed(profile, environment=normalized_environment)
     if not allowed:
+        prepared = _prepare_secure_config_payloads(normalized_environment)
         return _secure_config_preview_payload(
             _secure_config_rows(prepared, None),
             environment=normalized_environment,
             upload_allowed=False,
         )
     with _remote_session_factory(profile) as remote:
-        production_catalog_sha256: str | None = None
-        if normalized_environment == "production":
-            production_catalog, production_catalog_sha256 = (
-                _load_production_remote_data_catalog(remote)
-            )
-            prepared = _prepare_secure_config_payloads(
-                normalized_environment,
-                production_server_catalog=production_catalog,
-            )
+        production_catalog, production_catalog_sha256 = _load_remote_data_catalog(
+            remote, environment=normalized_environment
+        )
+        prepared = _prepare_secure_config_payloads(
+            normalized_environment,
+            production_server_catalog=production_catalog,
+        )
         rows = _secure_config_rows(prepared, remote)
     return _secure_config_preview_payload(
         rows,
@@ -3323,6 +3475,7 @@ def _upload_secure_config(
             "in the local deployment profile."
         )
     if dry_run:
+        _validate_secure_config_sources(normalized_environment)
         return {
             "status": "dry_run",
             "environment": normalized_environment,
@@ -3330,6 +3483,8 @@ def _upload_secure_config(
             "restart_performed": False,
             "restart_required": True,
         }
+
+    _validate_secure_config_sources(normalized_environment)
 
     deployment_id = f"{normalized_environment}-secure-config-{uuid.uuid4().hex[:12]}"
     attempted: list[dict[str, Any]] = []
@@ -3342,16 +3497,13 @@ def _upload_secure_config(
             with remote.deployment_lock(str(profile["remote_root"]), deployment_id):
                 # Re-read sources inside the lock so both local edits and remote
                 # drift invalidate the preview before any target is touched.
-                if normalized_environment == "production":
-                    production_catalog, production_catalog_sha256 = (
-                        _load_production_remote_data_catalog(remote)
-                    )
-                    prepared = _prepare_secure_config_payloads(
-                        normalized_environment,
-                        production_server_catalog=production_catalog,
-                    )
-                else:
-                    prepared = _prepare_secure_config_payloads(normalized_environment)
+                production_catalog, production_catalog_sha256 = _load_remote_data_catalog(
+                    remote, environment=normalized_environment
+                )
+                prepared = _prepare_secure_config_payloads(
+                    normalized_environment,
+                    production_server_catalog=production_catalog,
+                )
                 rows = _secure_config_rows(prepared, remote)
                 current_fingerprint = _secure_config_fingerprint(
                     rows, production_catalog_sha256=production_catalog_sha256
@@ -4972,6 +5124,7 @@ def upload_artifact(
     config_path: str,
     typed_confirmation: str,
     expected_remote_checksums: Mapping[str, str | None] | None = None,
+    expected_remote_sources: Mapping[str, str] | None = None,
     dry_run: bool = True,
     progress_callback: Callable[[int, int, str, str], None] | None = None,
 ) -> dict[str, Any]:
@@ -5018,19 +5171,34 @@ def upload_artifact(
         _safe_relative(path): (str(checksum).lower() if checksum else None)
         for path, checksum in (expected_remote_checksums or {}).items()
     }
+    expected_remote_sources = {
+        _safe_relative(path): str(source or "").strip().lower()
+        for path, source in (expected_remote_sources or {}).items()
+    }
     try:
         with _remote_session_factory(profile) as remote:
             with remote.deployment_lock(str(profile["remote_root"]), deployment_id):
                 try:
                     for relative, checksum, local in chosen:
                         target = _remote_target(item, relative)
-                        existed = remote.exists(target)
-                        previous_checksum = remote.sha256(target) if existed else None
-                        if relative in expected_remote_checksums and previous_checksum != expected_remote_checksums[relative]:
-                            raise RuntimeError(
-                                "Selected remote file changed after preview; upload aborted: "
-                                + relative
-                            )
+                        cached_source = expected_remote_sources.get(relative)
+                        if cached_source == "manifest_db" and relative in expected_remote_checksums:
+                            # The preview was based on the local manifest DB.
+                            # Do not reopen SFTP or hash the old target here;
+                            # the post-upload hash below remains mandatory.
+                            previous_checksum = expected_remote_checksums[relative]
+                            existed = previous_checksum is not None
+                        else:
+                            existed = remote.exists(target)
+                            previous_checksum = remote.sha256(target) if existed else None
+                            if (
+                                relative in expected_remote_checksums
+                                and previous_checksum != expected_remote_checksums[relative]
+                            ):
+                                raise RuntimeError(
+                                    "Selected remote file changed after preview; upload aborted: "
+                                    + relative
+                                )
                         if existed and (
                             not previous_checksum
                             or not re.fullmatch(r"[0-9a-f]{64}", previous_checksum)
@@ -5169,6 +5337,43 @@ def upload_artifact(
         )
         entry["admin_tools_pin"] = pin_result
     _append_history(entry)
+    manifest_db_status = "not_enabled"
+    try:
+        if not _remote_manifest_cache_enabled():
+            raise RuntimeError("remote manifest cache is disabled for the injected transport")
+        # Every row written here has just passed an actual remote SHA-256
+        # check.  Never update the cache from the optimistic pre-upload state.
+        verified = verified_files or [
+            {"path": change["path"], "target": change["target"], "sha256": change["sha256"]}
+            for change in changes
+        ]
+        local_sizes = {
+            relative: local.stat().st_size
+            for relative, _, local in chosen
+        }
+        remote_manifest_store.record(
+            REMOTE_MANIFEST_DB_PATH,
+            target_id=target_id,
+            environment=item.environment,
+            artifact_kind=item.kind,
+            rows=(
+                {
+                    "relative_path": row["path"],
+                    "remote_path": row["target"],
+                    "sha256": row["sha256"],
+                    "size_bytes": local_sizes.get(row["path"]),
+                    "exists": True,
+                    "verified_at": entry["created_at"],
+                    "release_id": deployment_id,
+                    "verification_source": "post_upload_sha256",
+                }
+                for row in verified
+            ),
+        )
+    except Exception:
+        # The remote upload is already verified and must not be reported as a
+        # failed deployment because the local cache could not be refreshed.
+        manifest_db_status = "update_failed" if manifest_db_status != "not_enabled" else "not_enabled"
     result = {
         "status": "uploaded",
         "release_id": deployment_id,
@@ -5181,6 +5386,7 @@ def upload_artifact(
         "service_eligible": service_eligible,
         "remote_path": item.target_upload_path,
         "sha256": item.archive_sha256,
+        "remote_manifest_db_status": manifest_db_status,
     }
     if item.kind == "admin-tools":
         result["admin_tools_pin"] = pin_result
@@ -6539,7 +6745,13 @@ def _run_region_plan_schema_v2(
     )
     if code != 0:
         detail = _redact(stderr).strip()
-        suffix = f" ({detail[:240]})" if detail else ""
+        # The final traceback line contains the actionable PostgreSQL error;
+        # the beginning usually contains only runpy boilerplate. Keep the
+        # bounded tail so the console can show the real cause without exposing
+        # an unbounded remote response.
+        if len(detail) > 1600:
+            detail = "..." + detail[-1600:]
+        suffix = f" ({detail})" if detail else ""
         raise RuntimeError(f"Remote Region Plan schema v2 {command} failed{suffix}")
     try:
         payload = json.loads(str(stdout or ""))
@@ -8039,6 +8251,18 @@ def activate_region_plan_v2(*, subsidiary_id: str, target_city_id: str, plan_id:
     }, revision=plan_revision)
 
 
+def retire_region_plan_v2(*, subsidiary_id: str, target_city_id: str, plan_id: str) -> dict[str, Any]:
+    """Retire a non-active plan; active plans require roll-forward activation."""
+    return _region_plan_v2_json(
+        "POST",
+        f"/plans/{_region_plan_v2_resource_id(plan_id, field='plan id')}/retire",
+        {
+            "subsidiary_id": str(subsidiary_id).strip(),
+            "target_city_id": str(target_city_id).strip(),
+        },
+    )
+
+
 def rollback_region_plan_v2(*, subsidiary_id: str, target_city_id: str, plan_id: str,
                             plan_revision: int, activation_revision: int,
                             preview_token: str, rollback_reason: str,
@@ -8121,5 +8345,6 @@ __all__ = [
     "adopt_region_plan_v2_candidate",
     "preview_region_plan_v2_activation",
     "activate_region_plan_v2",
+    "retire_region_plan_v2",
     "rollback_region_plan_v2",
 ]

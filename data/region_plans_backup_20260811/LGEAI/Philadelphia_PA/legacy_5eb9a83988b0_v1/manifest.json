@@ -1,0 +1,77 @@
+{
+  "artifacts": {
+    "area": "normalized/area.csv",
+    "canonical": "canonical.json",
+    "region_postal": "normalized/region_postal.csv",
+    "regions": "normalized/regions.csv",
+    "rejects": "rejects.csv",
+    "rejects_jsonl": "rejects.jsonl",
+    "technician": "normalized/technician.csv",
+    "technician_assignments": "normalized/technician_assignments.csv"
+  },
+  "layout": "data/region_plans/<subsidiary>/<source_city>/<plan_id>/",
+  "legacy_source": true,
+  "lifecycle_stage": "migration_candidate",
+  "plan_id": "legacy_5eb9a83988b0_v1",
+  "quality": {
+    "missing_or_noncanonical_area_type_region_seq": [
+      "1",
+      "2",
+      "3"
+    ],
+    "needs_review_reasons": [
+      "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+      "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+    ],
+    "original_area_type_column_present": true,
+    "original_fields": [
+      "STRATEGIC_CITY_NAME",
+      "candidate_region_count",
+      "POSTAL_CODE",
+      "region_id",
+      "region_seq",
+      "AREA_NAME",
+      "new_region_name",
+      "area_type",
+      "service_count",
+      "relevant_calls",
+      "dms_calls",
+      "dms2_calls",
+      "asc_calls",
+      "dms_share_zip",
+      "dms_fit_score",
+      "density_raw",
+      "dms_avg_distance_km",
+      "distance_to_density_center_km",
+      "nearest_dms_home_distance_km",
+      "nearest_dms_home_code",
+      "is_dms_home_anchor",
+      "density_center_latitude",
+      "density_center_longitude",
+      "density_center_postal_code",
+      "latitude",
+      "longitude"
+    ],
+    "technician_assignment_source_present": false
+  },
+  "row_accounting": {
+    "accepted_region_rows": 162,
+    "postal_memberships": 162,
+    "regions": 3,
+    "rejects": 0,
+    "source_region_rows": 162,
+    "technician_assignments": 0
+  },
+  "schema": "area-map-region-plan-migration/v1",
+  "source": {
+    "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_philadelphia_pa_3_area_type.csv",
+    "region_sha256": "1fa9358ef6abb686f49bc6b439da26f73c2692ad2576629496203c01f24ffb98",
+    "technician_file": null,
+    "technician_sha256": null
+  },
+  "source_strategic_city_name": "Philadelphia, PA",
+  "status": "needs_review",
+  "strategic_city_name": "philadelphia_pa_Area_Type_Clusters",
+  "subsidiary_name": "LGEAI",
+  "target_city_id": "philadelphia_pa_Area_Type_Clusters"
+}

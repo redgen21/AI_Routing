@@ -1,0 +1,60 @@
+{
+  "artifacts": {
+    "area": "normalized/area.csv",
+    "canonical": "canonical.json",
+    "region_postal": "normalized/region_postal.csv",
+    "regions": "normalized/regions.csv",
+    "rejects": "rejects.csv",
+    "rejects_jsonl": "rejects.jsonl",
+    "technician": "normalized/technician.csv",
+    "technician_assignments": "normalized/technician_assignments.csv"
+  },
+  "layout": "data/region_plans/<subsidiary>/<source_city>/<plan_id>/",
+  "legacy_source": true,
+  "lifecycle_stage": "migration_candidate",
+  "plan_id": "legacy_atlanta_ga_fixed_region_postal_atlanta_ga_3_068890fb_v1",
+  "quality": {
+    "missing_or_noncanonical_area_type_region_seq": [
+      "1",
+      "2",
+      "3"
+    ],
+    "needs_review_reasons": [
+      "AREA_TYPE_MISSING_OR_NOT_CANONICAL"
+    ],
+    "original_area_type_column_present": false,
+    "original_fields": [
+      "baseline_service_file",
+      "STRATEGIC_CITY_NAME",
+      "candidate_region_count",
+      "POSTAL_CODE",
+      "region_id",
+      "region_seq",
+      "AREA_NAME",
+      "service_count",
+      "latitude",
+      "longitude"
+    ],
+    "technician_assignment_source_present": true
+  },
+  "row_accounting": {
+    "accepted_region_rows": 199,
+    "postal_memberships": 199,
+    "regions": 3,
+    "rejects": 0,
+    "source_region_rows": 199,
+    "technician_assignments": 15
+  },
+  "schema": "area-map-region-plan-migration/v1",
+  "source": {
+    "region_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\reviewed\\regions\\fixed_region_postal_atlanta_ga_3.csv",
+    "region_sha256": "2b2c669c35ba79482a77c43fc085b6cfc404a7aa94eccf464f881b632c5c3d92",
+    "technician_file": "\\\\vpcnas-dm-01.cloudpc.lge.net\\Userdata01$\\yongbae.park\\python\\북미 라우팅\\data\\north_america\\db_input\\technicians\\atlanta_engineer_region_assignment.csv",
+    "technician_sha256": "6ab71dd76eea30b991e9a4ab70007565378c8d96ee518fd6e7fffae7a0c435d0"
+  },
+  "source_strategic_city_name": "Atlanta, GA",
+  "status": "needs_review",
+  "strategic_city_name": "Atlanta_GA",
+  "subsidiary_name": "LGEAI",
+  "target_city_id": "Atlanta_GA"
+}

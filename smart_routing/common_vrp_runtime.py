@@ -24,6 +24,7 @@ from .common_vrp_db import (
     get_routing_request,
     get_routing_result,
     get_active_region_plan_snapshot,
+    get_configured_region_plan_snapshot,
     list_active_region_plan_contexts,
     list_avoid_areas,
     list_capabilities,
@@ -49,11 +50,15 @@ AREA_TYPE_ROUTING_CITY_NAMES = set()
 AREA_TYPE_ROUTING_CITY_SUFFIXES = (" - AREA TYPE CLUSTERS", " - BUCKET SIM DRAFT")
 ATLANTA_6AREA_CITY = "Atlanta_6area"
 ATLANTA_6AREA_MANAGED_MASTER_REQUIRED = "ATLANTA_6AREA_MANAGED_MASTER_REQUIRED"
+HOME_DISTANCE_ONLY = "home_distance_only"
+PREFERRED_REGION_SOFT = "preferred_region_soft"
 OWN_REGION_WITH_APPROVED_BOUNDARY_OVERFLOW_V1 = "own_region_with_approved_boundary_overflow/v1"
 OWN_REGION_WITH_APPROVED_BOUNDARY_OVERFLOW_V2 = "own_region_with_approved_boundary_overflow/v2"
 ACTIVE_ROSTER_TYPE_HARD_REGION_SOFT_V1 = "active_roster_type_hard_region_soft/v1"
 ACTIVE_ROSTER_AREA_TYPE_FALLBACK_REGION_SOFT_V1 = "active_roster_area_type_fallback_region_soft/v1"
 ATLANTA_6AREA_SUPPORTED_POLICY_VERSIONS = frozenset({
+    HOME_DISTANCE_ONLY,
+    PREFERRED_REGION_SOFT,
     OWN_REGION_WITH_APPROVED_BOUNDARY_OVERFLOW_V1,
     OWN_REGION_WITH_APPROVED_BOUNDARY_OVERFLOW_V2,
     "explicit_workbook_membership/v1",
@@ -202,7 +207,16 @@ def list_runtime_contexts(config_path: Path = COMMON_CONFIG_PATH) -> dict[str, A
 
 def _active_atlanta6_plan(subsidiary_name: str, strategic_city_name: str, config_path: Path) -> dict[str, Any] | None:
     try:
-        snapshot = get_active_region_plan_snapshot(subsidiary_name, strategic_city_name, config_path=config_path)
+        # City Config owns the selected plan.  The activation table remains a
+        # backward-compatible fallback only for cities that have not migrated
+        # to explicit plan selection yet.
+        snapshot = get_configured_region_plan_snapshot(
+            subsidiary_name,
+            strategic_city_name,
+            config_path=config_path,
+        )
+        if snapshot is None:
+            snapshot = get_active_region_plan_snapshot(subsidiary_name, strategic_city_name, config_path=config_path)
     except RuntimeError as exc:
         if str(exc) in {"ACTIVE_REGION_PLAN_NOT_FOUND", "REGION_PLAN_RUNTIME_DISABLED_IN_PRODUCTION"}:
             return None
@@ -210,8 +224,8 @@ def _active_atlanta6_plan(subsidiary_name: str, strategic_city_name: str, config
     status = str(snapshot.get("status", snapshot.get("plan_status", ""))).strip().lower()
     context_status = str(snapshot.get("context_status", "")).strip().lower()
     enabled = snapshot.get("enabled", snapshot.get("feature_enabled", False))
-    if enabled is not True or status != "active" or context_status not in {"", "active"}:
-        raise ValueError("ATLANTA_6AREA_ACTIVE_PLAN_REQUIRED")
+    if enabled is not True or status not in {"active", "reviewed"} or context_status not in {"", "active", "reviewed"}:
+        raise ValueError("CONFIGURED_REGION_PLAN_MUST_BE_REVIEWED_OR_ACTIVE")
     if not str(snapshot.get("plan_id", "")).strip() or not str(snapshot.get("checksum", snapshot.get("bundle_sha256", "")).strip()):
         raise ValueError("ATLANTA_6AREA_PLAN_SNAPSHOT_INVALID")
     _atlanta6_snapshot_policy_version(snapshot)
@@ -302,6 +316,8 @@ def _apply_active_region_plan(payload: dict[str, Any], snapshot: dict[str, Any] 
         enriched_tech["assigned_region_name"] = str(
             assignment.get("assigned_region_name", assignment.get("region_name", region_names.get(str(assigned_region_seq), "")))
         ).strip()
+        if policy_version == PREFERRED_REGION_SOFT:
+            enriched_tech["preferred_region_name"] = enriched_tech["assigned_region_name"]
         selected_technicians.append(enriched_tech)
     execution["technicians"] = selected_technicians
     active_codes = {str(tech.get("employee_code", "")).strip() for tech in execution["technicians"]}
@@ -315,6 +331,34 @@ def _apply_active_region_plan(payload: dict[str, Any], snapshot: dict[str, Any] 
         for tech in execution["technicians"]
         if str(tech.get("center_type", "")).strip().upper() == "DMS2"
     }
+    if policy_version in {HOME_DISTANCE_ONLY, PREFERRED_REGION_SOFT}:
+        # These two policies use the selected plan as the roster/context only.
+        # Home-distance ignores region membership; preferred-region exposes it
+        # as an affinity and never as a hard eligibility restriction.
+        if policy_version == PREFERRED_REGION_SOFT:
+            for job in execution.get("jobs", []):
+                postal = str(job.get("postal_code", job.get("zip_code", ""))).strip().replace(".0", "").zfill(5)
+                membership = postal_region.get(postal)
+                if membership:
+                    region = str(membership.get("region_seq", "")).strip()
+                    name = str(membership.get("region_name") or region_names.get(region) or f"Region {region}").strip()
+                    job["region_seq"] = membership.get("region_seq")
+                    job["region_name"] = name
+                    job["region_preference"] = {"region_seq": membership.get("region_seq"), "region_name": name}
+                else:
+                    job["region_preference_diagnostic"] = "REGION_PREFERENCE_UNRESOLVED"
+        options = dict(execution.get("options") or {})
+        options["region_policy"] = policy_version
+        options["region_plan"] = {
+            "plan_id": str(snapshot["plan_id"]),
+            "plan_revision": snapshot.get("revision", snapshot.get("plan_revision")),
+            "policy_version": policy_version,
+            "checksum": str(snapshot.get("checksum", snapshot.get("bundle_sha256"))),
+            "activation_revision": snapshot.get("activation_revision"),
+        }
+        execution["options"] = options
+        execution["region_plan"] = dict(options["region_plan"])
+        return execution
     overflow_by_postal = {str(row.get("postal_code", "")).strip().zfill(5): row for row in overflow_rows}
     jobs: list[dict[str, Any]] = []
     for job in list(execution.get("jobs", [])):

@@ -27,6 +27,29 @@ class Repo:
 
 
 class RegionPlanV2ApiTests(unittest.TestCase):
+    def test_legacy_city_names_are_valid_scope_keys(self):
+        api._validate_scope_identifiers({"subsidiary_id": "LGEAI", "target_city_id": "Atlanta, GA"})
+
+    def test_city_registry_includes_legacy_region_only_city(self):
+        class Cursor:
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+            def execute(self, *_): pass
+            def fetchall(self): return [("LGEAI", "Atlanta, GA", 137, 0, ["region_master"])]
+
+        class Connection:
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+            def cursor(self): return Cursor()
+
+        with patch.object(api, "get_db_connection", return_value=Connection()):
+            status, result = api.handle("cities", {}, config_path="injected.json")
+        self.assertEqual(200, status)
+        city = result["data"]["cities"][0]
+        self.assertEqual("Atlanta, GA", city["source_city_id"])
+        self.assertEqual("needs_review", city["migration_status"])
+        self.assertEqual(["region_master"], city["registry_sources"])
+
     def test_console_routes_and_headers(self):
         self.assertEqual("imports", _region_plan_v2_route("/api/region-plans/v2/imports", {})[0])
         self.assertEqual("list", _region_plan_v2_route("/api/region-plans/v2/plans/list", {})[0])

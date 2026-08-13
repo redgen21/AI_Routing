@@ -1,0 +1,19 @@
+{
+  "needs_review_reasons": [
+    "AREA_TYPE_MISSING_OR_NOT_CANONICAL",
+    "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+  ],
+  "normalized_artifacts": [
+    "normalized/regions.csv",
+    "normalized/region_postal.csv",
+    "normalized/technician_assignments.csv",
+    "normalized/area.csv",
+    "normalized/technician.csv"
+  ],
+  "plan_id": "legacy_ecd39f6d5ee7_v1",
+  "reason": "Legacy source normalization is complete, but this bundle is not importable until all review reasons are resolved.",
+  "schema": "region-plan-canonical-pending/v1",
+  "source_strategic_city_name": "San Diego, CA",
+  "status": "needs_review",
+  "target_city_id": "san_diego_ca_Area_Type_Clusters"
+}

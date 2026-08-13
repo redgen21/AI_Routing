@@ -1,0 +1,4 @@
+subsidiary_name,strategic_city_name,plan_id,region_id,region_seq,region_name,new_region_name,area_type,required_center_type
+LGEAI,"San Diego, CA",legacy_022d90c898db_v1,san_diego_ca_r01,1,Region 1,Region 1,,
+LGEAI,"San Diego, CA",legacy_022d90c898db_v1,san_diego_ca_r02,2,Region 2,Region 2,,
+LGEAI,"San Diego, CA",legacy_022d90c898db_v1,san_diego_ca_r03,3,Region 3,Region 3,,

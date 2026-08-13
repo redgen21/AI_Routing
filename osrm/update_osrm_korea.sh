@@ -14,7 +14,7 @@ DATA_DIR="${OSRM_STORAGE_ROOT}/south-korea"
 PBF_PATH="${DATA_DIR}/south-korea-latest.osm.pbf"
 DOWNLOAD_URL="${DOWNLOAD_URL:-https://download.geofabrik.de/asia/south-korea-latest.osm.pbf}"
 REQUIRED_SUFFIXES=(
-  partition cells cell_metrics cnbg datasource_names ebg ebg_nodes edges
+  "" partition cells cell_metrics cnbg datasource_names ebg ebg_nodes edges
   fileIndex geometry icd mldgr names properties ramIndex tld tls
   turn_duration_penalties turn_weight_penalties
 )

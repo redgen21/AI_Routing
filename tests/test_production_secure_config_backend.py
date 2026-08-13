@@ -264,7 +264,7 @@ class ProductionSecureConfigBackendTests(unittest.TestCase):
             remote.files[console_backend.PRODUCTION_REMOTE_DATA_CATALOG] = json.dumps(
                 mismatched_catalog
             ).encode("utf-8")
-            with self.assertRaisesRegex(ValueError, "does not match") as raised:
+            with self.assertRaisesRegex(ValueError, "must match the active data catalog") as raised:
                 console_backend.preview_production_secure_config_upload(
                     environment="production", config_path="config/server_deploy.local.json"
                 )

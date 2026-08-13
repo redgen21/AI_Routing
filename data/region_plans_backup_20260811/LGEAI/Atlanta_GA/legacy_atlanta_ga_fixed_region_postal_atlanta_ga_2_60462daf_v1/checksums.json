@@ -1,0 +1,11 @@
+{
+  "canonical.json": "df5935a4cbfc094cc1bcd38458e13fe1c1ac72d550d26f4d29c4f6ce68b6a426",
+  "manifest.json": "9adaf7a186882bc6111e0ab93be3d7da2ce4b7456ccc1248a7b6db61ab1f3842",
+  "normalized/area.csv": "444f8ae06c41fdf48ff5267fd928ef8ccbfc4a08dfe508675c378684cd818404",
+  "normalized/region_postal.csv": "686f5fbf8ecd0583d5b907e0817fb481304965fa379d5b97c7c1f3d5abb042e4",
+  "normalized/regions.csv": "977ca796f8dd8384292ce7e6342d89737677331a9a66644fc601e3be148dffd3",
+  "normalized/technician.csv": "1b444cb4824414d3ecbdbbee29646c555447ea94a6182af6f29b45730a293c88",
+  "normalized/technician_assignments.csv": "8765a71b840ac80b40839840d099db517ec3192df1b62b4cf78dd611dcf3b389",
+  "rejects.csv": "f0d7745ca76b70489759d044258b8374d84cdd4aad101c540de7944fc8a3e503",
+  "rejects.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

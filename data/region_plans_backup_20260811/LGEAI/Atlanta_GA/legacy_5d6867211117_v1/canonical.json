@@ -1,0 +1,18 @@
+{
+  "needs_review_reasons": [
+    "TECHNICIAN_REGION_ASSIGNMENT_MISSING"
+  ],
+  "normalized_artifacts": [
+    "normalized/regions.csv",
+    "normalized/region_postal.csv",
+    "normalized/technician_assignments.csv",
+    "normalized/area.csv",
+    "normalized/technician.csv"
+  ],
+  "plan_id": "legacy_5d6867211117_v1",
+  "reason": "Legacy source normalization is complete, but this bundle is not importable until all review reasons are resolved.",
+  "schema": "region-plan-canonical-pending/v1",
+  "source_strategic_city_name": "Atlanta_6area",
+  "status": "needs_review",
+  "target_city_id": "Atlanta_6area_new"
+}

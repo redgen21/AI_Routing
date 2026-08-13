@@ -7,6 +7,7 @@ import io
 import json
 from pathlib import Path
 import re
+from typing import Mapping
 
 import folium
 import geopandas as gpd
@@ -17,15 +18,11 @@ from folium.plugins import MarkerCluster
 
 from smart_routing.area_map import (
     ALL_CITIES,
-    AREA_TYPE_CLUSTER_REGION_COUNT,
-    BUCKET_SIM_DRAFT_REGION_COUNT,
     CACHE_VERSION as AREA_MAP_CACHE_VERSION,
     get_latest_geocoded_service_file as _area_map_get_latest_geocoded_service_file,
     load_city_map_data as _area_map_load_city_map_data,
     load_zcta_geometry as _area_map_load_zcta_geometry,
     load_profile_data as _area_map_load_profile_data,
-    _get_all_available_fixed_region_options,
-    load_region_count_options,
     load_region_count_stats,
     load_route_explorer_data as _area_map_load_route_explorer_data,
     load_service_points as _area_map_load_service_points,
@@ -33,9 +30,19 @@ from smart_routing.area_map import (
 from smart_routing.census_geocoder import load_geocode_cache, merge_service_with_geocodes
 from smart_routing.data_catalog import na_data_path
 from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
+from smart_routing.routing_policy_catalog import (
+    routing_policy_description,
+    routing_policy_label,
+)
 from tools.data.atlanta_6area_plan import (
     Atlanta6AreaPlanError,
     parse_atlanta_6area_workbook,
+)
+from tools.data.region_plan_area_map import (
+    AreaMapRegionPlanError,
+    POLICY_MODES as REGION_PLAN_POLICY_MODES,
+    build_area_map_region_plan,
+    save_area_map_region_plan,
 )
 
 
@@ -47,10 +54,6 @@ AREA_MAP_CONFIG_SECTION = "area_map_usa"
 PROFILE_FILE = na_data_path("profile_production")
 ATLANTA_6AREA_WORKBOOK = Path("260310/New ATL Buckets.xlsx")
 PRODUCTION_INPUT_DIR = na_data_path("region_seed_dir")
-CURRENT_REGION_LABEL = "Current Coverage"
-AREA_TYPE_REGION_PREFIX = "Area Type Clusters"
-BUCKET_SIM_DRAFT_LABEL = "Bucket Sim Draft"
-ATLANTA_6AREA_LABEL = "6 Area"
 ALL_OPTION = "ALL"
 BLANK_CITY_OPTION = "(Blank)"
 AREA_TYPE_FILTERS = [
@@ -63,20 +66,11 @@ DEFAULT_CITY_OSRM_URLS = {
     "Los Angeles, CA": "http://20.51.244.68:5001",
     "Atlanta, GA": "http://20.51.244.68:5002",
 }
-ATLANTA_6AREA_CITY_NAME = "Atlanta_6area"
-ATLANTA_REGION_CITY_NAMES = (
-    ATLANTA_6AREA_CITY_NAME,
-    "Atlanta_3area",
-    "Atlanta_6area_new",
-    "Atlanta_6area_overlab",
-)
-DEFAULT_CITY_OSRM_URLS.update({city_name: DEFAULT_CITY_OSRM_URLS["Atlanta, GA"] for city_name in ATLANTA_REGION_CITY_NAMES})
-CITY_BASE_ALIASES = {city_name: "Atlanta, GA" for city_name in ATLANTA_REGION_CITY_NAMES}
+REGION_PLAN_ROOT = Path("data/region_plans")
 COUNTRY_ROUTE_KEYS = {"THAILAND", "INDONESIA", "MALAYSIA"}
 ROUTE_CITY_ALIASES = {
     "North Jersey, NJ": "Northeast",
     "Philadelphia, PA": "Northeast",
-    **CITY_BASE_ALIASES,
 }
 PINK_SM_LABEL_CODES = {
     "AI102692",
@@ -124,8 +118,9 @@ def get_latest_geocoded_service_file():
 
 
 def _base_city_name(city_name: str) -> str:
-    normalized = str(city_name or "").strip()
-    return CITY_BASE_ALIASES.get(normalized, normalized)
+    # Area Plans carry their own source-strategic-city lineage.  Do not map
+    # policy-city names through a hardcoded Atlanta alias table.
+    return str(city_name or "").strip()
 
 
 def load_city_map_data(city_name: str = ALL_CITIES):
@@ -162,9 +157,9 @@ def get_route_explorer_data(
     cache_version: str,
     service_source_fingerprint: str = "",
 ):
-    # Atlanta_6area is sourced only from the reviewed workbook. Never ask the
-    # clustering/sweep loader to synthesize an integrated 6-region candidate.
-    source_region_count = None if city_name == ATLANTA_6AREA_CITY_NAME else region_count
+    # Region membership is supplied by the selected Area Plan.  The legacy
+    # region-count loader is intentionally never used by the map runtime.
+    source_region_count = None
     # The fingerprint exists only to invalidate Streamlit's in-memory cache.
     # The authoritative loader resolves the configured source and validates its
     # own disk-cache metadata (source path, mtime, and config) before returning.
@@ -258,62 +253,10 @@ def _filter_area_type(df: pd.DataFrame, selected_area_types: list[str] | None) -
     return df[df["area_type"].astype(str).str.strip().str.upper().isin(selected)].copy()
 
 
-def _parse_region_option(region_option: str) -> int | None:
-    if region_option == CURRENT_REGION_LABEL:
-        return None
-    if region_option == BUCKET_SIM_DRAFT_LABEL:
-        return BUCKET_SIM_DRAFT_REGION_COUNT
-    if region_option.startswith(AREA_TYPE_REGION_PREFIX):
-        return AREA_TYPE_CLUSTER_REGION_COUNT
-    if region_option.startswith("New Region (") and region_option.endswith(" regions)"):
-        try:
-            return int(region_option.split("(", 1)[1].split(" ", 1)[0])
-        except (ValueError, IndexError):
-            return None
-    try:
-        return int(str(region_option).replace("New Region ", "").strip())
-    except (ValueError, TypeError):
-        return None
-
-
-def _region_option_labels(city_name: str, candidate_counts: list[int]) -> tuple[list[str], dict[str, int | None]]:
-    labels = [CURRENT_REGION_LABEL]
-    mapping: dict[str, int | None] = {CURRENT_REGION_LABEL: None}
-
-    all_fixed_options_with_types = {count: type_label for count, type_label in _get_all_available_fixed_region_options(city_name)}
-
-    for count in sorted(count for count in candidate_counts if count > 0):
-        type_label = all_fixed_options_with_types.get(int(count))
-
-        if type_label == "area_type":
-            labels.append(AREA_TYPE_REGION_PREFIX)
-            mapping[AREA_TYPE_REGION_PREFIX] = int(count)
-        elif type_label == "fixed" or type_label is None:
-            label = f"New Region ({int(count)} regions)"
-            labels.append(label)
-            mapping[label] = int(count)
-
-    if all_fixed_options_with_types.get(AREA_TYPE_CLUSTER_REGION_COUNT) == "area_type":
-        labels.append(AREA_TYPE_REGION_PREFIX)
-        mapping[AREA_TYPE_REGION_PREFIX] = AREA_TYPE_CLUSTER_REGION_COUNT
-    if all_fixed_options_with_types.get(BUCKET_SIM_DRAFT_REGION_COUNT) == "bucket_sim_draft":
-        labels.append(BUCKET_SIM_DRAFT_LABEL)
-        mapping[BUCKET_SIM_DRAFT_LABEL] = BUCKET_SIM_DRAFT_REGION_COUNT
-
-    return labels, mapping
-
-
 def _region_options_for_city(city_name: str) -> tuple[list[str], dict[str, int | None]]:
-    if city_name == ATLANTA_6AREA_CITY_NAME:
-        return (
-            [CURRENT_REGION_LABEL, ATLANTA_6AREA_LABEL],
-            {CURRENT_REGION_LABEL: None, ATLANTA_6AREA_LABEL: 6},
-        )
-    runtime_city_name = _base_city_name(city_name)
-    return _region_option_labels(
-        runtime_city_name,
-        load_region_count_options(runtime_city_name),
-    )
+    # Retained as a compatibility shim for imports from older local helpers;
+    # region choices are no longer exposed by Area Map.
+    return [], {}
 
 
 def _normalize_center_bucket(center_type: object) -> str:
@@ -369,11 +312,6 @@ def get_service_scope_options(service_file: str | None):
         options = [ALL_OPTION] + cities
         if scoped["STRATEGIC_CITY_NAME"].fillna("").astype(str).str.strip().eq("").any():
             options.append(BLANK_CITY_OPTION)
-        if "Atlanta, GA" in options:
-            atlanta_index = options.index("Atlanta, GA") + 1
-            for city_name in reversed(ATLANTA_REGION_CITY_NAMES):
-                if city_name not in options:
-                    options.insert(atlanta_index, city_name)
         city_options_by_subsidiary[subsidiary] = options
     return subsidiary_options, city_options_by_subsidiary
 
@@ -517,6 +455,121 @@ def _get_selected_frames(explorer_data, region_count: int | None):
         explorer_data.integrated_area_layer.copy(),
         explorer_data.integrated_service_df.copy(),
     )
+
+
+def _empty_area_plan_frames(explorer_data):
+    """Return service points without silently applying a legacy region map."""
+    service_df = explorer_data.current_service_df.copy()
+    service_df["AREA_NAME"] = "NO_ACTIVE_AREA_PLAN"
+    service_df["region_id"] = ""
+    service_df["region_seq"] = pd.NA
+    service_df["area_type"] = ""
+    crs = getattr(explorer_data.current_zip_layer, "crs", "EPSG:4326")
+    empty_zip = gpd.GeoDataFrame(
+        columns=["POSTAL_CODE", "AREA_NAME", "geometry"],
+        geometry="geometry",
+        crs=crs,
+    )
+    empty_area = gpd.GeoDataFrame(
+        columns=["AREA_NAME", "region_id", "region_seq", "area_type", "geometry"],
+        geometry="geometry",
+        crs=crs,
+    )
+    return empty_zip, empty_area, service_df
+
+
+def _load_area_plan_frames(candidate: Mapping[str, object], explorer_data):
+    """Build map layers from a locally selected Area Plan candidate.
+
+    The normal Area View loader reads the legacy/current fixed-region files.
+    A selected candidate must explicitly replace those layers; otherwise the
+    Area Plan selector only changes the sidebar label while the map remains on
+    the old source data.
+    """
+    plan_dir = Path(str(candidate.get("path") or ""))
+    area_path = plan_dir / "normalized" / "area.csv"
+    if not area_path.is_file():
+        return None
+    try:
+        area_df = pd.read_csv(area_path, dtype=str, keep_default_na=False)
+    except (OSError, ValueError, pd.errors.ParserError):
+        return None
+    required = {"postal_code", "region_name"}
+    if not required.issubset(area_df.columns):
+        return None
+
+    area_df = area_df.copy()
+    area_df["POSTAL_CODE"] = (
+        area_df["postal_code"].astype(str).str.strip().str.replace(r"\.0+$", "", regex=True).str.zfill(5)
+    )
+    area_df["AREA_NAME"] = area_df["region_name"].astype(str).str.strip()
+    if "region_code" in area_df.columns:
+        area_df["region_id"] = area_df["region_code"].astype(str).str.strip()
+    if "region_seq" in area_df.columns:
+        area_df["region_seq"] = pd.to_numeric(area_df["region_seq"], errors="coerce")
+    if "area_type" in area_df.columns:
+        area_df["area_type"] = area_df["area_type"].astype(str).str.strip().str.upper()
+    if "membership_rank" in area_df.columns:
+        area_df["membership_rank"] = pd.to_numeric(area_df["membership_rank"], errors="coerce").fillna(1)
+    else:
+        area_df["membership_rank"] = area_df.groupby("POSTAL_CODE", sort=False).cumcount() + 1
+    area_df = area_df[area_df["POSTAL_CODE"].str.fullmatch(r"\d{5}") & area_df["AREA_NAME"].ne("")].copy()
+    if area_df.empty:
+        return None
+
+    primary_area = (
+        area_df.sort_values(["POSTAL_CODE", "membership_rank"])
+        .drop_duplicates("POSTAL_CODE", keep="first")
+        .set_index("POSTAL_CODE")
+    )
+    requested_postals = sorted(area_df["POSTAL_CODE"].unique().tolist())
+    base_zip = _area_map_load_zcta_geometry(
+        requested_postals,
+        config_section=AREA_MAP_CONFIG_SECTION,
+    )
+    if base_zip.empty or "POSTAL_CODE" not in base_zip.columns:
+        return None
+    base_zip = base_zip.copy()
+    base_zip["POSTAL_CODE"] = base_zip["POSTAL_CODE"].astype(str).str.strip().str.zfill(5)
+    zip_layer = gpd.GeoDataFrame(
+        area_df.merge(base_zip, on="POSTAL_CODE", how="left", suffixes=("", "_zcta")),
+        geometry="geometry",
+        crs=base_zip.crs,
+    )
+
+    service_df = explorer_data.current_service_df.copy()
+    if "POSTAL_CODE" not in service_df.columns:
+        return None
+    service_df["POSTAL_CODE"] = service_df["POSTAL_CODE"].astype(str).str.strip().str.zfill(5)
+    for target_column, source_column in (
+        ("AREA_NAME", "AREA_NAME"),
+        ("region_id", "region_id"),
+        ("region_seq", "region_seq"),
+        ("area_type", "area_type"),
+    ):
+        if source_column in primary_area.columns:
+            service_df[target_column] = service_df["POSTAL_CODE"].map(primary_area[source_column])
+    service_df["AREA_NAME"] = service_df["AREA_NAME"].fillna("POSTAL_NOT_IN_ACTIVE_PLAN")
+    service_df["ambiguity_status"] = service_df["POSTAL_CODE"].map(
+        lambda postal: "resolved" if postal in primary_area.index else "unmapped"
+    )
+
+    area_rows = []
+    for area_name, group in zip_layer.groupby("AREA_NAME", sort=False):
+        geometries = group.geometry.dropna()
+        geometry = geometries.union_all() if not geometries.empty else None
+        area_rows.append({
+            "AREA_NAME": area_name,
+            "region_id": group["region_id"].dropna().iloc[0] if "region_id" in group and group["region_id"].notna().any() else "",
+            "region_seq": group["region_seq"].dropna().iloc[0] if "region_seq" in group and group["region_seq"].notna().any() else None,
+            "area_type": group["area_type"].dropna().iloc[0] if "area_type" in group and group["area_type"].notna().any() else "",
+            "postal_count": int(group["POSTAL_CODE"].nunique()),
+            "service_count": int(service_df.loc[service_df["AREA_NAME"].eq(area_name), "GSFS_RECEIPT_NO"].nunique())
+            if "GSFS_RECEIPT_NO" in service_df.columns else 0,
+            "geometry": geometry,
+        })
+    area_layer = gpd.GeoDataFrame(area_rows, geometry="geometry", crs=base_zip.crs)
+    return zip_layer, area_layer, service_df
 
 
 def _candidate_workbook_source() -> tuple[bytes | Path | None, str]:
@@ -1183,6 +1236,7 @@ def build_map(
     selected_date: str,
     selected_sm: str,
     selected_center_buckets: list[str],
+    area_plan_candidate: Mapping[str, object] | None = None,
 ):
     explorer_data = get_route_explorer_data(
         city_name,
@@ -1190,10 +1244,11 @@ def build_map(
         AREA_MAP_CACHE_VERSION,
         _current_coverage_source_fingerprint(get_latest_geocoded_service_file()),
     )
-    if city_name == ATLANTA_6AREA_CITY_NAME and region_count == 6:
-        zip_layer, area_layer, service_df = _get_atlanta_6area_frames(explorer_data)
+    plan_frames = _load_area_plan_frames(area_plan_candidate, explorer_data) if area_plan_candidate else None
+    if plan_frames is not None:
+        zip_layer, area_layer, service_df = plan_frames
     else:
-        zip_layer, area_layer, service_df = _get_selected_frames(explorer_data, region_count)
+        zip_layer, area_layer, service_df = _empty_area_plan_frames(explorer_data)
     area_col = _get_area_column_name(region_count, zip_layer)
 
     service_df = _apply_service_scope_filters(service_df, subsidiary_name, strategic_city_name)
@@ -1224,7 +1279,7 @@ def build_map(
         if "AREA_NAME" in area_layer.columns
         else {}
     )
-    color_by_area_type = region_count != BUCKET_SIM_DRAFT_REGION_COUNT
+    color_by_area_type = True
 
     if not area_layer.empty and "AREA_NAME" in area_layer.columns:
         area_fields = ["AREA_NAME", "postal_count", "service_count"]
@@ -1787,68 +1842,498 @@ def _snapshot_plan_artifacts(plan: dict[str, object], api_origin: str) -> dict[s
     }
 
 
-def _render_atlanta_plan_comparison(selected_city: str) -> None:
-    """Show API-sourced plan status only; plan authoring and exports live elsewhere."""
-    if _base_city_name(selected_city) != "Atlanta, GA":
-        return
-    st.subheader("Atlanta Region Plan Comparison")
-    baseline, proposed = st.columns(2)
-    baseline.metric("Atlanta, GA", "3 areas")
-    baseline.caption("Reviewed baseline region plan")
-    proposed.metric(ATLANTA_6AREA_CITY_NAME, "6 areas")
-    proposed.caption("Runtime plan status is read from the routing API.")
-
-    api_origin = _region_plan_api_origin()
-    result = _load_atlanta_6area_plans(api_origin)
-    plans = result.get("plans") if isinstance(result, dict) else []
-    if not isinstance(plans, list) or not plans:
-        st.info(
-            "No reviewed or active Atlanta_6area server plan is available from "
-            f"{api_origin or 'the routing_api_url configuration'}. Manage candidates, review, activation, "
-            "and exports in Deployment Console; this map is visualization/debug only."
+def _render_legacy_region_plan_builder(selected_subsidiary: str, selected_city: str) -> None:
+    """Create the common Region Plan v2 source artifact from Area Map."""
+    with st.expander("Region Plan 데이터 생성 (Admin Tools 연계)", expanded=False):
+        st.caption(
+            "Region/Technician 원본을 검증한 뒤 공통 Area + Technician workbook을 생성합니다. "
+            "DB에는 직접 저장하지 않으며, 생성된 파일은 Admin Tools의 Region Plans v2에서 "
+            "review/activation해야 합니다."
         )
-        return
-    metadata = next(
-        (
-            item for item in plans
-            if str(item.get("lifecycle_stage") or item.get("status") or "").lower()
-            in {"active", "reviewed"}
-        ),
-        plans[0],
-    )
-    metadata_lifecycle = str(metadata.get("lifecycle_stage") or metadata.get("status") or "candidate").lower()
-    if metadata_lifecycle not in {"active", "reviewed"}:
-        st.info(
-            "Atlanta_6area has no active or reviewed server plan. Upload, review, and activate the region "
-            "in Deployment Console; this map does not activate plans, write the database, or generate downloads."
-        )
-        plan = metadata
-    else:
-        snapshot_result = _load_atlanta_6area_active_plan(api_origin)
-        plan = snapshot_result.get("plan") if isinstance(snapshot_result, dict) else None
-        if not isinstance(plan, dict):
-            st.info(
-                "Atlanta_6area plan metadata is available, but the active runtime snapshot is unavailable from "
-                f"{api_origin or 'the routing_api_url configuration'}. Upload, review, and activate the region "
-                "in Deployment Console, then refresh."
+        sample_region = pd.DataFrame(columns=[
+            "POSTAL_CODE", "STRATEGIC_CITY_NAME", "region_id", "region_seq",
+            "AREA_NAME", "new_region_name", "area_type",
+        ])
+        sample_technician = pd.DataFrame(columns=["Tech ID", "Tech Name", "Assignment"])
+        sample_cols = st.columns(2)
+        with sample_cols[0]:
+            st.download_button(
+                "Region CSV 샘플",
+                data=_to_csv_bytes(sample_region),
+                file_name="region_plan_region_template.csv",
+                mime="text/csv",
+                key="region-plan-region-template",
             )
-            plan = metadata
-    safe_plan_id = str(plan.get("plan_id") or plan.get("id") or "")[:80]
-    lifecycle = str(plan.get("lifecycle_stage") or plan.get("status") or "candidate")[:40]
-    checksum = str(plan.get("checksum") or "-")[:80]
-    st.caption(f"Plan: {safe_plan_id or '-'} | checksum: {checksum} | lifecycle: {lifecycle}")
-    ambiguity_rows = _region_plan_ambiguity_rows(plan)
-    unresolved = [row for row in ambiguity_rows if row["Status"] == "unresolved"]
-    unresolved_count = int(plan.get("unresolved_ambiguity_count") or len(unresolved) or 0)
-    if ambiguity_rows:
-        st.markdown("#### Ambiguous ZIP owner / overflow decisions")
-        st.dataframe(ambiguity_rows, width="stretch", hide_index=True)
-    if unresolved_count:
-        st.error(
-            f"{unresolved_count} ambiguous ZIP decision(s) remain unresolved. "
-            "Each ZIP requires explicit owner and overflow decisions before review or activation."
+        with sample_cols[1]:
+            st.download_button(
+                "Technician CSV 샘플",
+                data=_to_csv_bytes(sample_technician),
+                file_name="region_plan_technician_template.csv",
+                mime="text/csv",
+                key="region-plan-technician-template",
+            )
+        region_upload = st.file_uploader(
+            "Region 데이터 (CSV/XLSX)", type=["csv", "xlsx"], key="area-map-region-plan-region-upload"
         )
-    st.caption("Candidate bundles and exports are intentionally unavailable in this map UI.")
+        technician_upload = st.file_uploader(
+            "Technician 데이터 (CSV/XLSX)", type=["csv", "xlsx"], key="area-map-region-plan-technician-upload"
+        )
+        metadata_cols = st.columns(3)
+        default_source_city = selected_city if selected_city not in {ALL_OPTION, BLANK_CITY_OPTION, ALL_CITIES} else ""
+        default_target_city = (
+            "Atlanta_6area" if default_source_city == "Atlanta, GA"
+            else re.sub(r"[^A-Za-z0-9]+", "_", default_source_city).strip("_")
+        )
+        with metadata_cols[0]:
+            subsidiary_id = st.text_input(
+                "법인 ID", value=selected_subsidiary if selected_subsidiary not in {ALL_OPTION, BLANK_CITY_OPTION} else "",
+                key="area-map-region-plan-subsidiary",
+            ).strip()
+        with metadata_cols[1]:
+            source_city_id = st.text_input(
+                "source_strategic_city_name", value=default_source_city,
+                key="area-map-region-plan-source-city",
+            ).strip()
+        with metadata_cols[2]:
+            target_city_id = st.text_input(
+                "정책 도시 / Plan ID 대상", value=default_target_city,
+                key="area-map-region-plan-target-city",
+            ).strip()
+        policy_labels = {
+            policy: routing_policy_label(policy)
+            for policy in REGION_PLAN_POLICY_MODES
+        }
+        policy_version = st.selectbox(
+            "Region Plan 정책",
+            list(REGION_PLAN_POLICY_MODES),
+            format_func=lambda value: policy_labels.get(value, "기존/미등록 정책"),
+            key="area-map-region-plan-policy",
+        )
+        st.info(routing_policy_description(policy_version))
+        penalty = st.number_input(
+            "중복 우편번호 overflow penalty",
+            min_value=1, value=4500, step=1,
+            help="중복 postal membership이 있을 때 alternate Region에 적용할 정책 비용입니다.",
+            key="area-map-region-plan-penalty",
+        )
+        build_key = "area-map-region-plan-export"
+        if st.button(
+            "검증 후 Region Plan 생성/저장",
+            type="primary",
+            disabled=region_upload is None or technician_upload is None,
+            key="area-map-region-plan-build",
+        ):
+            try:
+                export = build_area_map_region_plan(
+                    region_upload.name, region_upload.getvalue(),
+                    technician_upload.name, technician_upload.getvalue(),
+                    subsidiary_id=subsidiary_id,
+                    source_city_id=source_city_id,
+                    target_city_id=target_city_id,
+                    policy_version=policy_version,
+                    overflow_penalty_minutes=int(penalty),
+                )
+                output_dir = save_area_map_region_plan(export, REGION_PLAN_ROOT)
+                st.session_state[build_key] = {
+                    "manifest": dict(export.manifest),
+                    "workbook_bytes": export.workbook_bytes,
+                    "output_dir": str(output_dir),
+                }
+                st.success(f"Region Plan candidate 파일을 저장했습니다: `{output_dir}`")
+            except (AreaMapRegionPlanError, ValueError, OSError) as exc:
+                st.session_state.pop(build_key, None)
+                st.error(f"Region Plan 생성 실패: {exc}")
+        generated = st.session_state.get(build_key)
+        if isinstance(generated, dict) and generated.get("workbook_bytes"):
+            manifest = generated.get("manifest") or {}
+            st.json({
+                "plan_id": manifest.get("plan_id"),
+                "source_city_id": (manifest.get("city_metadata") or {}).get("source_city_id"),
+                "target_city_id": (manifest.get("city_metadata") or {}).get("target_city_id"),
+                "row_accounting": manifest.get("row_accounting"),
+                "canonical_sha256": manifest.get("canonical_sha256"),
+                "saved_directory": generated.get("output_dir"),
+            })
+            stem = str(manifest.get("plan_id") or "region_plan")
+            st.download_button(
+                "생성된 Area + Technician workbook 다운로드",
+                data=generated["workbook_bytes"],
+                file_name=f"{stem}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="area-map-region-plan-workbook-download",
+            )
+            st.caption("Admin Tools → Region Plans v2에서 이 workbook을 선택하거나, 생성된 `data/region_plans` 항목을 선택해 업로드하세요.")
+
+
+def _region_plan_candidate_rows(
+    subsidiary_name: str,
+    selected_city: str,
+) -> list[dict[str, object]]:
+    """Load local plan manifests without treating them as active runtime data."""
+    if selected_city in {ALL_OPTION, BLANK_CITY_OPTION, ALL_CITIES}:
+        return []
+    root = REGION_PLAN_ROOT.resolve()
+    if not root.is_dir():
+        return []
+    source_city = _base_city_name(selected_city)
+    selected_city_key = re.sub(r"[^A-Za-z0-9]+", "_", str(selected_city)).strip("_").casefold()
+    selected_city_keys = {str(selected_city).strip().casefold(), selected_city_key}
+    rows: list[dict[str, object]] = []
+    for manifest_path in sorted(root.glob("*/*/*/manifest.json")):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        metadata = manifest.get("city_metadata") or {}
+        manifest_subsidiary = str(
+            manifest.get("subsidiary_name") or metadata.get("subsidiary_id") or ""
+        ).strip()
+        manifest_source_city = str(
+            manifest.get("source_strategic_city_name")
+            or metadata.get("source_city_id")
+            or ""
+        ).strip()
+        target_city = str(
+            manifest.get("target_city_id")
+            or manifest.get("strategic_city_name")
+            or metadata.get("target_city_id")
+            or ""
+        ).strip()
+        if subsidiary_name not in {ALL_OPTION, BLANK_CITY_OPTION} and manifest_subsidiary != subsidiary_name:
+            continue
+        # Strategic city is the source roster city. Area Plan then lists all
+        # policy-city variants belonging to that source city (for example
+        # Atlanta, GA -> Atlanta_3area / Atlanta_6area).
+        source_candidates = {
+            manifest_source_city,
+            _base_city_name(manifest_source_city),
+            manifest_source_city.split(" - ", 1)[0].strip(),
+        }
+        source_keys = {
+            re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_").casefold()
+            for value in source_candidates
+            if value
+        }
+        if manifest_source_city and (
+            source_city.casefold() not in {value.casefold() for value in source_candidates}
+            and selected_city.casefold() not in {value.casefold() for value in source_candidates}
+            and re.sub(r"[^A-Za-z0-9]+", "_", source_city).strip("_").casefold() not in source_keys
+        ):
+            continue
+        if not manifest_source_city:
+            # Very old manifests may omit source metadata. Keep them
+            # discoverable by the policy-city directory/target as a fallback.
+            target_city_key = re.sub(r"[^A-Za-z0-9]+", "_", target_city).strip("_").casefold()
+            if target_city.casefold() not in selected_city_keys and target_city_key not in selected_city_keys:
+                continue
+        plan_id = str(manifest.get("plan_id") or manifest_path.parent.name).strip()
+        display_name = str(manifest.get("plan_display_name") or plan_id).strip()
+        status = str(manifest.get("status") or manifest.get("lifecycle_stage") or "candidate").strip()
+        rows.append({
+            "label": f"{display_name} ({target_city or source_city}) [{status}]",
+            "path": manifest_path.parent.resolve(),
+            "manifest": manifest,
+            "plan_id": plan_id,
+            "target_city_id": target_city,
+            "source_city_id": manifest_source_city or source_city,
+        })
+    return rows
+
+
+def _plan_source_bytes(candidate: Mapping[str, object], kind: str) -> tuple[str, bytes] | None:
+    plan_dir = Path(str(candidate.get("path") or ""))
+    manifest = candidate.get("manifest") if isinstance(candidate.get("manifest"), Mapping) else {}
+    source = manifest.get("source") if isinstance(manifest, Mapping) else {}
+    source = source if isinstance(source, Mapping) else {}
+    if kind == "region":
+        configured = source.get("region_file")
+        names = [source.get("region_file_name")]
+    else:
+        configured = source.get("technician_file")
+        names = [source.get("technician_file_name")]
+    if configured:
+        path = Path(str(configured))
+        if path.is_file():
+            return path.name, path.read_bytes()
+    for name in names:
+        if name:
+            path = plan_dir / "source" / str(name)
+            if path.is_file():
+                return path.name, path.read_bytes()
+    source_dir = plan_dir / "source"
+    if source_dir.is_dir():
+        candidates = sorted(path for path in source_dir.iterdir() if path.is_file())
+        if kind == "region":
+            candidates = [path for path in candidates if "technician" not in path.name.casefold()]
+        else:
+            candidates = [path for path in candidates if "technician" in path.name.casefold()]
+        if candidates:
+            path = candidates[0]
+            return path.name, path.read_bytes()
+    return None
+
+
+def _update_candidate_display_name(candidate: Mapping[str, object], display_name: str) -> Path:
+    """Update only a local candidate's display name without rebuilding data."""
+    plan_dir = Path(str(candidate.get("path") or "")).resolve()
+    manifest_path = plan_dir / "manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError("Area Plan manifest not found")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["plan_display_name"] = str(display_name).strip()
+    manifest_bytes = json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
+    manifest_path.write_bytes(manifest_bytes)
+    checksums_path = plan_dir / "checksums.json"
+    if checksums_path.is_file():
+        checksums = json.loads(checksums_path.read_text(encoding="utf-8"))
+        checksums["manifest.json"] = hashlib.sha256(manifest_bytes).hexdigest()
+        checksums_path.write_text(
+            json.dumps(checksums, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    return manifest_path
+
+
+def _adapt_region_source_city(region_name: str, region_bytes: bytes, target_city_id: str) -> tuple[str, bytes]:
+    """Keep source-city lineage; the builder accepts source or legacy target IDs.
+
+    Older code rewrote ``STRATEGIC_CITY_NAME`` to the policy city before
+    validation.  That hid the distinction between roster city and policy city
+    and could make a valid source upload appear to have changed.  The common
+    builder now handles both legacy and current files, so the bytes must remain
+    untouched here.
+    """
+    return region_name, region_bytes
+
+
+def _render_area_plan_sidebar(selected_subsidiary: str, selected_city: str) -> dict[str, object] | None:
+    candidates = _region_plan_candidate_rows(selected_subsidiary, selected_city)
+    labels = ["(No Area Plan)"] + [str(row["label"]) for row in candidates]
+    label_to_candidate = {str(row["label"]): row for row in candidates}
+    selected_label = st.selectbox(
+        "Area Plan",
+        labels,
+        key=f"area-plan-select::{selected_subsidiary}::{selected_city}",
+    )
+    selected = label_to_candidate.get(selected_label)
+    action_cols = st.columns(2)
+    if action_cols[0].button(
+        "Add",
+        disabled=selected_city in {ALL_OPTION, BLANK_CITY_OPTION, ALL_CITIES},
+        key=f"area-plan-add::{selected_subsidiary}::{selected_city}",
+    ):
+        st.session_state["area-plan-editor"] = {
+            "mode": "add",
+            "selected_city": selected_city,
+            "selected_subsidiary": selected_subsidiary,
+            "candidate_path": "",
+        }
+        st.rerun()
+    if action_cols[1].button(
+        "Edit",
+        disabled=selected is None,
+        key=f"area-plan-edit::{selected_subsidiary}::{selected_city}",
+    ):
+        st.session_state["area-plan-editor"] = {
+            "mode": "edit",
+            "selected_city": selected_city,
+            "selected_subsidiary": selected_subsidiary,
+            "candidate_path": str(selected["path"]) if selected else "",
+        }
+        st.rerun()
+    if selected:
+        manifest = selected.get("manifest") or {}
+        reasons = ((manifest.get("quality") or {}).get("needs_review_reasons") or []) if isinstance(manifest, Mapping) else []
+        if reasons:
+            st.caption("검토 필요: " + ", ".join(map(str, reasons[:2])))
+    return selected
+
+
+def _render_region_plan_editor(selected_subsidiary: str, selected_city: str) -> None:
+    editor = st.session_state.get("area-plan-editor")
+    if not isinstance(editor, Mapping):
+        return
+    mode = str(editor.get("mode") or "add")
+    candidates = _region_plan_candidate_rows(selected_subsidiary, selected_city)
+    candidate = next(
+        (row for row in candidates if str(row.get("path")) == str(editor.get("candidate_path"))),
+        None,
+    )
+    if mode == "edit" and candidate is None:
+        st.warning("선택한 Area Plan을 찾을 수 없습니다. 목록을 새로고침해 주세요.")
+        return
+
+    manifest = (candidate or {}).get("manifest") if candidate else {}
+    manifest = manifest if isinstance(manifest, Mapping) else {}
+    metadata = manifest.get("city_metadata") if isinstance(manifest.get("city_metadata"), Mapping) else {}
+    source_city_default = str(
+        metadata.get("source_city_id")
+        or manifest.get("source_strategic_city_name")
+        or _base_city_name(selected_city)
+    ).strip()
+    target_default = str(
+        metadata.get("target_city_id")
+        or manifest.get("target_city_id")
+        or re.sub(r"[^A-Za-z0-9]+", "_", source_city_default).strip("_")
+    ).strip()
+    name_default = str(manifest.get("plan_display_name") or manifest.get("plan_id") or target_default).strip()
+    policy_default = str(
+        metadata.get("policy_version")
+        or manifest.get("policy_version")
+        or "explicit_workbook_membership/v1"
+    )
+    if policy_default not in REGION_PLAN_POLICY_MODES:
+        policy_default = "explicit_workbook_membership/v1"
+    token = re.sub(r"[^A-Za-z0-9]+", "_", str(editor.get("candidate_path") or "new")).strip("_")[-80:]
+
+    st.divider()
+    st.subheader("Area Plan " + ("추가" if mode == "add" else "수정"))
+    st.caption("저장 시 데이터가 바뀌면 새로운 checksum Plan으로 저장되고, 이름만 바꾸면 현재 Plan의 표시 이름이 갱신됩니다.")
+    close_col, _ = st.columns([1, 5])
+    if close_col.button("닫기", key=f"area-plan-editor-close::{token}"):
+        st.session_state.pop("area-plan-editor", None)
+        st.rerun()
+
+    metadata_cols = st.columns(4)
+    subsidiary_id = metadata_cols[0].text_input(
+        "법인 ID", value=str(metadata.get("subsidiary_id") or manifest.get("subsidiary_name") or selected_subsidiary), key=f"area-plan-subsidiary::{token}"
+    ).strip()
+    source_city_id = metadata_cols[1].text_input(
+        "source_strategic_city_name", value=source_city_default, key=f"area-plan-source-city::{token}"
+    ).strip()
+    target_city_id = metadata_cols[2].text_input(
+        "정책 도시 ID", value=target_default, key=f"area-plan-target-city::{token}"
+    ).strip()
+    plan_display_name = metadata_cols[3].text_input(
+        "Plan 이름", value=name_default, key=f"area-plan-name::{token}"
+    ).strip()
+    policy_version = st.selectbox(
+        "Region Plan 정책",
+        list(REGION_PLAN_POLICY_MODES),
+        index=list(REGION_PLAN_POLICY_MODES).index(policy_default),
+        format_func=routing_policy_label,
+        key=f"area-plan-policy::{token}",
+    )
+    st.info(routing_policy_description(policy_version))
+    existing_region = _plan_source_bytes(candidate, "region") if candidate else None
+    existing_technician = _plan_source_bytes(candidate, "technician") if candidate else None
+    if existing_region:
+        st.caption(f"기존 Region 원본: `{existing_region[0]}`")
+    if existing_technician:
+        st.caption(f"기존 Technician 원본: `{existing_technician[0]}`")
+    else:
+        st.info("기존 Technician 지역 배정 파일이 없습니다. 새 파일을 업로드해야 합니다.")
+    template_cols = st.columns(2)
+    region_template = pd.DataFrame(columns=[
+        "POSTAL_CODE", "STRATEGIC_CITY_NAME", "region_id", "region_seq",
+        "AREA_NAME", "new_region_name", "area_type",
+    ])
+    technician_template = pd.DataFrame(columns=["Tech ID", "Tech Name", "Assignment"])
+    with template_cols[0]:
+        st.download_button(
+            "Region 데이터 template 다운로드",
+            data=_to_csv_bytes(region_template),
+            file_name="region_plan_region_template.csv",
+            mime="text/csv",
+            key=f"area-plan-region-template::{token}",
+        )
+    with template_cols[1]:
+        st.download_button(
+            "Technician 데이터 template 다운로드",
+            data=_to_csv_bytes(technician_template),
+            file_name="region_plan_technician_template.csv",
+            mime="text/csv",
+            key=f"area-plan-technician-template::{token}",
+        )
+    region_upload = st.file_uploader(
+        "Region 데이터 (새 파일을 올리면 교체)", type=["csv", "xlsx"], key=f"area-plan-region-upload::{token}"
+    )
+    technician_upload = st.file_uploader(
+        "Technician 데이터 (새 파일을 올리면 교체)", type=["csv", "xlsx"], key=f"area-plan-technician-upload::{token}"
+    )
+    if st.button(
+        "Area Plan 저장",
+        type="primary",
+        disabled=not subsidiary_id or not source_city_id or not target_city_id or not plan_display_name,
+        key=f"area-plan-save::{token}",
+    ):
+        region_name, region_bytes = (
+            (region_upload.name, region_upload.getvalue()) if region_upload else existing_region or ("", b"")
+        )
+        technician_name, technician_bytes = (
+            (technician_upload.name, technician_upload.getvalue()) if technician_upload else existing_technician or ("", b"")
+        )
+        original_subsidiary = str(metadata.get("subsidiary_id") or manifest.get("subsidiary_name") or selected_subsidiary).strip()
+        original_source_city = str(
+            metadata.get("source_city_id")
+            or manifest.get("source_strategic_city_name")
+            or _base_city_name(selected_city)
+        ).strip()
+        original_target_city = str(
+            metadata.get("target_city_id")
+            or manifest.get("target_city_id")
+            or ""
+        ).strip()
+        original_policy = str(
+            metadata.get("policy_version")
+            or manifest.get("policy_version")
+            or "explicit_workbook_membership/v1"
+        ).strip()
+        metadata_changed = (
+            subsidiary_id != original_subsidiary
+            or source_city_id != original_source_city
+            or target_city_id != original_target_city
+            or policy_version != original_policy
+        )
+        if (
+            mode == "edit"
+            and candidate is not None
+            and not region_upload
+            and not technician_upload
+            and existing_technician is None
+            and not metadata_changed
+        ):
+            try:
+                manifest_path = _update_candidate_display_name(candidate, plan_display_name)
+                updated_manifest = dict(manifest)
+                updated_manifest["plan_display_name"] = plan_display_name
+                st.session_state["area-plan-editor-result"] = {
+                    "manifest": updated_manifest,
+                    "output_dir": str(manifest_path.parent),
+                }
+                st.success(f"Area Plan 표시 이름을 저장했습니다: `{manifest_path.parent}`")
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                st.error(f"Area Plan 이름 저장 실패: {exc}")
+            return
+        if not region_bytes or not technician_bytes:
+            st.error("데이터를 수정하려면 Region과 Technician 파일을 모두 준비해야 합니다. 이름만 수정할 때는 파일을 업로드하지 마세요.")
+        else:
+            adapted_name, adapted_region_bytes = _adapt_region_source_city(region_name, region_bytes, target_city_id)
+            try:
+                export = build_area_map_region_plan(
+                    adapted_name, adapted_region_bytes,
+                    technician_name, technician_bytes,
+                    subsidiary_id=subsidiary_id,
+                    source_city_id=source_city_id,
+                    target_city_id=target_city_id,
+                    policy_version=policy_version,
+                    overflow_penalty_minutes=4500,
+                )
+                export.manifest["plan_display_name"] = plan_display_name
+                output_dir = save_area_map_region_plan(export, REGION_PLAN_ROOT)
+                st.session_state["area-plan-editor-result"] = {
+                    "manifest": dict(export.manifest), "output_dir": str(output_dir),
+                }
+                st.success(f"Area Plan을 저장했습니다: `{output_dir}`")
+            except (AreaMapRegionPlanError, ValueError, OSError) as exc:
+                st.error(f"Area Plan 저장 실패: {exc}")
+    result = st.session_state.get("area-plan-editor-result")
+    if isinstance(result, Mapping):
+        st.json({
+            "plan_id": (result.get("manifest") or {}).get("plan_id"),
+            "plan_display_name": (result.get("manifest") or {}).get("plan_display_name"),
+            "saved_directory": result.get("output_dir"),
+        })
 
 
 def _build_monthly_area_stats_df(service_df: pd.DataFrame) -> pd.DataFrame:
@@ -1983,11 +2468,12 @@ def main():
         selected_subsidiary = st.selectbox("SUBSIDIARY_NAME", subsidiary_options, index=0)
         strategic_city_options = city_options_by_subsidiary.get(selected_subsidiary, [ALL_OPTION])
         selected_strategic_city = st.selectbox("STRATEGIC_CITY_NAME", strategic_city_options, index=0)
+        selected_area_plan = _render_area_plan_sidebar(selected_subsidiary, selected_strategic_city)
         city_name = selected_strategic_city if selected_strategic_city not in {ALL_OPTION, BLANK_CITY_OPTION} else ALL_CITIES
 
-        region_options, region_option_count_map = _region_options_for_city(city_name)
-        region_option = st.selectbox("Area View", region_options, index=0)
-        selected_region_count = region_option_count_map.get(region_option, _parse_region_option(region_option))
+        # Area Plan is the only supported region source.
+        region_option = "Area Plan"
+        selected_region_count = None
 
         explorer_data = get_route_explorer_data(
             city_name,
@@ -1995,19 +2481,27 @@ def main():
             AREA_MAP_CACHE_VERSION,
             _current_coverage_source_fingerprint(latest_service),
         )
-        if city_name == ATLANTA_6AREA_CITY_NAME and selected_region_count == 6:
-            _, area_layer, service_df = _get_atlanta_6area_frames(explorer_data)
+        plan_frames = _load_area_plan_frames(selected_area_plan, explorer_data) if selected_area_plan else None
+        if selected_area_plan and plan_frames is None:
+            st.error("선택한 Area Plan의 normalized/area.csv 또는 ZIP geometry를 불러오지 못했습니다.")
+        if plan_frames is not None:
+            _, area_layer, service_df = plan_frames
+            effective_region_count = max(1, int(area_layer["AREA_NAME"].nunique())) if not area_layer.empty else None
         else:
-            _, area_layer, service_df = _get_selected_frames(explorer_data, selected_region_count)
+            _, area_layer, service_df = _empty_area_plan_frames(explorer_data)
+            effective_region_count = None
+            if selected_area_plan is None:
+                st.info("Area Plan을 선택하면 해당 Plan의 지역 경계와 우편번호가 지도에 표시됩니다.")
         service_df = service_df.copy()
         service_df = _apply_service_scope_filters(service_df, selected_subsidiary, selected_strategic_city)
         if "service_date" not in service_df.columns:
             service_df["service_date"] = pd.NaT
         service_df["service_date_key"] = pd.to_datetime(service_df["service_date"]).dt.strftime("%Y-%m-%d")
-        service_df = _apply_center_bucket_rules(service_df, selected_region_count)
+        service_df = _apply_center_bucket_rules(service_df, effective_region_count)
 
-        area_type_options = _available_area_types(area_layer, service_df) if selected_region_count is not None else []
+        area_type_options = _available_area_types(area_layer, service_df) if effective_region_count is not None else []
         selected_area_types: list[str] | None = None
+        area_plan_key = str((selected_area_plan or {}).get("plan_id") or "none")
         if area_type_options:
             st.caption("Area Type")
             area_type_cols = st.columns(max(1, min(3, len(area_type_options))))
@@ -2018,7 +2512,7 @@ def main():
                 if area_type_col.checkbox(
                     label,
                     value=True,
-                    key=f"area_type_filter::{city_name}::{region_option}::{area_type}",
+                    key=f"area_type_filter::{city_name}::{region_option}::{area_plan_key}::{area_type}",
                 ):
                     selected_area_types.append(area_type)
             area_layer = _filter_area_type(area_layer, selected_area_types)
@@ -2049,7 +2543,7 @@ def main():
         selected_area_names = st.multiselect(
             "AREA NAME",
             area_options,
-            key=f"area_name_filter::{city_name}::{region_option}",
+            key=f"area_name_filter::{city_name}::{region_option}::{area_plan_key}",
         )
 
         date_service_df = service_df[service_df["service_date_key"] == selected_date].copy() if selected_date != "ALL" else service_df.copy()
@@ -2157,7 +2651,7 @@ def main():
         st.subheader("Service Count by Area")
         st.dataframe(area_count_df, width="stretch", height=220)
 
-    _render_atlanta_plan_comparison(city_name)
+    _render_region_plan_editor(selected_subsidiary, selected_strategic_city)
 
     map_obj, filtered_service_df, filtered_area_layer, route_groups = build_map(
         city_name=city_name,
@@ -2169,6 +2663,7 @@ def main():
         selected_date=selected_date,
         selected_sm=selected_sm,
         selected_center_buckets=selected_center_buckets,
+        area_plan_candidate=selected_area_plan,
     )
 
     metric_cols = st.columns(4)
@@ -2189,10 +2684,17 @@ def main():
 
     candidate_col, summary_col, detail_col = st.columns([1.25, 1.0, 1.75], gap="medium")
     with candidate_col:
-        st.subheader("Candidate Region Summary")
-        candidate_df = _build_candidate_display_df(city_name)
+        st.subheader("Area Plan Summary")
+        selected_manifest = (selected_area_plan or {}).get("manifest", {}) if isinstance(selected_area_plan, Mapping) else {}
+        selected_metadata = selected_manifest.get("city_metadata", {}) if isinstance(selected_manifest, Mapping) else {}
+        candidate_df = pd.DataFrame([{
+            "Plan": str((selected_area_plan or {}).get("label") or "No Area Plan selected"),
+            "Source City": str((selected_area_plan or {}).get("source_city_id") or selected_metadata.get("source_city_id") or ""),
+            "Policy City": str((selected_area_plan or {}).get("target_city_id") or selected_metadata.get("target_city_id") or ""),
+            "Plan ID": str((selected_area_plan or {}).get("plan_id") or ""),
+        }]) if selected_area_plan else pd.DataFrame()
         if candidate_df.empty:
-            st.caption("No candidate summary data.")
+            st.caption("No Area Plan selected.")
         else:
             st.dataframe(candidate_df, width="stretch", height=300)
         st.subheader("Jobs Input")

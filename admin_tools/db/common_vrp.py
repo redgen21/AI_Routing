@@ -36,7 +36,7 @@ ADMIN_SCHEMA_CONTRACTS: dict[str, dict[str, tuple[tuple[str, ...], tuple[str, ..
         "common_job_input": (("record_id", "subsidiary_name", "strategic_city_name", "promise_date"), ("record_id",)),
     },
     "la_seed": {
-        "common_routing_config_master": (("subsidiary_name", "strategic_city_name", "distance_backend", "assignment_distance_backend", "osrm_url", "osrm_profile", "effective_service_per_sm", "target_sm_per_region", "service_time_per_job_min", "max_work_min_per_sm_day", "max_travel_min_per_sm_day", "max_travel_km_per_sm_day", "max_single_leg_min", "max_home_to_job_min", "long_leg_penalty_start_min", "long_leg_penalty_multiplier", "timezone_offset", "updated_at"), ("subsidiary_name", "strategic_city_name")),
+        "common_routing_config_master": (("subsidiary_name", "strategic_city_name", "region_policy", "region_plan_id", "region_plan_revision", "region_plan_checksum", "distance_backend", "assignment_distance_backend", "osrm_url", "osrm_profile", "effective_service_per_sm", "target_sm_per_region", "service_time_per_job_min", "max_work_min_per_sm_day", "max_travel_min_per_sm_day", "max_travel_km_per_sm_day", "max_single_leg_min", "max_home_to_job_min", "long_leg_penalty_start_min", "long_leg_penalty_multiplier", "timezone_offset", "updated_at"), ("subsidiary_name", "strategic_city_name")),
         "common_technician_master": (("subsidiary_name", "strategic_city_name", "employee_code", "employee_name", "center_type", "home_address", "home_city", "home_state", "home_country", "home_postal_code", "home_latitude", "home_longitude", "active_flag", "priority_group", "max_home_to_job_min", "updated_at"), ("subsidiary_name", "strategic_city_name", "employee_code")),
         "common_technician_capability_master": (("subsidiary_name", "strategic_city_name", "employee_code", "product_group_code", "product_code", "repair_allowed", "heavy_repair_allowed", "priority_score", "effective_start_date", "effective_end_date", "updated_at"), ("subsidiary_name", "strategic_city_name", "employee_code", "product_group_code", "product_code")),
         "common_region_master": (("subsidiary_name", "strategic_city_name", "postal_code", "region_seq", "region_name", "area_type", "region_center_latitude", "region_center_longitude", "updated_at"), ("subsidiary_name", "strategic_city_name", "postal_code")),
@@ -53,6 +53,8 @@ ADMIN_SCHEMA_CONTRACTS: dict[str, dict[str, tuple[tuple[str, ...], tuple[str, ..
 SCHEMA_SQL = """
 create table if not exists common_routing_config_master (
     subsidiary_name text not null, strategic_city_name text not null,
+    region_policy text,
+    region_plan_id text, region_plan_revision integer, region_plan_checksum char(64),
     distance_backend text, assignment_distance_backend text, osrm_url text, osrm_profile text,
     effective_service_per_sm integer, target_sm_per_region integer, service_time_per_job_min integer,
     max_work_min_per_sm_day integer, max_travel_min_per_sm_day integer, max_travel_km_per_sm_day integer,
@@ -336,11 +338,13 @@ def upsert_routing_config(
     config_row: dict[str, Any], config_path: Path = COMMON_CONFIG_PATH, *, connection: Any | None = None,
 ) -> int:
     columns = [
-        "subsidiary_name", "strategic_city_name", "distance_backend", "assignment_distance_backend", "osrm_url",
+        "subsidiary_name", "strategic_city_name", "region_policy", "distance_backend", "assignment_distance_backend", "osrm_url",
         "osrm_profile", "effective_service_per_sm", "target_sm_per_region", "service_time_per_job_min",
         "max_work_min_per_sm_day", "max_travel_min_per_sm_day", "max_travel_km_per_sm_day", "max_single_leg_min",
         "max_home_to_job_min", "long_leg_penalty_start_min", "long_leg_penalty_multiplier", "timezone_offset",
     ]
+    if any(key in config_row for key in ("region_plan_id", "region_plan_revision", "region_plan_checksum")):
+        columns[2:2] = ["region_plan_id", "region_plan_revision", "region_plan_checksum"]
     return _execute_values_upsert(
         "common_routing_config_master", columns, [tuple(config_row.get(column) for column in columns)], columns[:2],
         columns[2:], config_path, connection=connection,

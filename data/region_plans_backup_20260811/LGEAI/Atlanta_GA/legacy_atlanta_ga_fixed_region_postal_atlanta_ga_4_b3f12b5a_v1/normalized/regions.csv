@@ -1,0 +1,5 @@
+subsidiary_name,strategic_city_name,plan_id,region_id,region_seq,region_name,new_region_name,area_type,required_center_type
+LGEAI,"Atlanta, GA",legacy_atlanta_ga_fixed_region_postal_atlanta_ga_4_b3f12b5a_v1,atlanta_ga_r01,1,Region 1,Region 1,,
+LGEAI,"Atlanta, GA",legacy_atlanta_ga_fixed_region_postal_atlanta_ga_4_b3f12b5a_v1,atlanta_ga_r02,2,Region 2,Region 2,,
+LGEAI,"Atlanta, GA",legacy_atlanta_ga_fixed_region_postal_atlanta_ga_4_b3f12b5a_v1,atlanta_ga_r03,3,Region 3,Region 3,,
+LGEAI,"Atlanta, GA",legacy_atlanta_ga_fixed_region_postal_atlanta_ga_4_b3f12b5a_v1,atlanta_ga_r04,4,Region 4,Region 4,,

@@ -10,6 +10,9 @@ from .common_vrp_db import (
     delete_job,
     delete_technician_master,
     get_routing_config,
+    list_region_plan_options,
+    list_region_set_options,
+    list_configured_region_plan_regions,
     init_schema,
     load_common_config,
     list_routing_request_dates,
@@ -278,7 +281,7 @@ def _region_plan_v2_route(path: str, payload: dict) -> tuple[str, dict] | None:
     chunks = suffix.split("/") if suffix else []
     if len(chunks) == 2 and chunks[0] == "plans" and chunks[1]:
         item = dict(payload); item.setdefault("plan_id", chunks[1]); return "get", item
-    if len(chunks) == 3 and chunks[0] == "plans" and chunks[2] in {"review", "activation-preview", "activate"}:
+    if len(chunks) == 3 and chunks[0] == "plans" and chunks[2] in {"review", "activation-preview", "activate", "retire"}:
         item = dict(payload); item.setdefault("plan_id", chunks[1]); return chunks[2], item
     if len(chunks) == 3 and chunks[0] == "cities" and chunks[2] == "active":
         item = dict(payload); item.setdefault("target_city_id", chunks[1]); return "active", item
@@ -307,7 +310,7 @@ def _region_plan_v2_headers(handler: BaseHTTPRequestHandler, payload: dict) -> d
     return normalized
 
 
-_REGION_PLAN_V2_MUTATIONS = {"imports", "adopt", "review", "activate", "rollback"}
+_REGION_PLAN_V2_MUTATIONS = {"imports", "adopt", "review", "activate", "rollback", "retire"}
 
 
 def _region_plan_v2_mutation_allowed(handler: BaseHTTPRequestHandler, operation: str) -> bool:
@@ -477,6 +480,36 @@ class CommonVRPRequestHandler(BaseHTTPRequestHandler):
                 strategic_city_name = _query_value(parsed, "strategic_city_name")
                 df = list_engineers(subsidiary_name, strategic_city_name)
                 _json_response(self, HTTPStatus.OK, {"rows": df.to_dict("records")})
+                return
+            if parsed.path == "/api/v1/common/configured-region-plans":
+                subsidiary_name = _query_value(parsed, "subsidiary_name")
+                strategic_city_name = _query_value(parsed, "strategic_city_name")
+                plans = list_region_plan_options(subsidiary_name, strategic_city_name)
+                config = get_routing_config(subsidiary_name, strategic_city_name) or {}
+                _json_response(
+                    self,
+                    HTTPStatus.OK,
+                    {
+                        "selected": {
+                            "region_plan_id": config.get("region_plan_id"),
+                            "region_plan_revision": config.get("region_plan_revision"),
+                            "region_plan_checksum": config.get("region_plan_checksum"),
+                        },
+                        "rows": plans.to_dict("records"),
+                    },
+                )
+                return
+            if parsed.path == "/api/v1/common/configured-region-plan-regions":
+                subsidiary_name = _query_value(parsed, "subsidiary_name")
+                strategic_city_name = _query_value(parsed, "strategic_city_name")
+                regions = list_configured_region_plan_regions(subsidiary_name, strategic_city_name)
+                _json_response(self, HTTPStatus.OK, {"rows": regions.to_dict("records")})
+                return
+            if parsed.path == "/api/v1/common/region-set-options":
+                subsidiary_name = _query_value(parsed, "subsidiary_name")
+                strategic_city_name = _query_value(parsed, "strategic_city_name")
+                options = list_region_set_options(subsidiary_name, strategic_city_name)
+                _json_response(self, HTTPStatus.OK, {"rows": options.to_dict("records")})
                 return
             if parsed.path == "/api/v1/common/capabilities":
                 subsidiary_name = _query_value(parsed, "subsidiary_name")

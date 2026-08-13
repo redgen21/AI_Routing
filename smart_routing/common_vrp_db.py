@@ -119,6 +119,10 @@ SCHEMA_SQL = """
 create table if not exists common_routing_config_master (
     subsidiary_name text not null,
     strategic_city_name text not null,
+    region_policy text,
+    region_plan_id text,
+    region_plan_revision integer,
+    region_plan_checksum char(64),
     distance_backend text,
     assignment_distance_backend text,
     osrm_url text,
@@ -414,6 +418,30 @@ def init_schema(config_path: Path = COMMON_CONFIG_PATH) -> None:
                 """
                 alter table if exists common_routing_config_master
                 add column if not exists long_leg_penalty_multiplier numeric
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_routing_config_master
+                add column if not exists region_policy text
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_routing_config_master
+                add column if not exists region_plan_id text
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_routing_config_master
+                add column if not exists region_plan_revision integer
+                """
+            )
+            cur.execute(
+                """
+                alter table if exists common_routing_config_master
+                add column if not exists region_plan_checksum char(64)
                 """
             )
             cur.execute(
@@ -1022,15 +1050,275 @@ def get_routing_config(subsidiary_name: str, strategic_city_name: str, config_pa
     return row
 
 
+def list_region_plan_options(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> pd.DataFrame:
+    """List plans for a physical city, including legacy target-city storage.
+
+    Older imports used names such as ``Atlanta_6area`` as the Region Plan
+    context key.  The new client treats ``Atlanta, GA`` as the physical city,
+    but this compatibility query still exposes those plans when their city
+    context declares Atlanta as the source city.
+    """
+    try:
+        return _fetch_df(
+            """
+            select rp.routing_plan_id as plan_id,
+                   rp.revision as plan_revision,
+                   rp.policy_version,
+                   rp.source_sha256 as checksum,
+                   rs.source_sha256 as region_set_source_sha256,
+                   rp.plan_status as lifecycle,
+                   rp.strategic_city_name as plan_storage_city_name,
+                   rp.source_strategic_city_name
+              from common_routing_plan rp
+              join common_region_set rs
+                on rs.subsidiary_name = rp.subsidiary_name
+               and rs.source_strategic_city_name = rp.source_strategic_city_name
+               and rs.region_set_id = rp.region_set_id
+             where rp.subsidiary_name = %s
+               and (rp.strategic_city_name = %s or rp.source_strategic_city_name = %s)
+               and rp.plan_status in ('candidate','reviewed','active','superseded')
+             order by case when rp.strategic_city_name = %s then 0 else 1 end,
+                      rp.updated_at desc, rp.routing_plan_id
+            """,
+            (subsidiary_name, strategic_city_name, strategic_city_name, strategic_city_name),
+            config_path=config_path,
+        )
+    except Exception:
+        try:
+            return _fetch_df(
+                """
+            select p.plan_id,
+                   p.revision as plan_revision,
+                   p.policy_version,
+                   p.bundle_sha256 as checksum,
+                   p.fixed_region_sha256 as region_set_source_sha256,
+                   p.plan_status as lifecycle,
+                   p.strategic_city_name as plan_storage_city_name,
+                   c.source_strategic_city_name
+              from common_region_plan p
+              left join common_city_context c
+                on c.subsidiary_name = p.subsidiary_name
+               and c.strategic_city_name = p.strategic_city_name
+             where p.subsidiary_name = %s
+               and (p.strategic_city_name = %s or c.source_strategic_city_name = %s)
+               and p.plan_status in ('candidate', 'reviewed', 'active', 'superseded')
+             order by case when p.strategic_city_name = %s then 0 else 1 end,
+                      p.updated_at desc, p.plan_id
+            """,
+            (subsidiary_name, strategic_city_name, strategic_city_name, strategic_city_name),
+            config_path=config_path,
+            )
+        except Exception:
+            return pd.DataFrame()
+
+
+def list_region_set_options(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> pd.DataFrame:
+    """List reusable Region Sets and the Routing Plans that reference them."""
+    try:
+        return _fetch_df(
+            """
+            select rs.region_set_id,
+                   rs.region_set_name,
+                   rs.region_count,
+                   rp.routing_plan_id as plan_id,
+                   rp.strategic_city_name as plan_storage_city_name,
+                   rp.source_strategic_city_name,
+                   rp.policy_version,
+                   rp.overlap_policy,
+                   rp.plan_status as lifecycle,
+                   rp.revision as plan_revision,
+                   rp.source_sha256 as checksum
+              from common_region_set rs
+              join common_routing_plan rp
+                on rp.subsidiary_name = rs.subsidiary_name
+               and rp.source_strategic_city_name = rs.source_strategic_city_name
+               and rp.region_set_id = rs.region_set_id
+             where rs.subsidiary_name = %s
+               and (rs.source_strategic_city_name = %s
+                    or rp.strategic_city_name = %s)
+               and rp.plan_status in ('candidate','reviewed','active','superseded')
+             order by rs.region_set_name, rp.updated_at desc, rp.routing_plan_id
+            """,
+            (subsidiary_name, strategic_city_name, strategic_city_name),
+            config_path=config_path,
+        )
+    except Exception:
+        # Development databases reconciled before the normalized schema use
+        # the compatibility tables until the schema migration is run.
+        plans = list_region_plan_options(subsidiary_name, strategic_city_name, config_path=config_path)
+        if plans.empty:
+            return pd.DataFrame()
+        plans = plans.copy()
+        plans["region_set_id"] = plans["region_set_source_sha256"].map(
+            lambda value: "rs_" + str(value)[:24] if str(value).strip() else ""
+        )
+        plans["region_set_name"] = plans["plan_storage_city_name"].astype(str) + " Region Set"
+        plans["region_count"] = pd.NA
+        return plans
+
+
+def _region_plan_storage_reference(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    plan_id: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> dict[str, Any] | None:
+    options = list_region_plan_options(subsidiary_name, strategic_city_name, config_path=config_path)
+    if options.empty or "plan_id" not in options.columns:
+        return None
+    matched = options[options["plan_id"].astype(str).eq(str(plan_id).strip())].head(1)
+    if matched.empty:
+        return None
+    return matched.iloc[0].to_dict()
+
+
+def _load_region_plan_snapshot(
+    subsidiary_name: str,
+    requested_city_name: str,
+    plan_reference: dict[str, Any],
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> dict[str, Any]:
+    storage_city = str(plan_reference.get("plan_storage_city_name", requested_city_name)).strip()
+    plan_id = str(plan_reference.get("plan_id", "")).strip()
+    if not storage_city or not plan_id:
+        raise RuntimeError("CONFIGURED_REGION_PLAN_NOT_FOUND")
+    params = (subsidiary_name, storage_city, plan_id)
+    try:
+        regions = _fetch_df(
+            "select * from common_region_plan_region where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s order by region_seq",
+            params,
+            config_path=config_path,
+        )
+        postals = _fetch_df(
+            """select p.*, r.region_name from common_region_plan_postal p join common_region_plan_region r
+               on (r.subsidiary_name,r.strategic_city_name,r.plan_id,r.region_seq)=(p.subsidiary_name,p.strategic_city_name,p.plan_id,p.region_seq)
+               where p.subsidiary_name=%s and p.strategic_city_name=%s and p.plan_id=%s order by p.postal_code""",
+            params,
+            config_path=config_path,
+        )
+        technicians = _fetch_df(
+            "select * from common_region_plan_technician where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s order by employee_code",
+            params,
+            config_path=config_path,
+        )
+        overflow = _fetch_df(
+            "select * from common_region_plan_boundary_overflow where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s order by postal_code",
+            params,
+            config_path=config_path,
+        )
+    except Exception as exc:
+        raise RuntimeError("REGION_PLAN_RUNTIME_REPOSITORY_UNAVAILABLE") from exc
+    return {
+        "enabled": True,
+        "status": str(plan_reference.get("lifecycle", plan_reference.get("plan_status", ""))),
+        "context_status": "active" if str(plan_reference.get("lifecycle", "")).lower() == "active" else "",
+        "source_strategic_city_name": str(plan_reference.get("source_strategic_city_name") or requested_city_name).strip(),
+        "configured_city_name": requested_city_name,
+        "plan_storage_city_name": storage_city,
+        "plan_id": plan_id,
+        "revision": plan_reference.get("plan_revision", plan_reference.get("revision")),
+        "policy_version": str(plan_reference.get("policy_version", "")),
+        "checksum": str(plan_reference.get("checksum", "")),
+        "activation_revision": None,
+        "regions": regions.where(pd.notna(regions), None).to_dict("records"),
+        "postals": postals.where(pd.notna(postals), None).to_dict("records"),
+        "technicians": technicians.where(pd.notna(technicians), None).to_dict("records"),
+        "boundary_overflow": overflow.where(pd.notna(overflow), None).to_dict("records"),
+    }
+
+
+def get_configured_region_plan_snapshot(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> dict[str, Any] | None:
+    """Resolve the plan selected in the city routing config.
+
+    Empty configuration preserves the pre-existing active-plan behavior.  Once
+    a plan is selected, routing uses that immutable plan rather than whichever
+    plan happens to be active in the legacy activation table.
+    """
+    try:
+        config_row = get_routing_config(subsidiary_name, strategic_city_name, config_path=config_path) or {}
+    except Exception:
+        # Preserve the legacy active-plan path and testability when a city has
+        # no reachable database yet.  A configured plan is still fail-closed
+        # below once the config row can be read.
+        return None
+    plan_id = _clean_text(config_row.get("region_plan_id"))
+    if not plan_id:
+        return None
+    reference = _region_plan_storage_reference(
+        subsidiary_name,
+        strategic_city_name,
+        plan_id,
+        config_path=config_path,
+    )
+    if reference is None:
+        raise RuntimeError("CONFIGURED_REGION_PLAN_NOT_FOUND")
+    expected_revision = config_row.get("region_plan_revision")
+    if expected_revision is not None and str(expected_revision).strip() and pd.notna(expected_revision):
+        if int(expected_revision) != int(reference.get("plan_revision")):
+            raise RuntimeError("CONFIGURED_REGION_PLAN_REVISION_MISMATCH")
+    expected_checksum = _clean_text(config_row.get("region_plan_checksum"))
+    actual_checksum = _clean_text(reference.get("checksum"))
+    if expected_checksum and actual_checksum and expected_checksum != actual_checksum:
+        raise RuntimeError("CONFIGURED_REGION_PLAN_CHECKSUM_MISMATCH")
+    return _load_region_plan_snapshot(
+        subsidiary_name,
+        strategic_city_name,
+        reference,
+        config_path=config_path,
+    )
+
+
 def upsert_routing_config(
     config_row: dict[str, Any],
     config_path: Path = COMMON_CONFIG_PATH,
     *,
     connection: Any | None = None,
 ) -> int:
+    config_row = dict(config_row)
+    if any(key in config_row for key in ("region_plan_id", "region_plan_revision", "region_plan_checksum")):
+        environment = str(load_common_config(config_path).get("environment", "")).strip().lower()
+        if environment not in {"development", "dev"}:
+            raise ValueError("REGION_PLAN_SELECTION_DEVELOPMENT_ONLY")
+    plan_id = _clean_text(config_row.get("region_plan_id"))
+    if plan_id:
+        reference = _region_plan_storage_reference(
+            _clean_text(config_row.get("subsidiary_name")),
+            _clean_text(config_row.get("strategic_city_name")),
+            plan_id,
+            config_path=config_path,
+        )
+        if reference is None:
+            raise ValueError("Selected Region Plan was not found for the city.")
+        plan_revision = reference.get("plan_revision")
+        plan_checksum = _clean_text(reference.get("checksum"))
+        supplied_revision = config_row.get("region_plan_revision")
+        if supplied_revision is not None and str(supplied_revision).strip() and pd.notna(supplied_revision):
+            if int(supplied_revision) != int(plan_revision):
+                raise ValueError("Selected Region Plan revision is stale.")
+        supplied_checksum = _clean_text(config_row.get("region_plan_checksum"))
+        if supplied_checksum and plan_checksum and supplied_checksum != plan_checksum:
+            raise ValueError("Selected Region Plan checksum is stale.")
+        config_row["region_plan_revision"] = plan_revision
+        config_row["region_plan_checksum"] = plan_checksum or None
+    elif any(key in config_row for key in ("region_plan_id", "region_plan_revision", "region_plan_checksum")):
+        config_row["region_plan_revision"] = None
+        config_row["region_plan_checksum"] = None
     columns = [
         "subsidiary_name",
         "strategic_city_name",
+        "region_policy",
         "distance_backend",
         "assignment_distance_backend",
         "osrm_url",
@@ -1047,6 +1335,8 @@ def upsert_routing_config(
         "long_leg_penalty_multiplier",
         "timezone_offset",
     ]
+    if any(key in config_row for key in ("region_plan_id", "region_plan_revision", "region_plan_checksum")):
+        columns[2:2] = ["region_plan_id", "region_plan_revision", "region_plan_checksum"]
     row = tuple(config_row.get(col) for col in columns)
     return _execute_values_upsert(
         "common_routing_config_master",
@@ -1060,16 +1350,60 @@ def upsert_routing_config(
 
 
 def list_engineers(subsidiary_name: str, strategic_city_name: str, config_path: Path = COMMON_CONFIG_PATH) -> pd.DataFrame:
-    return _fetch_df(
-        """
+    base_sql = """
         select *
         from common_technician_master
         where subsidiary_name = %s and strategic_city_name = %s
         order by employee_name, employee_code
-        """,
-        (subsidiary_name, strategic_city_name),
-        config_path=config_path,
-    )
+    """
+    try:
+        # The lateral lookup binds only the Plan selected in the city config.
+        # It also understands legacy plans stored under a target context such
+        # as Atlanta_6area while the operational city is Atlanta, GA.
+        return _fetch_df(
+            """
+            select t.*,
+                   cfg.region_plan_id,
+                   rpt.assigned_region_seq,
+                   r.region_id as assigned_region_id,
+                   r.region_name as assigned_region_name,
+                   r.required_center_type as assigned_region_center_type
+              from common_technician_master t
+              left join common_routing_config_master cfg
+                on cfg.subsidiary_name=t.subsidiary_name
+               and cfg.strategic_city_name=t.strategic_city_name
+              left join lateral (
+                    select p.strategic_city_name as plan_storage_city_name
+                      from common_region_plan p
+                      left join common_city_context c
+                        on c.subsidiary_name=p.subsidiary_name
+                       and c.strategic_city_name=p.strategic_city_name
+                     where p.subsidiary_name=t.subsidiary_name
+                       and p.plan_id=cfg.region_plan_id
+                       and (p.strategic_city_name=t.strategic_city_name
+                            or c.source_strategic_city_name=t.strategic_city_name)
+                     order by case when p.strategic_city_name=t.strategic_city_name then 0 else 1 end,
+                              p.updated_at desc
+                     limit 1
+              ) plan_ref on true
+              left join common_region_plan_technician rpt
+                on rpt.subsidiary_name=t.subsidiary_name
+               and rpt.strategic_city_name=plan_ref.plan_storage_city_name
+               and rpt.plan_id=cfg.region_plan_id
+               and rpt.employee_code=t.employee_code
+              left join common_region_plan_region r
+                on r.subsidiary_name=rpt.subsidiary_name
+               and r.strategic_city_name=rpt.strategic_city_name
+               and r.plan_id=rpt.plan_id
+               and r.region_seq=rpt.assigned_region_seq
+             where t.subsidiary_name=%s and t.strategic_city_name=%s
+             order by t.employee_name, t.employee_code
+            """,
+            (subsidiary_name, strategic_city_name),
+            config_path=config_path,
+        )
+    except Exception:
+        return _fetch_df(base_sql, (subsidiary_name, strategic_city_name), config_path=config_path)
 
 
 def upsert_technician_master(
@@ -1084,6 +1418,22 @@ def upsert_technician_master(
     employee_name = _clean_text(technician_row.get("employee_name")) or employee_code
     if not subsidiary_name or not strategic_city_name or not employee_code:
         raise ValueError("subsidiary_name, strategic_city_name, and employee_code are required.")
+    region_assignment_requested = bool(_clean_text(technician_row.get("region_plan_id"))) or (
+        "assigned_region_seq" in technician_row
+        and pd.notna(pd.to_numeric(pd.Series([technician_row.get("assigned_region_seq")]), errors="coerce").iloc[0])
+    )
+    if connection is None and region_assignment_requested:
+        environment = str(load_common_config(config_path).get("environment", "")).strip().lower()
+        if environment not in {"development", "dev"}:
+            raise ValueError("REGION_ASSIGNMENT_DEVELOPMENT_ONLY")
+        # Profile and Plan assignment must commit together when the client
+        # edits a Technician Master row with a Region selected.
+        with get_db_connection(config_path) as managed_connection:
+            return upsert_technician_master(
+                technician_row,
+                config_path=config_path,
+                connection=managed_connection,
+            )
 
     home_address = _clean_text(technician_row.get("home_address"))
     home_city = _clean_text(technician_row.get("home_city"))
@@ -1132,7 +1482,7 @@ def upsert_technician_master(
         priority_group,
         int(max_home_to_job_min) if pd.notna(max_home_to_job_min) else None,
     )
-    return _execute_values_upsert(
+    saved = _execute_values_upsert(
         "common_technician_master",
         [
             "subsidiary_name",
@@ -1170,6 +1520,111 @@ def upsert_technician_master(
         config_path=config_path,
         connection=connection,
     )
+    if region_assignment_requested:
+        upsert_region_plan_technician_assignment(
+            {
+                **technician_row,
+                "subsidiary_name": subsidiary_name,
+                "strategic_city_name": strategic_city_name,
+                "employee_code": employee_code,
+            },
+            config_path=config_path,
+            connection=connection,
+        )
+    return saved
+
+
+def upsert_region_plan_technician_assignment(
+    assignment: dict[str, Any],
+    config_path: Path = COMMON_CONFIG_PATH,
+    *,
+    connection: Any | None = None,
+) -> int:
+    """Save a technician's Region assignment for one configured Plan.
+
+    Technician profile columns remain in ``common_technician_master``.  This
+    child row is deliberately Plan-scoped so changing from 3-area to 6-area
+    does not overwrite the technician's profile or another Plan's assignment.
+    """
+    subsidiary_name = _clean_text(assignment.get("subsidiary_name"))
+    city_name = _clean_text(assignment.get("strategic_city_name"))
+    plan_id = _clean_text(assignment.get("region_plan_id"))
+    employee_code = _clean_text(assignment.get("employee_code"))
+    if not all((subsidiary_name, city_name, plan_id, employee_code)):
+        raise ValueError("subsidiary_name, strategic_city_name, region_plan_id, and employee_code are required.")
+    reference = _region_plan_storage_reference(subsidiary_name, city_name, plan_id, config_path=config_path)
+    if reference is None:
+        raise ValueError("Selected Region Plan was not found for the city.")
+    storage_city = _clean_text(reference.get("plan_storage_city_name")) or city_name
+    region_seq = pd.to_numeric(pd.Series([assignment.get("assigned_region_seq")]), errors="coerce").iloc[0]
+    if pd.isna(region_seq) or int(region_seq) <= 0:
+        raise ValueError("A Region must be selected for the technician.")
+    region_seq = int(region_seq)
+    if connection is None:
+        with get_db_connection(config_path) as managed_connection:
+            return upsert_region_plan_technician_assignment(
+                assignment,
+                config_path=config_path,
+                connection=managed_connection,
+            )
+    conn = connection
+    with conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """select required_center_type from common_region_plan_region
+                   where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s and region_seq=%s""",
+                (subsidiary_name, storage_city, plan_id, region_seq),
+            )
+            region_row = cur.fetchone()
+            if region_row is None:
+                raise ValueError("Selected Region does not belong to the selected Region Plan.")
+            required_center = _clean_text(region_row[0]).upper()
+            supplied_center = _clean_text(assignment.get("center_type")).upper()
+            if required_center and supplied_center and required_center != supplied_center:
+                raise ValueError(f"Technician center type {supplied_center} does not match Region center type {required_center}.")
+            cur.execute(
+                """select policy_mode from common_region_plan_technician
+                   where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s and employee_code=%s""",
+                (subsidiary_name, storage_city, plan_id, employee_code),
+            )
+            existing = cur.fetchone()
+            policy_mode = _clean_text(assignment.get("policy_mode")) or _clean_text(existing[0] if existing else "") or "active_roster_type_hard_region_soft/v1"
+            cur.execute(
+                """insert into common_region_plan_technician
+                   (subsidiary_name, strategic_city_name, plan_id, employee_code,
+                    assigned_region_seq, policy_mode, active_flag)
+                   values (%s,%s,%s,%s,%s,%s,%s)
+                   on conflict (subsidiary_name, strategic_city_name, plan_id, employee_code)
+                   do update set assigned_region_seq=excluded.assigned_region_seq,
+                                 policy_mode=excluded.policy_mode,
+                                 active_flag=excluded.active_flag""",
+                (subsidiary_name, storage_city, plan_id, employee_code, region_seq, policy_mode, _coerce_bool(assignment.get("active_flag", True), default=True)),
+            )
+            saved = int(cur.rowcount or 0)
+        conn.commit()
+    return saved
+
+
+def list_configured_region_plan_regions(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> pd.DataFrame:
+    config_row = get_routing_config(subsidiary_name, strategic_city_name, config_path=config_path) or {}
+    plan_id = _clean_text(config_row.get("region_plan_id"))
+    if not plan_id:
+        return pd.DataFrame()
+    reference = _region_plan_storage_reference(subsidiary_name, strategic_city_name, plan_id, config_path=config_path)
+    if reference is None:
+        return pd.DataFrame()
+    return _fetch_df(
+        """select region_seq, region_id, region_name, required_center_type, source_territory
+           from common_region_plan_region
+           where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s
+           order by region_seq""",
+        (subsidiary_name, _clean_text(reference.get("plan_storage_city_name")) or strategic_city_name, plan_id),
+        config_path=config_path,
+    )
 
 
 def delete_technician_master(
@@ -1185,6 +1640,20 @@ def delete_technician_master(
         raise ValueError("subsidiary_name, strategic_city_name, and employee_code are required.")
     with get_db_connection(config_path) as conn:
         with conn.cursor() as cur:
+            cur.execute(
+                """
+                delete from common_region_plan_technician
+                where employee_code = %s
+                  and subsidiary_name = %s
+                  and (strategic_city_name = %s or exists (
+                      select 1 from common_city_context c
+                       where c.subsidiary_name = common_region_plan_technician.subsidiary_name
+                         and c.strategic_city_name = common_region_plan_technician.strategic_city_name
+                         and c.source_strategic_city_name = %s
+                  ))
+                """,
+                (employee_code, subsidiary_name, strategic_city_name, strategic_city_name),
+            )
             cur.execute(
                 """
                 delete from common_technician_capability_master
@@ -1603,16 +2072,47 @@ def get_routing_result(request_id: str, config_path: Path = COMMON_CONFIG_PATH) 
 
 
 def list_regions(subsidiary_name: str, strategic_city_name: str, config_path: Path = COMMON_CONFIG_PATH) -> pd.DataFrame:
-    return _fetch_df(
-        """
-        select *
-        from common_region_master
-        where subsidiary_name = %s and strategic_city_name = %s
-        order by region_seq, postal_code
-        """,
-        (subsidiary_name, strategic_city_name),
-        config_path=config_path,
+    """Return postal membership from the selected/active Area Plan only.
+
+    Legacy ``common_region_master`` rows remain available for migration and
+    audit, but they must not silently drive the client map after Region Plan
+    v2 is enabled.
+    """
+
+    snapshot = get_configured_region_plan_snapshot(
+        subsidiary_name, strategic_city_name, config_path=config_path
     )
+    if snapshot is None:
+        try:
+            snapshot = get_active_region_plan_snapshot(
+                subsidiary_name, strategic_city_name, config_path=config_path
+            )
+        except RuntimeError:
+            snapshot = None
+            options = list_region_plan_options(
+                subsidiary_name, strategic_city_name, config_path=config_path
+            )
+            if not options.empty:
+                active = options[
+                    options["lifecycle"].astype(str).str.casefold().eq("active")
+                ].head(1)
+                if not active.empty:
+                    snapshot = _load_region_plan_snapshot(
+                        subsidiary_name,
+                        strategic_city_name,
+                        active.iloc[0].to_dict(),
+                        config_path=config_path,
+                    )
+    if not snapshot:
+        return pd.DataFrame(
+            columns=["postal_code", "region_seq", "region_name", "area_type"]
+        )
+    rows = snapshot.get("postals") or []
+    if not isinstance(rows, list):
+        return pd.DataFrame(
+            columns=["postal_code", "region_seq", "region_name", "area_type"]
+        )
+    return pd.DataFrame(rows)
 
 
 def list_avoid_areas(
@@ -1776,6 +2276,7 @@ def _seed_routing_config(
             {
                 "subsidiary_name": subsidiary_name,
                 "strategic_city_name": strategic_city_name,
+                "region_policy": city_seed.get("region_policy"),
                 "distance_backend": city_seed.get("distance_backend"),
                 "assignment_distance_backend": city_seed.get("assignment_distance_backend"),
                 "osrm_url": resolved_osrm_url,

@@ -1,0 +1,7 @@
+subsidiary_name,strategic_city_name,plan_id,region_id,region_seq,region_name,new_region_name,area_type,required_center_type
+LGEAI,Atlanta_6area,legacy_5d6867211117_v1,atlanta_6area_r01,1,Atlanta_6area Zone 1,Atlanta_6area Zone 1,DMS,DMS
+LGEAI,Atlanta_6area,legacy_5d6867211117_v1,atlanta_6area_r02,2,Atlanta_6area Zone 2,Atlanta_6area Zone 2,DMS,DMS
+LGEAI,Atlanta_6area,legacy_5d6867211117_v1,atlanta_6area_r03,3,Atlanta_6area Zone 3,Atlanta_6area Zone 3,DMS,DMS
+LGEAI,Atlanta_6area,legacy_5d6867211117_v1,atlanta_6area_r04,4,Atlanta_6area Zone 4,Atlanta_6area Zone 4,DMS,DMS
+LGEAI,Atlanta_6area,legacy_5d6867211117_v1,atlanta_6area_r05,5,Atlanta_6area Zone 5,Atlanta_6area Zone 5,DMS,DMS
+LGEAI,Atlanta_6area,legacy_5d6867211117_v1,atlanta_6area_r06,6,Atlanta_6area ATL Outer Area,Atlanta_6area ATL Outer Area,DMS,DMS

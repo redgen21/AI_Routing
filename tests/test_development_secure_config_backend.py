@@ -42,6 +42,14 @@ class _SecureConfigRemote:
         data = self.files.get(path)
         return _sha256(data) if data is not None else None
 
+    def read_bytes(self, path: str, *, maximum_bytes: int) -> bytes:
+        if path not in self.files:
+            raise FileNotFoundError(path)
+        payload = self.files[path]
+        if len(payload) > maximum_bytes:
+            raise ValueError("remote payload too large")
+        return payload
+
     def mode(self, path: str) -> int | None:
         return self.modes.get(path)
 
@@ -138,6 +146,21 @@ class DevelopmentSecureConfigBackendTests(unittest.TestCase):
 
     @contextlib.contextmanager
     def _backend(self, remote: _SecureConfigRemote):
+        remote.files.setdefault(
+            console_backend.DEVELOPMENT_REMOTE_DATA_CATALOG,
+            json.dumps(
+                {
+                    "schema": "north-america-routing-data-catalog/v1",
+                    "data_root": "/home/csda/AI_Routing/shared/north_america",
+                    "state_root": "/home/csda/AI_Routing/state/development",
+                    "active": {
+                        "service_geocoded": "processed/service/service.csv",
+                        "profile_production": "processed/profile/profile.xlsx",
+                        "zcta_geometry": "reference/geospatial/zcta.zip",
+                    },
+                }
+            ).encode("utf-8"),
+        )
         with (
             mock.patch.object(console_backend, "CONFIG_ROOT", self.config_root),
             mock.patch.object(console_backend, "HISTORY_PATH", self.history_path),
@@ -177,6 +200,20 @@ class DevelopmentSecureConfigBackendTests(unittest.TestCase):
         self.assertTrue(all(set(row) <= {
             "filename", "target", "local_sha256", "remote_sha256", "size_bytes", "mode", "status", "changed"
         } for row in rows))
+
+    def test_preview_accepts_already_server_shared_catalog_paths(self) -> None:
+        config_path = self.config_root / "config.json"
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        shared = "/home/csda/AI_Routing/shared/north_america"
+        payload["area_map_usa"]["service_file"] = f"{shared}/processed/service/service.csv"
+        payload["area_map_usa"]["profile_file"] = f"{shared}/processed/profile/profile.xlsx"
+        payload["area_map_usa"]["zcta_zip_file"] = f"{shared}/reference/geospatial/zcta.zip"
+        payload["area_map"]["service_file"] = payload["area_map_usa"]["service_file"]
+        payload["area_map"]["profile_file"] = payload["area_map_usa"]["profile_file"]
+        config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        preview = self._preview(_SecureConfigRemote())
+        self.assertEqual(preview["status"], "ready")
 
     def test_policy_off_blocks_mutation_without_opening_remote_session(self) -> None:
         remote = _SecureConfigRemote()

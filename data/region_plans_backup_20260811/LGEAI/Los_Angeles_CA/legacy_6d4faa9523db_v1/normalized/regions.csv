@@ -1,0 +1,10 @@
+subsidiary_name,strategic_city_name,plan_id,region_id,region_seq,region_name,new_region_name,area_type,required_center_type
+LGEAI,"Los Angeles, CA - Bucket Sim Draft",legacy_6d4faa9523db_v1,1,1,A,A,OVERLAP,
+LGEAI,"Los Angeles, CA - Bucket Sim Draft",legacy_6d4faa9523db_v1,2,2,B,B,OVERLAP,
+LGEAI,"Los Angeles, CA - Bucket Sim Draft",legacy_6d4faa9523db_v1,3,3,C,C,OVERLAP,
+LGEAI,"Los Angeles, CA - Bucket Sim Draft",legacy_6d4faa9523db_v1,4,4,D,D,OVERLAP,
+LGEAI,"Los Angeles, CA - Bucket Sim Draft",legacy_6d4faa9523db_v1,5,5,E,E,OVERLAP,
+LGEAI,"Los Angeles, CA - Bucket Sim Draft",legacy_6d4faa9523db_v1,6,6,F,F,OVERLAP,
+LGEAI,"Los Angeles, CA - Bucket Sim Draft",legacy_6d4faa9523db_v1,7,7,G,G,OVERLAP,
+LGEAI,"Los Angeles, CA - Bucket Sim Draft",legacy_6d4faa9523db_v1,8,8,H,H,OVERLAP,
+LGEAI,"Los Angeles, CA - Bucket Sim Draft",legacy_6d4faa9523db_v1,9,9,Outside Bucket Sim Draft,Outside Bucket Sim Draft,DMS2_EXCLUSIVE,
