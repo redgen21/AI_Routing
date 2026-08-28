@@ -18,6 +18,34 @@ ATLANTA_REGION_CITY_NAMES = (
 
 
 class AtlantaRegionCityUiTests(unittest.TestCase):
+    def test_common_clients_use_configured_slot_policy_for_ui_defaults(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {"COMMON_VRP_CONFIG_PATH": "config/common_vrp.dev.json"},
+        ):
+            import sr_common_vrp_client as client
+            import sr_common_vrp_client_server as server
+
+        for module in (client, server):
+            self.assertEqual(module._slot_minutes(), 40)
+            self.assertEqual(module._default_technician_slot_count(), 9)
+            self.assertEqual(module._estimate_service_time_min(pd.Series({"job_slot_count": 1})), 40.0)
+            self.assertEqual(module._estimate_service_time_min(pd.Series({"job_slot_count": 2})), 80.0)
+            self.assertEqual(module._estimate_service_time_min(pd.Series({"service_time_min": 55})), 55.0)
+            self.assertEqual(
+                module._estimate_service_time_min(pd.Series({"is_heavy_repair": True, "service_time_min": 55})),
+                100.0,
+            )
+            normalized = module._normalize_technician_rows(
+                pd.DataFrame([{"employee_code": "TECH-1", "slot_count": 6}]),
+                pd.DataFrame(),
+                "LGEAI",
+                "Atlanta, GA",
+                "2026-08-28",
+                default_source="test",
+            )
+            self.assertEqual(int(normalized.iloc[0]["slot_count"]), 6)
+
     def test_common_clients_expose_city_options_and_reuse_atlanta_runtime_truth(self) -> None:
         with mock.patch.dict(
             os.environ,

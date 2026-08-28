@@ -1,7 +1,6 @@
 {
   "credentials_file": "config/server_ftp.local.json",
   "remote_root": "/home/csda/AI_Routing",
-  "admin_tools_release_version": "<PINNED_ADMIN_TOOLS_RELEASE_VERSION>",
   "allow_upload": false,
   "allow_development_secure_config_upload": false,
   "allow_production_secure_config_upload": false,

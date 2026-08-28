@@ -395,8 +395,16 @@ def overview(config_path: Path) -> dict[str, Any]:
                     exists = cursor.fetchone()[0] is not None
                     count = None
                     actual_pk: list[str] = []
+                    columns: list[dict[str, object]] = []
                     if exists:
-                        cursor.execute(sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(spec.table)))
+                        # A full COUNT(*) for every operational table makes the
+                        # monitor unnecessarily slow.  PostgreSQL's catalog
+                        # estimate is sufficient for the console inventory and
+                        # avoids scanning job/result tables on every refresh.
+                        cursor.execute(
+                            "SELECT greatest(reltuples, 0)::bigint FROM pg_class WHERE oid=%s::regclass",
+                            (f"public.{spec.table}",),
+                        )
                         count = int(cursor.fetchone()[0])
                         cursor.execute(
                             "SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid=i.indrelid "
@@ -404,9 +412,27 @@ def overview(config_path: Path) -> dict[str, Any]:
                             "ORDER BY array_position(i.indkey,a.attnum)", (f"public.{spec.table}",),
                         )
                         actual_pk = [str(item[0]) for item in cursor.fetchall()]
+                        cursor.execute(
+                            """
+                            SELECT column_name, data_type, is_nullable, column_default
+                              FROM information_schema.columns
+                             WHERE table_schema='public' AND table_name=%s
+                             ORDER BY ordinal_position
+                            """,
+                            (spec.table,),
+                        )
+                        columns = [
+                            {
+                                "name": str(name),
+                                "type": str(data_type),
+                                "nullable": str(nullable).upper() == "YES",
+                                "default": default,
+                            }
+                            for name, data_type, nullable, default in cursor.fetchall()
+                        ]
                     schema_status = "missing_table" if not exists else ("compatible" if actual_pk == list(spec.primary_key) else "pk_drift")
                     write_allowed = spec.writable and target["environment"] == "development"
-                    rows.append({"table": spec.table, "table_name": spec.table, "exists": exists, "row_count": count, "primary_key": actual_pk, "schema_status": schema_status, "write_allowed": write_allowed, "write_capability": "csv_upsert" if write_allowed else "read_only"})
+                    rows.append({"table": spec.table, "table_name": spec.table, "row_count_is_estimate": True, "exists": exists, "row_count": count, "primary_key": actual_pk, "columns": columns, "schema_status": schema_status, "write_allowed": write_allowed, "write_capability": "csv_upsert" if write_allowed else "read_only"})
                 except Exception:
                     connection.rollback()
                     rows.append({"table": spec.table, "table_name": spec.table, "exists": None, "row_count": None, "primary_key": [], "schema_status": "unreadable", "write_allowed": False, "write_capability": "read_only"})

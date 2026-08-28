@@ -836,14 +836,12 @@ class RegionPlanBackendTests(unittest.TestCase):
         )
         sql = REGION_PLAN_SCHEMA_V2.read_text(encoding="utf-8")
         normalized = " ".join(sql.lower().split())
-        self.assertEqual(normalized.count("grant select, insert, update on table"), 3)
         self.assertIn("grant select, insert, update on table public.common_city_context to vrp_agent", normalized)
-        self.assertIn("grant select, insert, update on table public.common_region_plan to vrp_agent", normalized)
+        self.assertIn("grant select, insert, update, delete on table public.common_region_plan to vrp_agent", normalized)
         self.assertIn("public.common_region_plan_boundary_overflow, public.common_region_plan_activation to vrp_agent", normalized)
         self.assertNotIn("common_region_master", normalized)
         self.assertNotIn("common_technician_master", normalized)
         self.assertNotIn(" grant all ", f" {normalized} ")
-        self.assertNotIn("grant delete", normalized)
         self.assertNotIn("grant truncate", normalized)
 
     def test_stage_candidate_cli_rejects_legacy_raw_workbook_flow(self) -> None:

@@ -141,7 +141,7 @@ class DeploymentConsoleArtifactSafetyTests(unittest.TestCase):
             files.append({"path": relative, "sha256": _sha256(source)})
         manifest = {
             "artifact_type": "db-admin-tools",
-            "target_root": "/home/csda/AI_Routing/admin_tools/releases/admin-v1",
+            "target_root": "/home/csda/AI_Routing/admin_tools",
             "source_dirty": not clean,
             "promotable": clean,
             "contains_secrets": False,
@@ -401,7 +401,7 @@ class DeploymentConsoleArtifactSafetyTests(unittest.TestCase):
         self.assertEqual(
             remote.uploads,
             [
-                "/home/csda/AI_Routing/admin_tools/releases/admin-v1/"
+                "/home/csda/AI_Routing/admin_tools/"
                 "deploy_manifest.json"
             ],
         )
@@ -437,7 +437,7 @@ class DeploymentConsoleArtifactSafetyTests(unittest.TestCase):
         self.assertTrue(result["complete_manifest"])
         self.assertEqual(len(remote.uploads), 53)
         self.assertEqual(remote.uploads.count(
-            "/home/csda/AI_Routing/admin_tools/releases/admin-v1/deploy_manifest.json"
+            "/home/csda/AI_Routing/admin_tools/deploy_manifest.json"
         ), 1)
         self.assertEqual(len(recorded[0]["changes"]), 53)
         self.assertEqual(len(recorded[0]["verified_files"]), 53)
@@ -469,7 +469,7 @@ class DeploymentConsoleArtifactSafetyTests(unittest.TestCase):
         legacy_source.write_text("LEGACY = True\n", encoding="utf-8")
         manifest = {
             "artifact_type": "db-admin-tools",
-            "target_root": "/home/csda/AI_Routing/admin_tools/releases/legacy-admin",
+            "target_root": "/home/csda/AI_Routing/admin_tools",
             "files": [{"path": "smart_routing/common_vrp_db.py", "sha256": _sha256(legacy_source)}],
         }
         (stage / "deploy_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")

@@ -8,7 +8,7 @@ import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import pandas as pd
 
@@ -43,6 +43,37 @@ from .vrp_api_service import create_job_id, run_routing_request
 
 COMMON_JOB_ARCHIVE_ROOT = Path("260310/common_vrp_api_jobs")
 LOGGER = logging.getLogger(__name__)
+DEFAULT_SLOT_MINUTES = 45
+DEFAULT_TECHNICIAN_SLOT_COUNT = 8
+DEFAULT_HEAVY_JOB_MIN_SERVICE_MINUTES = 100
+
+
+def _positive_int_policy_value(value: object, default: int) -> int:
+    numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.isna(numeric) or float(numeric) <= 0:
+        return int(default)
+    return int(numeric)
+
+
+def _routing_slot_policy(config_path: Path = COMMON_CONFIG_PATH) -> dict[str, int]:
+    """Load the optional top-level slot policy with legacy-safe defaults."""
+    config = load_common_config(config_path)
+    policy = config.get("routing_policy", {}) or {}
+    if not isinstance(policy, dict):
+        policy = {}
+    return {
+        "slot_minutes": _positive_int_policy_value(
+            policy.get("slot_minutes"), DEFAULT_SLOT_MINUTES
+        ),
+        "default_technician_slot_count": _positive_int_policy_value(
+            policy.get("default_technician_slot_count"),
+            DEFAULT_TECHNICIAN_SLOT_COUNT,
+        ),
+        "heavy_job_min_service_minutes": _positive_int_policy_value(
+            policy.get("heavy_job_min_service_minutes"),
+            DEFAULT_HEAVY_JOB_MIN_SERVICE_MINUTES,
+        ),
+    }
 AREA_TYPE_DMS = {"DMS", "DMS_CORE", "DMS_ONLY"}
 AREA_TYPE_OVERLAP = {"OVERLAP", "OVERLAB"}
 AREA_TYPE_DMS2 = {"DMS2", "DMS2_EXCLUSIVE", "DMS2_ONLY"}
@@ -224,11 +255,10 @@ def _active_atlanta6_plan(subsidiary_name: str, strategic_city_name: str, config
     status = str(snapshot.get("status", snapshot.get("plan_status", ""))).strip().lower()
     context_status = str(snapshot.get("context_status", "")).strip().lower()
     enabled = snapshot.get("enabled", snapshot.get("feature_enabled", False))
-    if enabled is not True or status not in {"active", "reviewed"} or context_status not in {"", "active", "reviewed"}:
-        raise ValueError("CONFIGURED_REGION_PLAN_MUST_BE_REVIEWED_OR_ACTIVE")
+    if enabled is not True or status != "active" or context_status not in {"", "active"}:
+        raise ValueError("CONFIGURED_REGION_PLAN_MUST_BE_ACTIVE")
     if not str(snapshot.get("plan_id", "")).strip() or not str(snapshot.get("checksum", snapshot.get("bundle_sha256", "")).strip()):
         raise ValueError("ATLANTA_6AREA_PLAN_SNAPSHOT_INVALID")
-    _atlanta6_snapshot_policy_version(snapshot)
     return snapshot
 
 
@@ -237,16 +267,13 @@ def _plan_rows(snapshot: dict[str, Any], key: str) -> list[dict[str, Any]]:
     return [dict(row) for row in rows] if isinstance(rows, list) else []
 
 
-def _atlanta6_snapshot_policy_version(snapshot: dict[str, Any]) -> str:
-    """Return the immutable plan policy, rejecting absent or unknown policies.
+def _selected_region_policy(options: Mapping[str, Any] | None) -> str:
+    """Return the VRP Client routing policy, defaulting to Home based routing.
 
-    V2 is the policy for the current reviewed Atlanta-6 plan.  V1 remains
-    executable only when an older immutable snapshot explicitly records it;
-    it is never inferred as a fallback for incomplete snapshots.
+    An Area Plan is topology and roster data only.  It must never prescribe a
+    routing policy through its persisted snapshot.
     """
-    policy_version = str(snapshot.get("policy_version", "")).strip()
-    if not policy_version:
-        raise ValueError("ATLANTA_6AREA_PLAN_POLICY_VERSION_REQUIRED")
+    policy_version = str((options or {}).get("region_policy", "")).strip() or HOME_DISTANCE_ONLY
     if policy_version not in ATLANTA_6AREA_SUPPORTED_POLICY_VERSIONS:
         raise ValueError("ATLANTA_6AREA_PLAN_POLICY_VERSION_UNSUPPORTED")
     return policy_version
@@ -256,8 +283,24 @@ def _apply_active_region_plan(payload: dict[str, Any], snapshot: dict[str, Any] 
     """Apply immutable Atlanta-6 membership as hard eligibility, never a fallback."""
     if snapshot is None:
         return payload
-    policy_version = _atlanta6_snapshot_policy_version(snapshot)
     execution = copy.deepcopy(payload)
+    policy_version = _selected_region_policy(execution.get("options"))
+    if policy_version == HOME_DISTANCE_ONLY:
+        # Home based routing intentionally does not consume Region or
+        # technician-to-region membership.  Keep the API-provided roster
+        # intact even when a newly selected Area Plan has no assignments yet.
+        options = dict(execution.get("options") or {})
+        options["region_policy"] = policy_version
+        options["region_plan"] = {
+            "plan_id": str(snapshot["plan_id"]),
+            "plan_revision": snapshot.get("revision", snapshot.get("plan_revision")),
+            "policy_version": policy_version,
+            "checksum": str(snapshot.get("checksum", snapshot.get("bundle_sha256"))),
+            "activation_revision": snapshot.get("activation_revision"),
+        }
+        execution["options"] = options
+        execution["region_plan"] = dict(options["region_plan"])
+        return execution
     postal_rows = _plan_rows(snapshot, "postals") or _plan_rows(snapshot, "postal_memberships")
     technician_rows = _plan_rows(snapshot, "technicians") or _plan_rows(snapshot, "assigned_technicians")
     overflow_rows = _plan_rows(snapshot, "boundary_overflow")
@@ -653,7 +696,7 @@ def _default_time_limit_seconds(job_count: int, technician_count: int) -> int:
     if job_count <= 30:
         return 15
     if job_count <= 60:
-        return 60
+        return 30
     if job_count <= 100:
         return 60
     if job_count <= 150:
@@ -698,6 +741,7 @@ def _build_server_routing_options(
     config_path: Path = COMMON_CONFIG_PATH,
 ) -> dict[str, Any]:
     routing_config = _routing_config_with_fallback(subsidiary_name, strategic_city_name, config_path=config_path)
+    slot_policy = _routing_slot_policy(config_path)
     avoid_polygons: list[dict[str, Any]] = []
     avoid_area_df = list_avoid_areas(subsidiary_name, strategic_city_name, active_only=True, config_path=config_path)
     if not avoid_area_df.empty:
@@ -728,6 +772,7 @@ def _build_server_routing_options(
         "max_home_to_job_min": _positive_float_or_none(routing_config.get("max_home_to_job_min")),
         "long_leg_penalty_start_min": _positive_float_or_none(routing_config.get("long_leg_penalty_start_min")),
         "long_leg_penalty_multiplier": _positive_float_or_none(routing_config.get("long_leg_penalty_multiplier")),
+        **slot_policy,
     }
 
 
@@ -739,16 +784,42 @@ def _with_server_routing_options(
 ) -> dict[str, Any]:
     execution_payload = copy.deepcopy(payload)
     options = dict(execution_payload.get("options") or {})
+    client_region_policy = str(options.get("region_policy", "")).strip()
     options.update(_build_server_routing_options(subsidiary_name, strategic_city_name, config_path=config_path))
+    if client_region_policy:
+        options["region_policy"] = client_region_policy
     existing_plan = options.get("region_plan")
     if (
         isinstance(existing_plan, dict)
         and existing_plan.get("plan_id")
     ):
-        # The queued payload is the immutable active-plan snapshot.  Server
-        # defaults must not downgrade its routing policy while it is running.
-        options["region_policy"] = _atlanta6_snapshot_policy_version(existing_plan)
+        # The queued payload retains the selected Area Plan, but the routing
+        # policy belongs to VRP Client rather than the persisted Plan.
+        options["region_policy"] = _selected_region_policy(options)
     execution_payload["options"] = options
+
+    default_slot_count = _positive_int_policy_value(
+        options.get("default_technician_slot_count"),
+        DEFAULT_TECHNICIAN_SLOT_COUNT,
+    )
+    normalized_technicians: list[dict[str, Any]] = []
+    for technician in list(execution_payload.get("technicians", [])):
+        normalized = dict(technician)
+        explicit_slot_count = pd.to_numeric(
+            pd.Series(
+                [
+                    normalized.get(
+                        "slot_count",
+                        normalized.get("max_slots", normalized.get("max_jobs")),
+                    )
+                ]
+            ),
+            errors="coerce",
+        ).iloc[0]
+        if pd.isna(explicit_slot_count):
+            normalized["slot_count"] = default_slot_count
+        normalized_technicians.append(normalized)
+    execution_payload["technicians"] = normalized_technicians
 
     active_employee_codes = {
         str(tech.get("employee_code", "")).strip()
@@ -780,7 +851,17 @@ def _with_server_routing_options(
         )
         options = dict(execution_payload.get("options") or {})
     execution_payload["capabilities"] = capabilities
-    heavy_jobs = _enrich_jobs_heavy_repair(list(execution_payload.get("jobs", [])), config_path=config_path)
+    heavy_jobs = _enrich_jobs_heavy_repair(
+        list(execution_payload.get("jobs", [])),
+        config_path=config_path,
+        slot_minutes=_positive_int_policy_value(
+            options.get("slot_minutes"), DEFAULT_SLOT_MINUTES
+        ),
+        heavy_job_min_service_minutes=_positive_int_policy_value(
+            options.get("heavy_job_min_service_minutes"),
+            DEFAULT_HEAVY_JOB_MIN_SERVICE_MINUTES,
+        ),
+    )
     area_jobs = _apply_job_area_type_rules(
         heavy_jobs,
         list(execution_payload.get("technicians", [])),
@@ -1210,6 +1291,12 @@ def _build_payload_from_dataframes(
 
     source_city = _runtime_source_city(subsidiary_name, strategic_city_name, config_path)
     active_plan = _active_atlanta6_plan(subsidiary_name, strategic_city_name, config_path)
+    configured_policy = str(
+        _routing_config_with_fallback(
+            subsidiary_name, strategic_city_name, config_path=config_path,
+        ).get("region_policy", "")
+    ).strip() or HOME_DISTANCE_ONLY
+    slot_policy = _routing_slot_policy(config_path)
     engineer_master_df = _runtime_engineer_master(subsidiary_name, strategic_city_name, config_path=config_path)
     active_flag_lookup = {
         str(row.get("employee_code", "")).strip(): _coerce_bool_value(row.get("active_flag", True), default=True)
@@ -1365,8 +1452,12 @@ def _build_payload_from_dataframes(
         priority_group = _priority_group_label(priority_score)
         shift_start = str(tech.get("shift_start", "08:00")).strip() or "08:00"
         shift_end = str(tech.get("shift_end", "18:00")).strip() or "18:00"
-        slot_capacity = pd.to_numeric(pd.Series([tech.get("slot_count", 8)]), errors="coerce").iloc[0]
-        max_slots = int(slot_capacity) if pd.notna(slot_capacity) else 8
+        slot_capacity = pd.to_numeric(pd.Series([tech.get("slot_count")]), errors="coerce").iloc[0]
+        max_slots = (
+            int(slot_capacity)
+            if pd.notna(slot_capacity)
+            else int(slot_policy["default_technician_slot_count"])
+        )
         max_slots = max(0, max_slots)
         shift_minutes = _shift_minutes(shift_start, shift_end, default_minutes=540)
         configured_max_minutes = pd.to_numeric(pd.Series([tech.get("max_minutes")]), errors="coerce").iloc[0]
@@ -1488,6 +1579,8 @@ def _build_payload_from_dataframes(
             "respect_fixed_jobs": True,
             "objective": "min_total_travel_time",
             "time_limit_seconds": _default_time_limit_seconds(len(jobs_payload), len(technicians_payload)),
+            "region_policy": configured_policy,
+            **slot_policy,
         },
         "technicians": technicians_payload,
         "jobs": jobs_payload,
@@ -1534,7 +1627,13 @@ def build_payload_from_inputs(
     )
 
 
-def _enrich_jobs_heavy_repair(jobs: list[dict[str, Any]], config_path: Path = COMMON_CONFIG_PATH) -> list[dict[str, Any]]:
+def _enrich_jobs_heavy_repair(
+    jobs: list[dict[str, Any]],
+    config_path: Path = COMMON_CONFIG_PATH,
+    *,
+    slot_minutes: int = DEFAULT_SLOT_MINUTES,
+    heavy_job_min_service_minutes: int = DEFAULT_HEAVY_JOB_MIN_SERVICE_MINUTES,
+) -> list[dict[str, Any]]:
     heavy_repair_rule_df = _normalize_heavy_repair_rules(list_heavy_repair_rules(config_path=config_path))
     if heavy_repair_rule_df.empty:
         heavy_repair_rule_df = _load_fallback_heavy_repair_rules()
@@ -1577,10 +1676,20 @@ def _enrich_jobs_heavy_repair(jobs: list[dict[str, Any]], config_path: Path = CO
         job_slot_count = max(1, int(numeric_slot)) if pd.notna(numeric_slot) else (2 if _coerce_bool_value(job.get("two_slot_job", job.get("2slot_job", False)), default=False) else 1)
         if is_heavy_repair and job_slot_count < 2:
             job_slot_count = 2
-        slot_minutes = 45 * job_slot_count
+        explicit_service_minutes = pd.to_numeric(
+            pd.Series([job.get("service_minutes")]), errors="coerce"
+        ).iloc[0]
+        computed_service_minutes = max(
+            int(slot_minutes) * job_slot_count,
+            int(heavy_job_min_service_minutes) if is_heavy_repair else int(slot_minutes),
+        )
         enriched_job["is_heavy_repair"] = is_heavy_repair
         enriched_job["job_slot_count"] = job_slot_count
-        enriched_job["service_minutes"] = max(slot_minutes, 100 if is_heavy_repair else 45)
+        enriched_job["service_minutes"] = (
+            int(explicit_service_minutes)
+            if pd.notna(explicit_service_minutes)
+            else computed_service_minutes
+        )
         enriched.append(enriched_job)
     return enriched
 
@@ -1603,6 +1712,19 @@ def submit_routing_from_payload(
     enriched_payload["mode"] = mode
     enriched_payload["city"] = str(enriched_payload.get("city", "") or strategic_city_name).strip()
     enriched_payload["planning_date"] = str(enriched_payload.get("planning_date", "") or planning_date).strip()
+    options = dict(enriched_payload.get("options") or {})
+    server_routing_options = _build_server_routing_options(
+        subsidiary_name, strategic_city_name, config_path=config_path,
+    )
+    if not str(options.get("region_policy", "")).strip():
+        options["region_policy"] = _selected_region_policy(server_routing_options)
+    for key in (
+        "slot_minutes",
+        "default_technician_slot_count",
+        "heavy_job_min_service_minutes",
+    ):
+        options[key] = server_routing_options[key]
+    enriched_payload["options"] = options
     enriched_payload = _apply_active_region_plan(
         enriched_payload,
         _active_atlanta6_plan(subsidiary_name, strategic_city_name, config_path),

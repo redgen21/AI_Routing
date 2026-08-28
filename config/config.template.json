@@ -16,7 +16,9 @@
     "google_monthly_limit": 10000,
     "daily_limit": 10000,
     "batch_size": 1000,
-    "google_sleep_sec": 0.05
+    "google_sleep_sec": 0.05,
+    "postal_fallback_enabled": true,
+    "postal_fallback_zcta_zip_file": "data/north_america/reference/geospatial/tl_2024_us_zcta520.zip"
   },
   "llm": {
     "enabled": false,

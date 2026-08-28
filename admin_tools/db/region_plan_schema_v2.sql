@@ -156,7 +156,8 @@ $schema_v2$;
 
 grant select, insert, update on table public.common_city_context to vrp_agent;
 grant select, insert, update on table public.common_region_plan to vrp_agent;
-grant select, insert, update on table public.common_region_plan_region,
+grant delete on table public.common_region_plan to vrp_agent;
+grant select, insert, update, delete on table public.common_region_plan_region,
   public.common_region_plan_postal, public.common_region_plan_technician,
   public.common_region_plan_boundary_overflow, public.common_region_plan_activation to vrp_agent;
 
@@ -277,9 +278,9 @@ create index if not exists common_region_set_source_idx
     on public.common_region_set (subsidiary_name, source_strategic_city_name, status);
 
 grant select, insert, update on table public.common_region_set,
-  public.common_region_set_region, public.common_region_set_postal,
-  public.common_routing_plan, public.common_routing_plan_technician,
-  public.common_routing_plan_activation to vrp_agent;
+  public.common_region_set_region, public.common_region_set_postal to vrp_agent;
+grant select, insert, update, delete on table public.common_routing_plan,
+  public.common_routing_plan_technician, public.common_routing_plan_activation to vrp_agent;
 
 -- Backfill one Region Set per distinct fixed-region checksum.  Plans that
 -- differ only by routing policy therefore share topology, while their policy

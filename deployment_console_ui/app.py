@@ -5,12 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 import uuid
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, MutableMapping
 
+import pandas as pd
 import streamlit as st
 
 from .backend_adapter import BackendAdapter, BackendCapabilityError
@@ -23,7 +25,10 @@ from .helpers import (
     redact_text,
     safe_manifest_files,
 )
-from tools.data.region_plan_area_map import list_saved_region_plan_workbooks
+from tools.data.region_plan_area_map import (
+    POLICY_MODES as AREA_MAP_POLICY_MODES,
+    list_saved_region_plan_workbooks,
+)
 from smart_routing.routing_policy_catalog import (
     routing_policy_description,
     routing_policy_label,
@@ -45,6 +50,7 @@ NAVIGATION = (
     ("package-production", "Package Management", "Production"),
     ("package-admin-tools", "Package Management", "Admin Tools"),
     ("data", "Data Management", "Managed data"),
+    ("database", "Data Management", "Database monitor"),
     ("region-plans", "Data Management", "Region Plans v2"),
     ("settings", "Settings", "Connection settings"),
 )
@@ -259,6 +265,71 @@ def _load_remote_diff(
         elif force:
             cache.pop(cache_key, None)
     return cache.get(cache_key)
+
+
+def _cached_region_plan_workbooks(*, refresh: bool = False) -> list[dict[str, Any]]:
+    """Keep Area Map discovery off the Streamlit rerun hot path.
+
+    A Streamlit widget interaction reruns the fragment.  Walking every saved
+    Area Map directory and parsing every manifest on each interaction made the
+    Region Plans screen feel slow even though neither the files nor the DB
+    selection changed.  Metadata is short-lived and can be refreshed explicitly;
+    workbook bytes are handled separately and never included in this cache.
+    """
+
+    cache_key = "region-plan-local-workbooks-cache"
+    cached = _mapping(st.session_state.get(cache_key) or {})
+    now = time.monotonic()
+    if (
+        refresh
+        or not cached
+        or now - float(cached.get("loaded_at") or 0.0) >= 30.0
+    ):
+        candidates = list_saved_region_plan_workbooks(PROJECT_ROOT / "data" / "region_plans")
+        st.session_state[cache_key] = {
+            "loaded_at": now,
+            "items": candidates,
+        }
+        # A save can replace a workbook at the same path.  Metadata refresh
+        # therefore invalidates only the local byte cache, never DB inventory.
+        st.session_state.pop("region-plan-local-workbook-bytes-cache", None)
+        cached = _mapping(st.session_state[cache_key])
+    return [dict(item) for item in cached.get("items", []) if isinstance(item, Mapping)]
+
+
+def _cached_region_plan_workbook_bytes(workbook_path: Path) -> bytes:
+    """Read a selected workbook once per unchanged local file."""
+
+    resolved = workbook_path.resolve()
+    stat = resolved.stat()
+    signature = (str(resolved), int(stat.st_size), int(stat.st_mtime_ns))
+    cache = st.session_state.setdefault("region-plan-local-workbook-bytes-cache", {})
+    cached = _mapping(cache.get(str(resolved)) or {})
+    if tuple(cached.get("signature") or ()) != signature:
+        cache[str(resolved)] = {"signature": signature, "bytes": resolved.read_bytes()}
+    return bytes(_mapping(cache[str(resolved)]).get("bytes") or b"")
+
+
+def _session_ttl_value(
+    cache_key: str,
+    loader: Callable[[], Any | None],
+    *,
+    ttl_seconds: float,
+    refresh: bool = False,
+) -> Any | None:
+    """Reuse successful read-only backend responses during UI reruns."""
+
+    cached = _mapping(st.session_state.get(cache_key) or {})
+    if (
+        refresh
+        or "value" not in cached
+        or time.monotonic() - float(cached.get("loaded_at") or 0.0) >= ttl_seconds
+    ):
+        value = loader()
+        if value is not None:
+            st.session_state[cache_key] = {"loaded_at": time.monotonic(), "value": value}
+            return value
+    return cached.get("value")
 
 
 def _project_relative_path(value: object) -> str:
@@ -602,6 +673,12 @@ def _render_build_artifact(adapter: BackendAdapter, environment: str) -> None:
         "Building does not upload or deploy it."
     )
     st.info(
+        "This is the server runtime package. The local deployment-console backend "
+        "(`services/deploy/console_backend.py`) is intentionally not uploaded here. "
+        "For Region Plan DB operations, build and upload the Admin Tools artifact "
+        "from Package Management → Admin Tools."
+    )
+    st.info(
         "Development artifacts are never promoted by copying them to production. "
         "Build the production artifact separately from a clean checkout."
     )
@@ -832,9 +909,13 @@ def _render_admin_tools_build(adapter: BackendAdapter, environment: str) -> None
 
 
 def _render_admin_tools_development_activation(
-    adapter: BackendAdapter, artifacts: list[object]
+    adapter: BackendAdapter, artifact: object | list[object]
 ) -> None:
-    """Offer the newest remotely verified non-promotable release for Development only."""
+    """Offer Development activation for the artifact the operator selected.
+
+    Remote verification hashes every deployable Admin Tools file.  Do not run
+    it once for every retained artifact before the selector can render.
+    """
 
     if not (
         adapter.has("preview_admin_tools_development_activation")
@@ -843,8 +924,12 @@ def _render_admin_tools_development_activation(
         return
 
     candidate: Mapping[str, Any] = {}
-    for artifact in artifacts:
-        version = _safe_release_version(_mapping(artifact).get("version") or _id(artifact))
+    # The list input remains supported for isolated callers/tests. The actual
+    # deployment screen passes exactly one selected artifact, avoiding a remote
+    # hash walk across every retained artifact before the selector appears.
+    candidates = artifact if isinstance(artifact, list) else [artifact]
+    for item in candidates:
+        version = _safe_release_version(_mapping(item).get("version") or _id(item))
         if not version:
             continue
         preview_errors: list[str] = []
@@ -1029,8 +1114,6 @@ def _render_artifact_tab(
         if not artifacts:
             st.warning("No backend-validated artifacts are available for this selection.")
             return
-        if kind == "admin-tools" and environment == "development":
-            _render_admin_tools_development_activation(adapter, list(artifacts))
         artifact = _select_retained_artifact(
             list(artifacts),
             selector_key=f"artifact-version-{environment}-{kind}",
@@ -1040,6 +1123,8 @@ def _render_artifact_tab(
             st.warning("No backend-validated artifacts are available for this selection.")
             return
     artifact_data = _mapping(artifact)
+    if kind == "admin-tools" and environment == "development":
+        _render_admin_tools_development_activation(adapter, artifact)
     artifact_path = artifact_data.get("path") or artifact_data.get("archive_path")
     if not artifact_path:
         st.error("Artifact entry has no backend-provided path.")
@@ -1156,9 +1241,9 @@ def _render_artifact_tab(
         cache_key.encode("utf-8")
     ).hexdigest()[:16]
     widget_selection = st.session_state.get(upload_widget_key)
-    if isinstance(widget_selection, list) and not set(widget_selection).issubset(
-        changed_files
-    ):
+    if kind != "runtime" and isinstance(widget_selection, list) and not set(
+        widget_selection
+    ).issubset(changed_files):
         st.session_state.pop(upload_widget_key, None)
     if changed_files:
         selected_files = st.multiselect(
@@ -1215,6 +1300,13 @@ def _render_artifact_tab(
     if notice and notice.get("scope_id") != scope_id:
         st.session_state.pop(notice_key, None)
         notice = {}
+    # A failed upload can be left in Streamlit session state when the remote
+    # diff is refreshed in a later render. If the reviewed artifact now has no
+    # changed files, there is no active failure to display or retry; keeping the
+    # old notice makes a successful no-op look like a new upload failure.
+    if not changed_files and notice.get("status") == "failed":
+        st.session_state.pop(notice_key, None)
+        notice = {}
     if notice.get("status") == "completed":
         release_text = (
             f" | release_id: {notice.get('release_id')}"
@@ -1254,7 +1346,7 @@ def _render_artifact_tab(
     with confirmation_area.container():
         if changed_files:
             confirm = st.button(
-                "Upload selected files",
+                "Upload changed files" if kind == "runtime" else "Upload selected files",
                 disabled=not allowed,
                 type="primary",
                 key=f"upload-request-{environment}-{kind}-{identifier}",
@@ -1305,6 +1397,7 @@ def _render_artifact_tab(
                     },
                     config_path=config_path,
                     typed_confirmation=phrase,
+                    require_complete_manifest=False,
                     dry_run=False,
                     progress_callback=report_progress,
                     error_sink=upload_errors.append,
@@ -1378,56 +1471,19 @@ def _render_db_tab(adapter: BackendAdapter, environment: str, db_config_path: st
     """
     st.subheader("Database administration")
     st.warning("Writes use the selected target only, are delegated to the backend, and are transactional where supported.")
-
-    if adapter.has("get_connection_settings"):
-        settings_errors: list[str] = []
-        settings = _mapping(
-            _invoke(adapter, "get_connection_settings", error_sink=settings_errors.append)
-            or {}
-        )
-        connection = _mapping(settings.get("connection") or {})
-        common_pinned_version = _safe_release_version(
-            connection.get("admin_tools_release_version")
-        )
-        common_ready = (
-            connection.get("admin_tools_release_configured") is True
-            and bool(common_pinned_version)
-        )
-        development_pinned_version = _safe_release_version(
-            connection.get("admin_tools_development_release_version")
-        )
-        development_mode = str(
-            connection.get("admin_tools_development_release_mode") or ""
-        )
-        development_ready = (
-            environment == "development"
-            and connection.get("admin_tools_development_release_configured") is True
-            and bool(development_pinned_version)
-            and development_mode in {"clean", "development-verification"}
-        )
-        if not (common_ready or development_ready):
-            st.warning(
-                "Database administration is locked. Build and upload an Admin Tools artifact, "
-                "then select it as the execution version. Development may use an explicitly "
-                "activated verification release; Production requires a clean, promotable release."
-            )
-            return
-        if development_ready and development_mode == "development-verification":
-            st.caption(
-                f"Development verification execution version: {development_pinned_version}"
-            )
-            st.warning(
-                "Development verification only: this dirty/non-promotable Admin Tools release cannot be used for Production."
-            )
-        else:
-            st.caption(f"Clean Admin Tools execution version: {common_pinned_version}")
-
+    st.caption("DB commands use the shared server Admin Tools installation.")
+    refresh_overview = st.button("Refresh database overview", key=f"database-overview-refresh-{environment}")
     overview_errors: list[str] = []
-    overview = _invoke(
-        adapter,
-        "get_database_overview",
-        environment=environment,
-        error_sink=overview_errors.append,
+    overview = _session_ttl_value(
+        f"database-overview-cache-{environment}",
+        lambda: _invoke(
+            adapter,
+            "get_database_overview",
+            environment=environment,
+            error_sink=overview_errors.append,
+        ),
+        ttl_seconds=30.0,
+        refresh=refresh_overview,
     )
     if overview is None:
         error_text = " ".join(overview_errors).lower()
@@ -1472,7 +1528,21 @@ def _render_db_tab(adapter: BackendAdapter, environment: str, db_config_path: st
                 ],
                 width="stretch",
             )
-            st.caption(f"{len(table_rows)} tables returned by db-admin/v1 (expected operational inventory: 13).")
+            st.caption(
+                f"{len(table_rows)} tables returned by db-admin/v1. Row counts are PostgreSQL estimates for fast monitoring."
+            )
+            schema_by_table = {
+                str(_mapping(row).get("table") or _mapping(row).get("table_name")): _mapping(row).get("columns") or []
+                for row in table_rows
+                if _mapping(row).get("columns")
+            }
+            if schema_by_table:
+                selected_schema_table = st.selectbox(
+                    "View table schema",
+                    list(schema_by_table),
+                    key=f"database-schema-{environment}",
+                )
+                st.dataframe(schema_by_table[selected_schema_table], width="stretch", hide_index=True)
         else:
             st.info("No table overview was returned by the database adapter.")
 
@@ -1848,8 +1918,15 @@ def _render_monitor_tab(adapter: BackendAdapter, config_path: str) -> None:
 
     @st.fragment(run_every=10 if auto_refresh else None)
     def _snapshot() -> None:
-        st.button("Refresh now", key="monitor-refresh")
-        report = _invoke(adapter, "observe_platform", config_path=config_path)
+        refresh_now = st.button("Refresh now", key="monitor-refresh")
+        report = _session_ttl_value(
+            "platform-monitor-cache",
+            lambda: _invoke(adapter, "observe_platform", config_path=config_path),
+            ttl_seconds=30.0,
+            # Scheduled refresh deliberately fetches a fresh server snapshot;
+            # ordinary widget reruns reuse the last successful observation.
+            refresh=auto_refresh or refresh_now,
+        )
         if report is None:
             return
         payload = _mapping(report)
@@ -3122,6 +3199,67 @@ def _region_plan_v2_data(value: object) -> Mapping[str, Any]:
     return _mapping(data) if isinstance(data, Mapping) else {}
 
 
+def _merge_area_map_city_registry(cities: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Keep local Area Map candidates uploadable before their first DB import."""
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    for value in cities:
+        subsidiary = str(value.get("subsidiary_id") or "").strip()
+        source_city = str(value.get("source_city_id") or "").strip()
+        if not subsidiary or not source_city:
+            continue
+        row = dict(value)
+        row["target_city_ids"] = [
+            str(item).strip() for item in (row.get("target_city_ids") or [])
+            if str(item).strip()
+        ]
+        row["policies"] = [
+            dict(item) for item in (row.get("policies") or []) if isinstance(item, Mapping)
+        ]
+        merged[(subsidiary, source_city)] = row
+
+    for candidate in list_saved_region_plan_workbooks(PROJECT_ROOT / "data" / "region_plans"):
+        manifest = candidate.get("manifest") or {}
+        metadata = manifest.get("city_metadata") if isinstance(manifest, Mapping) else {}
+        metadata = metadata if isinstance(metadata, Mapping) else {}
+        subsidiary = str(metadata.get("subsidiary_id") or "").strip()
+        source_city = str(metadata.get("source_city_id") or "").strip()
+        target_city = str(metadata.get("target_city_id") or "").strip()
+        policy = str(metadata.get("policy_version") or "").strip()
+        mode = str(metadata.get("technician_policy_mode") or AREA_MAP_POLICY_MODES.get(policy) or "").strip()
+        if not subsidiary or not source_city:
+            continue
+        key = (subsidiary, source_city)
+        row = merged.setdefault(
+            key,
+            {
+                "subsidiary_id": subsidiary,
+                "source_city_id": source_city,
+                "region_count": 0,
+                "technician_count": 0,
+                "registry_sources": ["area_map_local"],
+                "target_city_ids": [],
+                "policies": [],
+                "migration_status": "ready_for_review",
+            },
+        )
+        targets = row.setdefault("target_city_ids", [])
+        if target_city and target_city not in targets:
+            targets.append(target_city)
+        policies = row.setdefault("policies", [])
+        if policy and mode and not any(
+            str(item.get("policy_version") or "") == policy for item in policies
+            if isinstance(item, Mapping)
+        ):
+            policies.append({"policy_version": policy, "technician_policy_mode": mode})
+        sources = row.setdefault("registry_sources", [])
+        if "area_map_local" not in sources:
+            sources.append("area_map_local")
+
+    return sorted(merged.values(), key=lambda row: (
+        str(row.get("subsidiary_id") or ""), str(row.get("source_city_id") or "")
+    ))
+
+
 def _render_region_plan_v2_receipt(value: object) -> None:
     envelope = _mapping(value)
     data = _region_plan_v2_data(envelope)
@@ -3135,6 +3273,7 @@ def _render_region_plan_v2_receipt(value: object) -> None:
             "job_id", "plan_id", "lifecycle", "state", "workbook_sha256",
             "canonical_sha256", "plan_revision", "activation_revision", "preview_token",
             "row_accounting", "counts", "reject_summary", "reject_count", "checksum",
+            "reject_rows", "plan_errors",
             "accepted", "rejected", "region_count", "postal_count",
             "technician_count", "boundary_resolution_count", "source_sha256",
             "manifest_sha256", "bundle_sha256", "plan_status",
@@ -3150,7 +3289,7 @@ _fragment = getattr(st, "fragment", lambda fn: fn)
 
 
 @_fragment
-def _render_region_plan_v2(adapter: BackendAdapter) -> None:
+def _render_region_plan_v2_legacy(adapter: BackendAdapter) -> None:
     """The only visible Region Plan workflow: browser -> versioned HTTP API."""
     st.caption("Upload one Area + Technician Excel workbook, then explicitly review, preview, and activate through the Region Plan v2 API.")
     required = ("preview_region_plan_schema", "install_region_plan_schema", "list_region_plan_v2_cities", "import_region_plan_v2_workbook", "review_region_plan_v2", "preview_region_plan_v2_activation", "activate_region_plan_v2")
@@ -3234,23 +3373,9 @@ def _render_region_plan_v2(adapter: BackendAdapter) -> None:
     target_valid = bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", target_city_id))
     if target_city_id and not target_valid:
         st.error("Target city ID format is invalid.")
-    policies = [item for item in city.get("policies", []) if isinstance(item, Mapping)]
-    policy_by_version = {
-        str(item.get("policy_version")): item for item in policies
-        if str(item.get("policy_version") or "") and str(item.get("technician_policy_mode") or "")
-    }
-    policy_version = st.selectbox(
-        "Policy",
-        list(policy_by_version),
-        format_func=routing_policy_label,
-        key="rp2-policy",
-    )
-    selected_policy = policy_by_version[policy_version]
-    technician_policy_mode = str(selected_policy["technician_policy_mode"])
-    st.info(routing_policy_description(policy_version))
-    st.caption("Technician assignment mode is determined by the selected policy.")
-    overlap_options = selected_policy.get("allowed_overlap_policies") or city.get("allowed_overlap_policies") or ("registry_default", "explicit_workbook")
-    overlap_policy = st.selectbox("Overlap policy", [str(value) for value in overlap_options], key="rp2-overlap")
+    # Region Plan upload stores topology and technician assignments only.
+    # Routing policy is selected later in the VRP Client.
+    overlap_policy = "registry_default"
     # Upload is deliberately candidate-only. Review and activation always need
     # separate visible operator actions below.
     intent = "review_only"
@@ -3301,7 +3426,6 @@ def _render_region_plan_v2(adapter: BackendAdapter) -> None:
     if st.button("Upload and validate", type="primary", disabled=not workbook_bytes or not target_valid or not local_binding_valid, key="rp2-upload"):
         result = _invoke(adapter, "import_region_plan_v2_workbook", workbook_name=workbook_name, workbook_bytes=workbook_bytes, metadata={
             "subsidiary_id": subsidiary_id, "target_city_id": target_city_id, "source_city_id": source_city_id,
-            "policy_version": policy_version, "technician_policy_mode": technician_policy_mode,
             "overlap_policy": overlap_policy, "activation_intent": intent,
         })
         state["import"] = _mapping(result or {})
@@ -3392,6 +3516,905 @@ def _render_region_plan_v2(adapter: BackendAdapter) -> None:
 
 
 @_fragment
+def _render_region_plan_v2_old(adapter: BackendAdapter) -> None:
+    """Management-oriented Region Plan screen.
+
+    The old screen was upload-first.  This screen is list-first: operators can
+    see existing plans and their lifecycle before choosing to add a plan,
+    create a revised plan, review/activate it, or retire a non-active plan.
+    Plan contents remain immutable; editing is represented by a new Candidate
+    plan, preserving the existing v2 lifecycle and rollback model.
+    """
+    st.caption(
+        "법인·도시별 Region Plan을 조회하고 관리합니다. 기존 Plan은 보존되며, 수정은 새 revision/Candidate로 생성됩니다."
+    )
+    required = (
+        "list_region_plan_v2_cities", "list_region_plan_v2_candidates",
+        "import_region_plan_v2_workbook", "review_region_plan_v2",
+        "preview_region_plan_v2_activation", "activate_region_plan_v2",
+    )
+    if not all(adapter.has(name) for name in required):
+        st.info("Region Plan 관리 기능은 최신 Console Backend가 필요합니다.")
+        return
+
+    state = st.session_state.setdefault("region-plan-management-v2", {})
+    save_notice = _mapping(state.get("save_notice") or {})
+    if save_notice.get("status") == "success":
+        plan_id = str(save_notice.get("plan_id") or "").strip()
+        st.success(
+            "Candidate Plan 저장이 완료되었습니다."
+            + (f" | plan_id: {plan_id}" if plan_id else "")
+        )
+    elif save_notice.get("status") == "failed":
+        st.error(
+            "Candidate Plan 저장에 실패했습니다. "
+            + str(save_notice.get("message") or "응답을 확인하세요.")
+        )
+    cities_response = _invoke(adapter, "list_region_plan_v2_cities")
+    cities_data = _region_plan_v2_data(cities_response or {})
+    cities = [item for item in cities_data.get("cities", []) if isinstance(item, Mapping)]
+    if not cities:
+        _render_region_plan_v2_receipt(cities_response or {})
+        st.warning("등록된 법인·도시가 없습니다. Area Plan을 먼저 생성하거나 마이그레이션하세요.")
+        return
+
+    # Load the complete plan inventory on every render.  This is deliberately
+    # independent of the city registry's target_city_ids because old registry
+    # rows may contain display names while the DB plan uses the real policy
+    # city ID (for example Atlanta_3area vs Atlanta_GA).
+    board_rows: list[dict[str, Any]] = []
+    for subsidiary_item in sorted({str(item.get("subsidiary_id") or "") for item in cities}):
+        if not subsidiary_item:
+            continue
+        response = _invoke(
+            adapter, "list_region_plan_v2_candidates",
+            subsidiary_id=subsidiary_item, target_city_id="", include_regions=True,
+        ) or {}
+        source_by_target = {
+            str(target): str(item.get("source_city_id") or "")
+            for item in cities if str(item.get("subsidiary_id") or "") == subsidiary_item
+            for target in (item.get("target_city_ids") or [])
+        }
+        for plan_item in _region_plan_v2_data(response).get("plans", []) or []:
+            if isinstance(plan_item, Mapping):
+                target_item = str(plan_item.get("target_city_id") or "")
+                regions = plan_item.get("regions") or [{}]
+                for region_item in regions:
+                    board_rows.append({
+                        "subsidiary_id": subsidiary_item,
+                        "source_city_id": plan_item.get("source_city_id") or source_by_target.get(target_item, "-"),
+                        "target_city_id": target_item,
+                        **dict(plan_item),
+                        **(dict(region_item) if isinstance(region_item, Mapping) else {}),
+                    })
+    state["all_plan_rows"] = board_rows
+    all_plan_rows = list(state.get("all_plan_rows") or [])
+
+    subsidiaries = sorted({str(item.get("subsidiary_id") or "") for item in cities if item.get("subsidiary_id")})
+    subsidiary_id = st.selectbox("Subsidiary", subsidiaries, key="rp2-management-subsidiary")
+    city_rows = [item for item in cities if str(item.get("subsidiary_id")) == subsidiary_id]
+    source_city_ids = [str(item.get("source_city_id")) for item in city_rows if item.get("source_city_id")]
+    source_city_id = st.selectbox("Source city", source_city_ids, key="rp2-management-source-city")
+    source_city = next(item for item in city_rows if str(item.get("source_city_id")) == source_city_id)
+
+    # The Area Map display name (for example ``Atlanta_3area``) and the
+    # persisted policy-city ID (for example ``Atlanta_GA``) are different
+    # concepts.  Prefer the target IDs returned by the actual plan inventory
+    # so an existing DB plan is always selectable even when an old city
+    # registry entry contains a stale/display-only target name.
+    inventory_targets = sorted({
+        str(row.get("target_city_id") or "").strip()
+        for row in all_plan_rows
+        if str(row.get("subsidiary_id") or "") == subsidiary_id
+        and str(row.get("source_city_id") or "") == source_city_id
+        and str(row.get("target_city_id") or "").strip()
+    })
+    registry_targets = [
+        str(value).strip() for value in (source_city.get("target_city_ids") or [])
+        if str(value).strip()
+    ]
+    target_city_options = inventory_targets or sorted(set(registry_targets))
+    if target_city_options:
+        target_city_id = st.selectbox(
+            "Target city ID", target_city_options, key="rp2-management-target-city-select",
+            help="Area Plan이 등록된 정책 도시 ID입니다.",
+        ).strip()
+    else:
+        # Compatibility fallback for an older API that only returns source
+        # cities.  New API responses always render a selectable target list.
+        target_city_id = st.text_input(
+            "Target city ID", placeholder="Atlanta_GA", key="rp2-management-target-city",
+            help="정책 도시 ID입니다. Source city와 다른 이름의 Area Plan을 구분합니다.",
+        ).strip()
+    target_valid = bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", target_city_id))
+    if target_city_id and not target_valid:
+        st.error("Target city ID 형식이 올바르지 않습니다.")
+
+    policies = [item for item in source_city.get("policies", []) if isinstance(item, Mapping)]
+    policy_by_version = {
+        str(item.get("policy_version")): item for item in policies
+        if item.get("policy_version") and item.get("technician_policy_mode")
+    }
+    if policy_by_version:
+        policy_version = st.selectbox(
+            "Default policy for new/revised Plan", list(policy_by_version),
+            format_func=routing_policy_label, key="rp2-management-policy",
+        )
+        st.caption(routing_policy_description(policy_version))
+    else:
+        policy_version = ""
+        st.warning("이 도시에는 선택 가능한 라우팅 정책이 없습니다.")
+
+    scope_key = f"{subsidiary_id}:{source_city_id}:{target_city_id}"
+    if state.get("scope_key") != scope_key:
+        state["scope_key"] = scope_key
+        state.pop("plans_response", None)
+        state.pop("selected_plan_id", None)
+        state.pop("detail", None)
+        state.pop("preview", None)
+
+    st.divider()
+    st.subheader("등록된 Region Plan")
+    st.caption("상태가 active인 Plan이 현재 라우팅에 사용됩니다. retired는 이력 보존용으로 표시됩니다.")
+    refresh_col = st.columns([5, 2])[1]
+    with refresh_col:
+        refresh = st.button("새로고침", key="rp2-management-refresh")
+    if refresh or "plans_response" not in state or not _region_plan_v2_data(state.get("plans_response", {})).get("plans"):
+        if target_valid:
+            state["plans_response"] = _mapping(
+                _invoke(
+                    adapter, "list_region_plan_v2_candidates",
+                    subsidiary_id=subsidiary_id, target_city_id=target_city_id,
+                ) or {}
+            )
+        else:
+            state["plans_response"] = {}
+    plans = _region_plan_v2_data(state.get("plans_response", {})).get("plans", [])
+    plans = [dict(item) for item in plans if isinstance(item, Mapping)]
+    if plans:
+        st.dataframe(
+            [
+                {
+                    "Subsidiary": subsidiary_id,
+                    "Source city": source_city_id,
+                    "Plan ID": item.get("plan_id", "-"),
+                    "Target city": item.get("target_city_id", target_city_id),
+                    "상태": item.get("lifecycle", item.get("plan_status", "-")),
+                    "Revision": item.get("plan_revision", item.get("revision", "-")),
+                    "정책": routing_policy_label(str(item.get("policy_version", ""))),
+                    "Checksum": str(item.get("checksum", ""))[:12],
+                }
+                for item in plans
+            ],
+            width="stretch", hide_index=True,
+        )
+    elif target_valid:
+        st.info("선택한 정책 도시에는 등록된 Region Plan이 없습니다. ‘추가/수정본 업로드’에서 생성하세요.")
+    else:
+        st.info("Target city ID를 입력하면 기존 Plan 목록이 표시됩니다.")
+
+    plan_ids = [str(item.get("plan_id")) for item in plans if item.get("plan_id")]
+    if plan_ids:
+        default_plan = str(state.get("selected_plan_id") or plan_ids[0])
+        if default_plan not in plan_ids:
+            default_plan = plan_ids[0]
+        selected_plan_id = st.selectbox(
+            "관리할 Plan", plan_ids, index=plan_ids.index(default_plan), key="rp2-management-plan",
+        )
+        state["selected_plan_id"] = selected_plan_id
+    else:
+        selected_plan_id = ""
+
+    manage_tab, add_tab = st.tabs(["Plan 상세·상태 관리", "추가 / 수정본 업로드"])
+    with manage_tab:
+        if not selected_plan_id:
+            st.info("먼저 Plan을 선택하세요.")
+        else:
+            detail = _mapping(state.get("detail"))
+            if str(detail.get("plan_id")) != selected_plan_id:
+                if adapter.has("get_region_plan_v2_plan"):
+                    detail_response = _invoke(
+                        adapter, "get_region_plan_v2_plan", subsidiary_id=subsidiary_id,
+                        target_city_id=target_city_id, plan_id=selected_plan_id,
+                    ) or {}
+                else:
+                    detail_response = _invoke(
+                        adapter, "adopt_region_plan_v2_candidate", subsidiary_id=subsidiary_id,
+                        target_city_id=target_city_id, plan_id=selected_plan_id,
+                    ) or {}
+                detail = _region_plan_v2_data(detail_response)
+                detail = _mapping(detail.get("plan")) if isinstance(detail.get("plan"), Mapping) else detail
+                state["detail"] = dict(detail)
+            if detail:
+                lifecycle = str(detail.get("lifecycle", detail.get("plan_status", "")))
+                metrics = st.columns(5)
+                metrics[0].metric("상태", lifecycle or "-")
+                metrics[1].metric("Revision", detail.get("plan_revision", "-"))
+                metrics[2].metric("Region", len(detail.get("regions", []) or []) or detail.get("region_count", "-"))
+                metrics[3].metric("Postal", len(detail.get("postals", []) or []) or detail.get("postal_count", "-"))
+                metrics[4].metric("Technician", len(detail.get("technicians", []) or []) or detail.get("technician_count", "-"))
+                st.json(public_mapping(detail, (
+                    "plan_id", "source_strategic_city_name", "strategic_city_name",
+                    "policy_version", "source_sha256", "manifest_sha256", "bundle_sha256",
+                    "plan_status", "lifecycle", "reviewed_by", "review_reference",
+                )))
+                regions = detail.get("regions")
+                technicians = detail.get("technicians")
+                if isinstance(regions, list) and regions:
+                    st.markdown("**Region 목록**")
+                    st.dataframe(regions, width="stretch", hide_index=True)
+                if isinstance(technicians, list) and technicians:
+                    st.markdown("**Technician 지역 배정 목록**")
+                    st.dataframe(technicians, width="stretch", hide_index=True)
+                postals = detail.get("postals")
+                if isinstance(postals, list) and postals:
+                    with st.expander(f"우편번호 배정 ({len(postals):,}건)"):
+                        st.dataframe(postals, width="stretch", hide_index=True)
+
+                action_cols = st.columns(4)
+                with action_cols[0]:
+                    if adapter.has("adopt_region_plan_v2_candidate") and lifecycle == "candidate":
+                        if st.button("Adopt selected candidate", key="rp2-management-adopt"):
+                            result = _invoke(
+                                adapter, "adopt_region_plan_v2_candidate",
+                                subsidiary_id=subsidiary_id, target_city_id=target_city_id,
+                                plan_id=selected_plan_id,
+                            ) or {}
+                            state["detail"] = dict(_region_plan_v2_data(result).get("plan") or detail)
+                            _render_region_plan_v2_receipt(result)
+                            st.rerun()
+                with action_cols[1]:
+                    if lifecycle == "candidate" and detail.get("plan_revision") is not None:
+                        if st.button("Review", key="rp2-management-review"):
+                            result = _invoke(
+                                adapter, "review_region_plan_v2", subsidiary_id=subsidiary_id,
+                                target_city_id=target_city_id, plan_id=selected_plan_id,
+                                plan_revision=int(detail.get("plan_revision", 0)),
+                                activation_revision=int(detail.get("activation_revision", 0)),
+                            ) or {}
+                            state["detail"] = {**detail, **_region_plan_v2_data(result)}
+                            _render_region_plan_v2_receipt(result)
+                            st.rerun()
+                with action_cols[2]:
+                    if lifecycle in {"reviewed", "superseded"} and adapter.has("preview_region_plan_v2_activation"):
+                        if st.button("Preview activation", key="rp2-management-preview"):
+                            result = _invoke(
+                                adapter, "preview_region_plan_v2_activation", subsidiary_id=subsidiary_id,
+                                target_city_id=target_city_id, plan_id=selected_plan_id,
+                                plan_revision=int(detail.get("plan_revision", 0)),
+                                activation_revision=int(detail.get("activation_revision", 0)),
+                            ) or {}
+                            state["preview"] = _mapping(result)
+                            _render_region_plan_v2_receipt(result)
+                with action_cols[3]:
+                    if lifecycle not in {"active", "retired"} and adapter.has("retire_region_plan_v2"):
+                        if st.button("Retire", key="rp2-management-retire", type="secondary"):
+                            result = _invoke(
+                                adapter, "retire_region_plan_v2", subsidiary_id=subsidiary_id,
+                                target_city_id=target_city_id, plan_id=selected_plan_id,
+                            ) or {}
+                            _render_region_plan_v2_receipt(result)
+                            state.pop("plans_response", None)
+                            st.rerun()
+                preview = _region_plan_v2_data(state.get("preview", {}))
+                if preview.get("preview_token") and lifecycle in {"reviewed", "superseded"}:
+                    reference = st.text_input("Activation reference", key="rp2-management-activation-reference")
+                    if st.button(
+                        "Activate", type="primary",
+                        disabled=not reference.strip(), key="rp2-management-activate",
+                    ):
+                        result = _invoke(
+                            adapter, "activate_region_plan_v2", subsidiary_id=subsidiary_id,
+                            target_city_id=target_city_id, plan_id=selected_plan_id,
+                            plan_revision=int(preview.get("plan_revision", detail.get("plan_revision", 0))),
+                            activation_revision=int(preview.get("activation_revision", detail.get("activation_revision", 0))),
+                            preview_token=str(preview["preview_token"]), activation_reference=reference,
+                        ) or {}
+                        _render_region_plan_v2_receipt(result)
+                        state.pop("plans_response", None)
+                        st.rerun()
+
+    with add_tab:
+        st.info("추가는 새 Plan을 만들고, 수정은 기존 Plan을 덮어쓰지 않는 새 Candidate/Revision을 만듭니다.")
+        local_candidates = list_saved_region_plan_workbooks(PROJECT_ROOT / "data" / "region_plans")
+        local_labels = ["Manual workbook upload"] + [str(item["label"]) for item in local_candidates]
+        selected_local_label = st.selectbox("Area Map Plan 또는 파일", local_labels, key="rp2-management-local-plan")
+        workbook_name = ""
+        workbook_bytes: bytes | None = None
+        local_binding_valid = True
+        local_policy_valid = True
+        if selected_local_label != local_labels[0]:
+            selected_local = next(item for item in local_candidates if str(item["label"]) == selected_local_label)
+            try:
+                workbook_path = Path(selected_local["path"]).resolve()
+                candidate_root = (PROJECT_ROOT / "data" / "region_plans").resolve()
+                if candidate_root not in workbook_path.parents:
+                    raise ValueError("Area Map Plan 경로가 관리 데이터 영역 밖에 있습니다.")
+                workbook_name, workbook_bytes = workbook_path.name, workbook_path.read_bytes()
+                manifest = selected_local.get("manifest") or {}
+                metadata = manifest.get("city_metadata") or {}
+                local_binding_valid = (
+                    str(metadata.get("subsidiary_id") or "") == subsidiary_id
+                    and str(metadata.get("source_city_id") or "") == source_city_id
+                    and str(metadata.get("target_city_id") or "") == target_city_id
+                )
+                st.caption(
+                    f"Area Map Plan: {manifest.get('plan_display_name') or '-'} | "
+                    f"plan_id={manifest.get('plan_id') or '-'}"
+                )
+                if not local_binding_valid:
+                    st.warning("Area Map 후보의 원본 매핑이 현재 선택과 다릅니다. 업로드 시 현재 법인·Source·Target으로 재바인딩합니다.")
+            except (OSError, ValueError, TypeError) as exc:
+                st.error(f"Area Map Plan을 읽을 수 없습니다: {exc}")
+        else:
+            workbook = st.file_uploader("Region + Technician workbook (.xlsx)", type=["xlsx"], key="rp2-management-workbook")
+            if workbook is not None:
+                workbook_name, workbook_bytes = workbook.name, workbook.getvalue()
+
+        if st.button(
+            "새 Plan / 수정본 업로드", type="primary",
+            disabled=not workbook_bytes or not target_valid,
+            key="rp2-management-upload",
+        ):
+            selected_policy = policy_by_version.get(policy_version, {})
+            result = _invoke(
+                adapter, "import_region_plan_v2_workbook", workbook_name=workbook_name,
+                workbook_bytes=workbook_bytes, metadata={
+                    "subsidiary_id": subsidiary_id, "target_city_id": target_city_id,
+                    "source_city_id": source_city_id, "policy_version": policy_version,
+                    "technician_policy_mode": str(selected_policy.get("technician_policy_mode") or ""),
+                    "overlap_policy": "registry_default", "activation_intent": "review_only",
+                },
+            ) or {}
+            state["last_import"] = _mapping(result)
+            _render_region_plan_v2_receipt(result)
+            if str(_mapping(result).get("status")) in {"accepted", "completed"}:
+                state.pop("plans_response", None)
+                st.success("새 Candidate가 생성되었습니다. Plan 관리 탭에서 Review 후 활성화하세요.")
+
+
+def _area_map_candidate_default_label(
+    candidates: list[Mapping[str, Any]],
+    selected_plan: Mapping[str, Any] | None,
+    *,
+    subsidiary_id: str,
+    source_city_id: str,
+) -> str:
+    """Choose the Area Map source that created the selected revision.
+
+    A policy city may have several Area Plans.  The immutable DB plan ID keeps
+    the Area Plan slug (``rp2_atlanta_3area_<digest>``), while older migrated
+    IDs use the same slug as a prefix (``atlanta_3area_...``).  Matching that
+    slug gives the edit form a usable default workbook, so changing only the
+    policy does not require re-uploading the same Area Map file.
+    """
+    plan_id = str((selected_plan or {}).get("plan_id") or "").strip().casefold()
+    if plan_id.startswith("rp2_"):
+        plan_id = plan_id[4:]
+    matches: list[str] = []
+    for candidate in candidates:
+        manifest = _mapping(candidate.get("manifest") or {})
+        metadata = _mapping(manifest.get("city_metadata") or {})
+        if (
+            str(metadata.get("subsidiary_id") or "") != subsidiary_id
+            or str(metadata.get("source_city_id") or "") != source_city_id
+        ):
+            continue
+        display_name = str(manifest.get("plan_display_name") or "").strip()
+        slug = re.sub(r"[^a-z0-9]+", "_", display_name.casefold()).strip("_")
+        if slug and (plan_id.startswith(slug + "_") or plan_id == slug):
+            matches.append(str(candidate.get("label") or ""))
+    return matches[0] if matches else ""
+
+
+@_fragment
+def _render_region_plan_v2(adapter: BackendAdapter) -> None:
+    """Simple list-first Region Plan administration screen."""
+    # Region Plans are Area Map artifacts.  This screen intentionally owns
+    # only their DB inventory: upload, query, and delete.  Routing policy and
+    # lifecycle controls belong to the VRP Client/runtime, not this console.
+    required = (
+        "list_region_plan_v2_cities", "list_region_plan_v2_candidates",
+        "import_region_plan_v2_workbook", "delete_region_plan_v2",
+    )
+    if not all(adapter.has(name) for name in required):
+        st.info("Region Plan DB management requires the current Console Backend.")
+        return
+
+    state = st.session_state.setdefault("region-plan-simple-management", {})
+    refresh_cities = st.button("Refresh cities", key="rp2-simple-cities-refresh")
+    cities_loaded_at = float(state.get("cities_loaded_at") or 0.0)
+    if refresh_cities or "cities" not in state or time.monotonic() - cities_loaded_at >= 300.0:
+        response = _mapping(_invoke(adapter, "list_region_plan_v2_cities") or {})
+        state["cities"] = list(_region_plan_v2_data(response).get("cities", []) or [])
+        state["cities_loaded_at"] = time.monotonic()
+        if refresh_cities:
+            state.pop("plans_by_city", None)
+    cities = [dict(item) for item in state.get("cities", []) if isinstance(item, Mapping)]
+    if not cities:
+        st.info("No permitted Region Plan cities are available.")
+        return
+
+    subsidiaries = sorted({str(item.get("subsidiary_id") or "") for item in cities if item.get("subsidiary_id")})
+    subsidiary_id = st.selectbox("Subsidiary", subsidiaries, key="rp2-simple-subsidiary")
+    scoped_cities = [item for item in cities if str(item.get("subsidiary_id") or "") == subsidiary_id]
+    source_city_ids = sorted({str(item.get("source_city_id") or "") for item in scoped_cities if item.get("source_city_id")})
+    source_city_id = st.selectbox("Source city", source_city_ids, key="rp2-simple-source-city")
+    inventory_key = f"{subsidiary_id}:{source_city_id}"
+    refresh_plans = st.button("Refresh plans", key="rp2-simple-refresh")
+    plans_by_city = state.setdefault("plans_by_city", {})
+    cached_inventory = _mapping(plans_by_city.get(inventory_key) or {})
+    if (
+        refresh_plans
+        or not cached_inventory
+        or time.monotonic() - float(cached_inventory.get("loaded_at") or 0.0) >= 60.0
+    ):
+        response = _invoke(adapter, "list_region_plan_v2_candidates", subsidiary_id=subsidiary_id, city_name=source_city_id) or {}
+        cached_inventory = {
+            "loaded_at": time.monotonic(),
+            "plans": list(_region_plan_v2_data(response).get("plans", []) or []),
+        }
+        plans_by_city[inventory_key] = cached_inventory
+    plans = [dict(item) for item in cached_inventory.get("plans", []) if isinstance(item, Mapping)]
+
+    st.subheader("Region Plans")
+    if plans:
+        inventory = pd.DataFrame(plans)
+        visible_columns = [column for column in ("plan_id", "plan_display_name", "lifecycle", "plan_revision", "checksum") if column in inventory.columns]
+        st.dataframe(inventory[visible_columns], width="stretch", hide_index=True)
+    else:
+        st.info("No Region Plans are stored for this city.")
+
+    st.subheader("Upload Area Map Plan")
+    refresh_local_candidates = st.button("Refresh Area Map files", key="rp2-simple-local-refresh")
+    local_candidates = _cached_region_plan_workbooks(refresh=refresh_local_candidates)
+    local_labels = ["Manual workbook upload"] + [str(item["label"]) for item in local_candidates]
+    selected_label = st.selectbox("Area Map Plan or workbook", local_labels, key="rp2-simple-upload-source")
+    workbook_name = ""
+    workbook_bytes: bytes | None = None
+    plan_display_name = source_city_id
+    if selected_label == local_labels[0]:
+        workbook = st.file_uploader("Region + Technician workbook (.xlsx)", type=["xlsx"], key="rp2-simple-workbook")
+        if workbook is not None:
+            workbook_name, workbook_bytes = workbook.name, workbook.getvalue()
+        plan_display_name = st.text_input("Plan name", value=source_city_id, key="rp2-simple-plan-name").strip() or source_city_id
+    else:
+        selected_local = next(item for item in local_candidates if str(item["label"]) == selected_label)
+        workbook_path = Path(selected_local["path"]).resolve()
+        candidate_root = (PROJECT_ROOT / "data" / "region_plans").resolve()
+        if candidate_root in workbook_path.parents:
+            workbook_name = workbook_path.name
+            workbook_bytes = _cached_region_plan_workbook_bytes(workbook_path)
+            manifest = _mapping(selected_local.get("manifest") or {})
+            plan_display_name = str(manifest.get("plan_display_name") or source_city_id)
+            metadata = _mapping(manifest.get("city_metadata") or {})
+            if any((
+                str(metadata.get("subsidiary_id") or "") != subsidiary_id,
+                str(metadata.get("city_name") or metadata.get("source_city_id") or "") != source_city_id,
+            )):
+                st.error("The selected Area Map Plan belongs to a different subsidiary or city.")
+                workbook_bytes = None
+    if st.button("Upload to DB", type="primary", disabled=not workbook_bytes, key="rp2-simple-upload"):
+        result = _invoke(adapter, "import_region_plan_v2_workbook", workbook_name=workbook_name, workbook_bytes=workbook_bytes, metadata={
+            "subsidiary_id": subsidiary_id,
+            "city_name": source_city_id,
+            "plan_display_name": plan_display_name,
+        }) or {}
+        _render_region_plan_v2_receipt(result)
+        if str(_mapping(result).get("status") or "").lower() in {"accepted", "completed"}:
+            imported = _region_plan_v2_data(result)
+            plan_id = str(imported.get("plan_id") or "")
+            if not plan_id:
+                st.error("Upload succeeded but did not return a Plan ID.")
+                return
+            state.get("plans_by_city", {}).pop(inventory_key, None)
+            _cached_region_plan_workbooks(refresh=True)
+            st.rerun()
+
+    if plans:
+        st.subheader("Delete Region Plan")
+        plan_ids = [str(item.get("plan_id") or "") for item in plans if str(item.get("plan_id") or "")]
+        delete_plan_id = st.selectbox("Plan", plan_ids, key="rp2-simple-delete-plan")
+        st.caption("Deletes this one DB Plan only. Area Map source files are kept.")
+        if st.button("Confirm delete", type="secondary", key="rp2-simple-delete"):
+            result = _invoke(adapter, "delete_region_plan_v2", subsidiary_id=subsidiary_id, target_city_id=source_city_id, plan_id=delete_plan_id, confirmation="CONFIRM") or {}
+            _render_region_plan_v2_receipt(result)
+            if str(_mapping(result).get("status") or "").lower() in {"accepted", "completed"}:
+                state.get("plans_by_city", {}).pop(inventory_key, None)
+                st.rerun()
+    return
+
+    st.caption("법인·도시별 Region Plan을 조회하고 관리합니다. 수정은 새 Candidate revision으로 생성됩니다.")
+    required = (
+        "list_region_plan_v2_cities", "list_region_plan_v2_candidates",
+        "import_region_plan_v2_workbook", "review_region_plan_v2",
+        "preview_region_plan_v2_activation", "activate_region_plan_v2",
+    )
+    if not all(adapter.has(name) for name in required):
+        st.info("Region Plan 관리에는 최신 Console Backend가 필요합니다.")
+        return
+
+    state = st.session_state.setdefault("region-plan-management-v2", {})
+    refresh_inventory = st.button("Refresh plan inventory", key="rp2-inventory-refresh")
+    if refresh_inventory or "cities_response" not in state:
+        state["cities_response"] = _mapping(
+            _invoke(adapter, "list_region_plan_v2_cities") or {}
+        )
+    cities_response = _mapping(state.get("cities_response") or {})
+    cities_data = _region_plan_v2_data(cities_response)
+    cities = _merge_area_map_city_registry([
+        item for item in cities_data.get("cities", []) if isinstance(item, Mapping)
+    ])
+    if not cities:
+        _render_region_plan_v2_receipt(cities_response)
+        st.warning("등록된 법인·도시가 없습니다. Area Plan을 먼저 생성하거나 마이그레이션하세요.")
+        return
+
+    # Read the complete inventory.  The real policy-city ID comes from the
+    # plan table, not from an old Area Map display-name registry.
+    if refresh_inventory or "plan_inventory" not in state:
+        plan_rows: list[dict[str, Any]] = []
+        for subsidiary in sorted({str(item.get("subsidiary_id") or "") for item in cities}):
+            if not subsidiary:
+                continue
+            response = _invoke(
+                adapter, "list_region_plan_v2_candidates",
+                subsidiary_id=subsidiary, target_city_id="",
+            ) or {}
+            source_by_target = {
+                str(target): str(item.get("source_city_id") or "")
+                for item in cities if str(item.get("subsidiary_id") or "") == subsidiary
+                for target in (item.get("target_city_ids") or [])
+            }
+            seen: set[tuple[str, str]] = set()
+            for value in _region_plan_v2_data(response).get("plans", []) or []:
+                if not isinstance(value, Mapping):
+                    continue
+                row = dict(value)
+                row["subsidiary_id"] = subsidiary
+                row["target_city_id"] = str(row.get("target_city_id") or "")
+                row["source_city_id"] = str(row.get("source_city_id") or source_by_target.get(row["target_city_id"], "-"))
+                identity = (row["target_city_id"], str(row.get("plan_id") or ""))
+                if identity not in seen:
+                    seen.add(identity)
+                    plan_rows.append(row)
+        state["plan_inventory"] = sorted(plan_rows, key=lambda row: (
+            str(row.get("subsidiary_id")), str(row.get("source_city_id")),
+            str(row.get("target_city_id")), str(row.get("plan_id")),
+        ))
+    plan_rows = [dict(row) for row in state.get("plan_inventory", []) if isinstance(row, Mapping)]
+
+    st.subheader("Region Plan 목록")
+    st.caption("Plan을 하나 선택한 뒤 수정 또는 영구 삭제를 사용하세요. 삭제는 선택한 Plan 하나만 DB에서 제거합니다.")
+    selected_ids: list[str] = []
+    if plan_rows:
+        headers = st.columns([0.45, 1.0, 1.35, 1.35, 1.8, 0.8, 0.55, 1.25, 1.9, 1.0])
+        labels = ["선택", "법인", "Source city", "Target city ID", "Plan ID", "상태", "Revision", "정책", "Checksum"]
+        for column, label in zip(headers, labels):
+            column.caption(label)
+        for index, row in enumerate(plan_rows):
+            plan_id = str(row.get("plan_id") or "")
+            columns = st.columns([0.45, 1.0, 1.35, 1.35, 1.8, 0.8, 0.55, 1.25, 1.9, 1.0])
+            if columns[0].checkbox("선택", key=f"rp2-plan-check-{index}-{plan_id}", label_visibility="collapsed"):
+                selected_ids.append(plan_id)
+            columns[1].write(row.get("subsidiary_id", "-"))
+            columns[2].write(row.get("source_city_id", "-"))
+            columns[3].write(row.get("target_city_id", "-"))
+            columns[4].write(plan_id or "-")
+            columns[5].write(row.get("lifecycle", row.get("plan_status", "-")))
+            columns[6].write(row.get("plan_revision", row.get("revision", "-")))
+            columns[7].write("CURRENT" if row.get("is_current_active") else "-")
+            columns[8].write(routing_policy_label(str(row.get("policy_version", ""))))
+            columns[9].write(str(row.get("checksum", ""))[:12] or "-")
+    else:
+        st.info("등록된 Region Plan이 없습니다. 추가 버튼으로 첫 Plan을 등록하세요.")
+
+    selected_plan_id = selected_ids[-1] if selected_ids else ""
+    if len(selected_ids) > 1:
+        st.warning("한 번에 하나의 Plan만 선택하세요.")
+        selected_plan_id = ""
+    selected_row = next((row for row in plan_rows if str(row.get("plan_id")) == selected_plan_id), None)
+    if selected_row:
+        state["selected_plan_id"] = selected_plan_id
+
+    button_cols = st.columns(3)
+    with button_cols[0]:
+        add_clicked = st.button("추가", key="rp2-plan-add", type="primary")
+    with button_cols[1]:
+        edit_clicked = st.button("수정", key="rp2-plan-edit", disabled=selected_row is None)
+    with button_cols[2]:
+        selected_lifecycle = str((selected_row or {}).get("lifecycle", (selected_row or {}).get("plan_status", "")))
+        delete_clicked = st.button(
+            "영구 삭제", key="rp2-plan-delete",
+            disabled=(
+                selected_row is None
+                or not adapter.has("delete_region_plan_v2")
+            ),
+            type="secondary",
+            help="Area Map 원본 파일은 보존합니다. active Plan은 VRP City Config에서 참조 중일 때만 삭제가 차단됩니다.",
+        )
+    if add_clicked:
+        state["mode"] = "add"
+        state.pop("save_notice", None)
+    if edit_clicked and selected_row:
+        state["mode"] = "edit"
+        state.pop("save_notice", None)
+    if delete_clicked and selected_row:
+        state["delete_plan_id"] = str(selected_row.get("plan_id") or "")
+
+    delete_plan_id = str(state.get("delete_plan_id") or "")
+    delete_row = next(
+        (row for row in plan_rows if str(row.get("plan_id") or "") == delete_plan_id),
+        None,
+    )
+    if delete_row:
+        st.warning(
+            f"선택한 Plan '{delete_plan_id}'와 연결된 DB 데이터만 삭제합니다. "
+            "Area Map 원본 파일은 삭제하지 않습니다. active Plan은 VRP City Config에서 참조 중일 때만 삭제가 거부됩니다."
+        )
+        delete_confirmation = st.text_input(
+            "삭제 확인: Plan ID를 그대로 입력하세요",
+            key=f"rp2-delete-confirm-{delete_plan_id}",
+            placeholder=delete_plan_id,
+        ).strip()
+        if st.button(
+            "확인: 이 Plan 영구 삭제",
+            key=f"rp2-delete-confirm-button-{delete_plan_id}",
+            type="secondary",
+            disabled=delete_confirmation != delete_plan_id,
+        ):
+            result = _invoke(
+                adapter, "delete_region_plan_v2",
+                subsidiary_id=str(delete_row.get("subsidiary_id")),
+                target_city_id=str(delete_row.get("target_city_id")),
+                plan_id=delete_plan_id,
+                confirmation=delete_confirmation,
+            ) or {}
+            _render_region_plan_v2_receipt(result)
+            if str(_mapping(result).get("status")) in {"completed", "accepted"}:
+                state.pop("selected_plan_id", None)
+                state.pop("delete_plan_id", None)
+                state.pop("mode", None)
+                st.rerun()
+
+    mode = str(state.get("mode") or "")
+    if selected_row and mode != "add":
+        subsidiary_id = str(selected_row.get("subsidiary_id") or "")
+        source_city_id = str(selected_row.get("source_city_id") or "")
+        target_city_id = str(selected_row.get("target_city_id") or "")
+        detail_key = f"{subsidiary_id}:{target_city_id}:{selected_plan_id}"
+        detail = _mapping(state.get("detail"))
+        if state.get("detail_key") != detail_key:
+            response = _invoke(
+                adapter, "get_region_plan_v2_plan",
+                subsidiary_id=subsidiary_id, target_city_id=target_city_id,
+                plan_id=selected_plan_id,
+            ) if adapter.has("get_region_plan_v2_plan") else {}
+            data = _region_plan_v2_data(response or {})
+            detail = _mapping(data.get("plan")) if isinstance(data.get("plan"), Mapping) else data
+            state["detail"] = dict(detail)
+            state["detail_key"] = detail_key
+        if detail:
+            st.divider()
+            st.subheader("Plan 상세·상태 관리")
+            lifecycle = str(detail.get("lifecycle", detail.get("plan_status", "")))
+            active_plan_id = str((selected_row or {}).get("active_plan_id") or "").strip()
+            active_relation = (
+                "CURRENT ACTIVE PLAN"
+                if active_plan_id == selected_plan_id
+                else (f"Current Active: {active_plan_id}" if active_plan_id else "No Active Plan")
+            )
+            st.info(
+                f"{active_relation} | Selected status: {lifecycle or '-'}"
+                + (f" | Activation revision: {(selected_row or {}).get('activation_revision')}" if (selected_row or {}).get("activation_revision") is not None else "")
+            )
+            metrics = st.columns(5)
+            metrics[0].metric("상태", lifecycle or "-")
+            metrics[1].metric("Revision", detail.get("plan_revision", "-"))
+            metrics[2].metric("Region", len(detail.get("regions", []) or []) or detail.get("region_count", "-"))
+            metrics[3].metric("Postal", len(detail.get("postals", []) or []) or detail.get("postal_count", "-"))
+            metrics[4].metric("Technician", len(detail.get("technicians", []) or []) or detail.get("technician_count", "-"))
+            regions = detail.get("regions")
+            if isinstance(regions, list) and regions:
+                st.markdown("**Region 목록**")
+                st.dataframe(regions, width="stretch", hide_index=True)
+            technicians = detail.get("technicians")
+            if isinstance(technicians, list) and technicians:
+                st.markdown("**Technician 배정 목록**")
+                st.dataframe(technicians, width="stretch", hide_index=True)
+            postals = detail.get("postals")
+            if isinstance(postals, list) and postals:
+                with st.expander(f"우편번호 배정 ({len(postals):,}건)"):
+                    st.dataframe(postals, width="stretch", hide_index=True)
+
+            action_cols = st.columns(4)
+            with action_cols[0]:
+                if lifecycle == "candidate" and adapter.has("adopt_region_plan_v2_candidate") and st.button("Adopt", key="rp2-management-adopt"):
+                    _render_region_plan_v2_receipt(_invoke(adapter, "adopt_region_plan_v2_candidate", subsidiary_id=subsidiary_id, target_city_id=target_city_id, plan_id=selected_plan_id) or {})
+                    st.rerun()
+            with action_cols[1]:
+                if lifecycle == "candidate" and st.button("Review → 활성화 준비", key="rp2-management-review"):
+                    reviewed = _invoke(
+                        adapter, "review_region_plan_v2",
+                        subsidiary_id=subsidiary_id, target_city_id=target_city_id,
+                        plan_id=selected_plan_id,
+                        plan_revision=int(detail.get("plan_revision", 0)),
+                        activation_revision=int(detail.get("activation_revision", 0)),
+                    ) or {}
+                    reviewed_data = _region_plan_v2_data(reviewed)
+                    _render_region_plan_v2_receipt(reviewed)
+                    if str(_mapping(reviewed).get("status")) == "completed":
+                        reviewed_revision = int(
+                            reviewed_data.get("plan_revision", detail.get("plan_revision", 0))
+                        )
+                        preview = _invoke(
+                            adapter, "preview_region_plan_v2_activation",
+                            subsidiary_id=subsidiary_id, target_city_id=target_city_id,
+                            plan_id=selected_plan_id,
+                            plan_revision=reviewed_revision,
+                            activation_revision=int(detail.get("activation_revision", 0)),
+                        ) or {}
+                        state["preview"] = _mapping(preview)
+                        state["detail"] = {
+                            **dict(detail),
+                            **dict(reviewed_data),
+                            "lifecycle": "reviewed",
+                            "plan_revision": reviewed_revision,
+                        }
+                        _render_region_plan_v2_receipt(preview)
+                    st.rerun()
+            with action_cols[2]:
+                if lifecycle in {"reviewed", "superseded"} and st.button("Preview activation", key="rp2-management-preview"):
+                    state["preview"] = _mapping(_invoke(adapter, "preview_region_plan_v2_activation", subsidiary_id=subsidiary_id, target_city_id=target_city_id, plan_id=selected_plan_id, plan_revision=int(detail.get("plan_revision", 0)), activation_revision=int(detail.get("activation_revision", 0))) or {})
+            with action_cols[3]:
+                if lifecycle not in {"active", "retired"} and adapter.has("delete_region_plan_v2") and st.button("영구 삭제", key="rp2-management-delete"):
+                    state["delete_plan_id"] = selected_plan_id
+                    st.rerun()
+            preview = _region_plan_v2_data(state.get("preview", {}))
+            if preview.get("preview_token") and lifecycle in {"reviewed", "superseded"}:
+                reference = st.text_input("Activation reference", key="rp2-management-activation-reference")
+                if st.button("Activate", type="primary", disabled=not reference.strip(), key="rp2-management-activate"):
+                    result = _invoke(adapter, "activate_region_plan_v2", subsidiary_id=subsidiary_id, target_city_id=target_city_id, plan_id=selected_plan_id, plan_revision=int(preview.get("plan_revision", detail.get("plan_revision", 0))), activation_revision=int(preview.get("activation_revision", detail.get("activation_revision", 0))), preview_token=str(preview["preview_token"]), activation_reference=reference) or {}
+                    _render_region_plan_v2_receipt(result)
+                    st.rerun()
+
+    if mode in {"add", "edit"}:
+        st.divider()
+        st.subheader("Plan 추가" if mode == "add" else "Plan 수정본 업로드")
+        if mode == "edit" and selected_row:
+            upload_subsidiary = str(selected_row.get("subsidiary_id") or "")
+            upload_source = str(selected_row.get("source_city_id") or "")
+            upload_target = str(selected_row.get("target_city_id") or "")
+        else:
+            upload_subsidiary = st.selectbox("법인", sorted({str(item.get("subsidiary_id") or "") for item in cities}), key="rp2-add-subsidiary")
+            source_options = [str(item.get("source_city_id") or "") for item in cities if str(item.get("subsidiary_id") or "") == upload_subsidiary and item.get("source_city_id")]
+            upload_source = st.selectbox("Source city", source_options, key="rp2-add-source") if source_options else ""
+            source_item = next((item for item in cities if str(item.get("subsidiary_id") or "") == upload_subsidiary and str(item.get("source_city_id") or "") == upload_source), {})
+            upload_targets = [str(value) for value in (source_item.get("target_city_ids") or []) if str(value)]
+            default_target = re.sub(r"[^A-Za-z0-9]+", "_", upload_source).strip("_")
+            upload_target = (
+                st.selectbox("Target city ID", upload_targets, key="rp2-add-target")
+                if upload_targets
+                else st.text_input("Target city ID", value=default_target, key="rp2-add-target-text")
+            )
+        source_item = next((item for item in cities if str(item.get("subsidiary_id") or "") == upload_subsidiary and str(item.get("source_city_id") or "") == upload_source), {})
+        policies = [item for item in source_item.get("policies", []) if isinstance(item, Mapping)]
+        # Region Plan stores topology only; routing policy is selected in VRP Client.
+        policy_map = {}
+        default_policy = str(selected_row.get("policy_version") or "") if mode == "edit" and selected_row else ""
+        if default_policy not in policy_map:
+            default_policy = next(iter(policy_map), "")
+        policy_version = st.selectbox("정책", list(policy_map), index=list(policy_map).index(default_policy) if default_policy in policy_map else 0, format_func=routing_policy_label, key=f"rp2-{mode}-policy") if policy_map else ""
+        local_candidates = list_saved_region_plan_workbooks(PROJECT_ROOT / "data" / "region_plans")
+        local_labels = ["Manual workbook upload"] + [str(item["label"]) for item in local_candidates]
+        local_plan_key = f"rp2-{mode}-local-plan"
+        local_plan_scope_key = f"{local_plan_key}-selected-plan"
+        if mode == "edit" and selected_row and state.get(local_plan_scope_key) != selected_plan_id:
+            default_local_label = _area_map_candidate_default_label(
+                local_candidates,
+                selected_row,
+                subsidiary_id=upload_subsidiary,
+                source_city_id=upload_source,
+            )
+            if default_local_label:
+                st.session_state[local_plan_key] = default_local_label
+            state[local_plan_scope_key] = selected_plan_id
+        selected_local_label = st.selectbox("Area Map Plan 또는 파일", local_labels, key=local_plan_key)
+        workbook_name = ""
+        workbook_bytes: bytes | None = None
+        local_binding_valid = True
+        local_plan_display_name = ""
+        if selected_local_label != local_labels[0]:
+            selected_local = next(item for item in local_candidates if str(item["label"]) == selected_local_label)
+            workbook_path = Path(selected_local["path"]).resolve()
+            candidate_root = (PROJECT_ROOT / "data" / "region_plans").resolve()
+            if candidate_root in workbook_path.parents:
+                workbook_name, workbook_bytes = workbook_path.name, workbook_path.read_bytes()
+                manifest = selected_local.get("manifest") or {}
+                local_plan_display_name = str(manifest.get("plan_display_name") or "").strip()
+                st.caption(f"Area Map Plan: {manifest.get('plan_display_name') or '-'} | plan_id={manifest.get('plan_id') or '-'}")
+                city_metadata = manifest.get("city_metadata") or {}
+                local_binding_valid = (
+                    str(city_metadata.get("subsidiary_id") or "") == upload_subsidiary
+                    and str(city_metadata.get("source_city_id") or "") == upload_source
+                    and str(city_metadata.get("target_city_id") or "") == str(upload_target)
+                )
+                if not local_binding_valid:
+                    st.warning(
+                        "선택한 Area Map Plan의 법인·Source city·Target city ID가 "
+                        "현재 수정 대상과 다릅니다. 같은 Target city의 Plan을 선택하세요."
+                    )
+                candidate_policy = str(city_metadata.get("policy_version") or "").strip()
+                candidate_mode = str(city_metadata.get("technician_policy_mode") or "").strip()
+                selected_mode = str(
+                    policy_map.get(policy_version, {}).get("technician_policy_mode") or ""
+                ).strip()
+                if candidate_policy and candidate_mode:
+                    local_policy_valid = True
+                    if not local_policy_valid:
+                        st.warning(
+                            "선택한 Area Map Plan의 정책이 현재 선택한 정책과 다릅니다. "
+                            f"Area Map: {routing_policy_label(candidate_policy)} / "
+                            f"현재 선택: {routing_policy_label(policy_version)}"
+                        )
+        else:
+            workbook = st.file_uploader("Region + Technician workbook (.xlsx)", type=["xlsx"], key=f"rp2-{mode}-workbook")
+            if workbook is not None:
+                workbook_name, workbook_bytes = workbook.name, workbook.getvalue()
+        plan_display_name = local_plan_display_name
+        if selected_local_label == local_labels[0]:
+            plan_display_name = st.text_input(
+                "Plan 이름",
+                value=str(upload_target),
+                key=f"rp2-{mode}-plan-display-name",
+                help="정책 도시와 별도로 표시되는 Area Plan 이름입니다.",
+            ).strip()
+        elif mode == "edit":
+            st.caption("현재 Plan의 Area Map 데이터를 기본값으로 사용합니다. 정책만 변경하려면 파일을 다시 선택하거나 업로드할 필요가 없습니다.")
+        target_valid = bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", str(upload_target or "")))
+        if st.button("Plan 저장", type="primary", disabled=not workbook_bytes or not target_valid or not local_binding_valid, key=f"rp2-{mode}-upload"):
+            selected_policy = policy_map.get(policy_version, {})
+            result = _invoke(adapter, "import_region_plan_v2_workbook", workbook_name=workbook_name, workbook_bytes=workbook_bytes, metadata={
+                "subsidiary_id": upload_subsidiary, "target_city_id": upload_target,
+                "source_city_id": upload_source,
+                "plan_display_name": plan_display_name or upload_target,
+                "overlap_policy": "registry_default", "activation_intent": "review_only",
+            }) or {}
+            _render_region_plan_v2_receipt(result)
+            result_map = _mapping(result)
+            result_data = _region_plan_v2_data(result)
+            result_error = _mapping(result_map.get("error") or {})
+            result_status = str(result_map.get("status") or "").lower()
+            if result_status in {"accepted", "completed"}:
+                state["save_notice"] = {
+                    "status": "success",
+                    "plan_id": str(result_data.get("plan_id") or ""),
+                }
+                state.pop("mode", None)
+                st.success(
+                    "Candidate Plan 저장이 완료되었습니다."
+                    + (
+                        f" | plan_id: {result_data.get('plan_id')}"
+                        if result_data.get("plan_id")
+                        else ""
+                    )
+                )
+                # The inventory was read before the save action. Refresh once
+                # so the newly accepted candidate appears immediately; the
+                # persistent save notice remains visible after the rerun.
+                st.rerun()
+            else:
+                state["save_notice"] = {
+                    "status": "failed",
+                    "message": str(
+                        result_error.get("message")
+                        or result_error.get("code")
+                        or "Region Plan API 응답이 완료되지 않았습니다."
+                    ),
+                }
+
+
+@_fragment
 def _render_data_management(adapter: BackendAdapter, config_path: str) -> None:
     st.caption(
         "Manage versioned allowlisted operational datasets. Source-code packages are managed separately under Package Management."
@@ -3406,13 +4429,22 @@ def _render_data_management(adapter: BackendAdapter, config_path: str) -> None:
     if not adapter.has("list_managed_data_sets"):
         st.info("Managed data is unavailable from this backend version.")
         return
+    refresh_catalog = st.button(
+        "Refresh data catalog",
+        key=f"managed-data-catalog-refresh-{scope}",
+    )
     list_errors: list[str] = []
     response = _mapping(
-        _invoke(
-            adapter,
-            "list_managed_data_sets",
-            scope=scope,
-            error_sink=list_errors.append,
+        _session_ttl_value(
+            f"managed-data-catalog-cache-{scope}",
+            lambda: _invoke(
+                adapter,
+                "list_managed_data_sets",
+                scope=scope,
+                error_sink=list_errors.append,
+            ),
+            ttl_seconds=60.0,
+            refresh=refresh_catalog,
         )
         or {}
     )
@@ -3671,6 +4703,20 @@ def render_app(backend: object | None = None) -> None:
         return
     if route == "data":
         _render_data_management(adapter, server_config_path)
+        return
+    if route == "database":
+        database_environment = st.segmented_control(
+            "Database environment",
+            ("development", "production"),
+            default="development",
+            key="database-monitor-environment",
+        )
+        database_environment = str(database_environment or "development")
+        _render_db_tab(
+            adapter,
+            database_environment,
+            DB_CONFIG_PATHS[database_environment],
+        )
         return
     if route == "region-plans":
         _render_region_plan_v2(adapter)

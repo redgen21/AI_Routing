@@ -5,30 +5,22 @@ set -euo pipefail
 # This script never accepts a database name and never touches production.
 
 DB_NAME="vrp_db_dev"
-ADMIN_RELEASE_ROOT="${1:-}"
-ADMIN_RELEASES_ROOT="/home/csda/AI_Routing/admin_tools/releases"
+ADMIN_RELEASE_ROOT="${1:-/home/csda/AI_Routing/admin_tools}"
 RUN_ROOT="/tmp/region-plan-schema-v2-$(date -u +%Y%m%dT%H%M%SZ)"
 
 if [[ -z "${ADMIN_RELEASE_ROOT}" ]]; then
   ADMIN_RELEASE_ROOT="$(
-    find "${ADMIN_RELEASES_ROOT}" -mindepth 1 -maxdepth 1 -type d -name 'admin-*' \
+    find "${ADMIN_RELEASE_ROOT}" -mindepth 1 -maxdepth 1 -type d -name 'admin-*' \
       -printf '%f\n' | sort | tail -n 1
   )"
   [[ -n "${ADMIN_RELEASE_ROOT}" ]] || {
     echo "No deployed Admin Tools release was found." >&2
     exit 1
   }
-  ADMIN_RELEASE_ROOT="${ADMIN_RELEASES_ROOT}/${ADMIN_RELEASE_ROOT}"
+  ADMIN_RELEASE_ROOT="${ADMIN_RELEASE_ROOT}/${ADMIN_RELEASE_ROOT}"
 fi
 
 ADMIN_RELEASE_ROOT="$(readlink -f -- "${ADMIN_RELEASE_ROOT}")"
-case "${ADMIN_RELEASE_ROOT}" in
-  "${ADMIN_RELEASES_ROOT}"/admin-*) ;;
-  *)
-    echo "Admin Tools release must be under ${ADMIN_RELEASES_ROOT}/admin-*" >&2
-    exit 1
-    ;;
-esac
 
 BASE_SQL="${ADMIN_RELEASE_ROOT}/admin_tools/db/migrations/V001__atlanta_6area_region_plan.sql"
 V2_SQL="${ADMIN_RELEASE_ROOT}/admin_tools/db/region_plan_schema_v2.sql"

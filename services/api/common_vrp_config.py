@@ -11,6 +11,40 @@ ENVIRONMENT_DATABASES = {
     "production": "vrp_db",
 }
 
+DEFAULT_ROUTING_POLICY = {
+    "slot_minutes": 45,
+    "default_technician_slot_count": 8,
+    "heavy_job_min_service_minutes": 100,
+}
+
+
+def _positive_integer(value: object, name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"routing_policy.{name} must be a positive integer.")
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"routing_policy.{name} must be a positive integer.") from exc
+    if str(value).strip() not in {str(numeric), f"{numeric}.0"} or numeric <= 0:
+        raise ValueError(f"routing_policy.{name} must be a positive integer.")
+    return numeric
+
+
+def normalize_routing_policy(config: dict[str, Any]) -> dict[str, int]:
+    """Validate the optional policy block and preserve legacy defaults."""
+    raw_policy = config.get("routing_policy")
+    if raw_policy is None:
+        return dict(DEFAULT_ROUTING_POLICY)
+    if not isinstance(raw_policy, dict):
+        raise ValueError("routing_policy must be a JSON object.")
+    missing = [key for key in DEFAULT_ROUTING_POLICY if key not in raw_policy]
+    if missing:
+        raise ValueError("routing_policy is missing required settings: " + ", ".join(missing))
+    return {
+        key: _positive_integer(raw_policy[key], key)
+        for key in DEFAULT_ROUTING_POLICY
+    }
+
 
 def load_and_validate_common_config(
     config_path: Path,
@@ -97,6 +131,10 @@ def load_and_validate_common_config(
             f"routing_api_url port {routing_port} does not match api.port {configured_port}."
         )
 
+    # Always provide a complete, validated policy to API startup.  Configs
+    # written before this block existed retain their historical 45/8/100
+    # behavior instead of becoming invalid on deployment.
+    config["routing_policy"] = normalize_routing_policy(config)
     return config
 
 

@@ -41,6 +41,7 @@ try {
         "admin_tools/db/migrations/V004__region_plan_area_type_region_soft.sql",
         "admin_tools/db/region_plan_schema_backend.py",
         "admin_tools/db/region_plan_schema_v2.sql",
+        "admin_tools/db/region_plan_v2_backend.py",
         "admin_tools/db/runners/__init__.py",
         "admin_tools/db/runners/reset_common_vrp_data.py",
         "admin_tools/db/seeds/__init__.py",
@@ -117,7 +118,7 @@ try {
     }
     $manifest = Get-Content -LiteralPath (Join-Path $staging "deploy_manifest.json") -Raw | ConvertFrom-Json
     if ($manifest.artifact_type -ne "db-admin-tools") { throw "Unexpected admin artifact type." }
-    if ($manifest.target_root -ne "/home/csda/AI_Routing/admin_tools/releases/$version") {
+    if ($manifest.target_root -ne "/home/csda/AI_Routing/admin_tools") {
         throw "Unexpected admin target root."
     }
     if ($manifest.promotable -ne (-not [bool]$manifest.source_dirty)) {

@@ -35,6 +35,21 @@ SOFT_REGION_AFFINITY_POLICIES = frozenset({
     ACTIVE_ROSTER_TYPE_HARD_REGION_SOFT_V1,
     ACTIVE_ROSTER_AREA_TYPE_FALLBACK_REGION_SOFT_V1,
 })
+DEFAULT_SLOT_MINUTES = 45
+DEFAULT_TECHNICIAN_SLOT_COUNT = 8
+DEFAULT_HEAVY_JOB_MIN_SERVICE_MINUTES = 100
+
+
+def _routing_policy_int(request_payload: dict[str, Any], key: str, default: int) -> int:
+    value = pd.to_numeric(
+        pd.Series([(request_payload.get("options") or {}).get(key)]),
+        errors="coerce",
+    ).iloc[0]
+    if pd.isna(value) or float(value) <= 0:
+        return int(default)
+    return int(value)
+
+
 CITY_ROUTING_POLICY = {
     "Atlanta, GA": HOME_DISTANCE_ONLY,
     # Compatibility fallback for existing Atlanta_6area requests that predate
@@ -340,6 +355,11 @@ def _build_engineer_frames_from_payload(
     region_centers: dict[int, tuple[float, float]],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     region_policy = resolve_city_routing_policy(request_payload)
+    default_slot_count = _routing_policy_int(
+        request_payload,
+        "default_technician_slot_count",
+        DEFAULT_TECHNICIAN_SLOT_COUNT,
+    )
     ref_engineer = reference_engineer_region_df.copy()
     ref_engineer["SVC_ENGINEER_CODE"] = ref_engineer["SVC_ENGINEER_CODE"].astype(str)
     ref_home = reference_home_df.copy()
@@ -406,7 +426,7 @@ def _build_engineer_frames_from_payload(
                 "anchor_region_seq": int(region_seq),
                 "anchor_region_name": region_name,
                 "Name": name,
-                "normalized_slot": 8,
+                "normalized_slot": default_slot_count,
                 "REF_HEAVY_REPAIR_FLAG": "Y",
             }
         region_row["SVC_ENGINEER_CODE"] = code
@@ -431,7 +451,12 @@ def _build_engineer_frames_from_payload(
                 priority_group = 1
             else:
                 priority_group = 2
-        slot_capacity = pd.to_numeric(pd.Series([tech.get("slot_count", tech.get("max_slots", tech.get("max_jobs", 8)))]), errors="coerce").fillna(8).iloc[0]
+        slot_capacity = pd.to_numeric(
+            pd.Series(
+                [tech.get("slot_count", tech.get("max_slots", tech.get("max_jobs")))]
+            ),
+            errors="coerce",
+        ).fillna(default_slot_count).iloc[0]
         max_slot_capacity = max(0, int(slot_capacity))
         max_minutes = pd.to_numeric(pd.Series([tech.get("max_minutes", 540)]), errors="coerce").fillna(540).iloc[0]
         slot_based_max_minutes = (max_slot_capacity + 1) * 60
@@ -469,7 +494,7 @@ def _build_engineer_frames_from_payload(
                 "match_type": "",
                 "source": "api_payload",
                 "SVC_CENTER_TYPE": region_row["SVC_CENTER_TYPE"],
-                "normalized_slot": region_row.get("normalized_slot", 8),
+                "normalized_slot": region_row.get("normalized_slot", default_slot_count),
                 "REF_HEAVY_REPAIR_FLAG": region_row.get("REF_HEAVY_REPAIR_FLAG", "Y"),
                 "assigned_region_seq": region_row.get("assigned_region_seq"),
                 "assigned_region_name": region_row.get("assigned_region_name"),
@@ -502,6 +527,14 @@ def _build_service_frame_from_payload(
 
     planning_date = str(request_payload.get("planning_date", "")).strip()
     region_policy = resolve_city_routing_policy(request_payload)
+    slot_minutes_per_job = _routing_policy_int(
+        request_payload, "slot_minutes", DEFAULT_SLOT_MINUTES
+    )
+    heavy_job_min_service_minutes = _routing_policy_int(
+        request_payload,
+        "heavy_job_min_service_minutes",
+        DEFAULT_HEAVY_JOB_MIN_SERVICE_MINUTES,
+    )
     jobs = list(request_payload.get("jobs", []))
     rows: list[dict[str, Any]] = []
     for job in jobs:
@@ -541,8 +574,12 @@ def _build_service_frame_from_payload(
         if pd.isna(service_minutes):
             heavy_text = str(job.get("is_heavy_repair", False)).strip().lower()
             is_heavy_repair = bool(job.get("is_heavy_repair", False)) if heavy_text not in {"true", "1", "y", "yes", "t", "false", "0", "n", "no", "f", ""} else heavy_text in {"true", "1", "y", "yes", "t"}
-            slot_minutes = 45 * job_slot_count
-            service_minutes = max(slot_minutes, 100 if is_heavy_repair else 45)
+            service_minutes = max(
+                slot_minutes_per_job * job_slot_count,
+                heavy_job_min_service_minutes
+                if is_heavy_repair
+                else slot_minutes_per_job,
+            )
         explicit_eligible_employee_codes = _hard_eligible_employee_codes(job)
         skill_eligible_employee_codes = _skill_eligible_employee_codes(
             request_payload,
@@ -648,8 +685,15 @@ def _build_service_frame_from_payload(
         df = prod._enrich_service_df(df, heavy_lookup_df)
         if payload_service_times:
             df["service_time_min"] = df["GSFS_RECEIPT_NO"].map(payload_service_times).fillna(df["service_time_min"])
-            df["service_time_min"] = pd.to_numeric(df["service_time_min"], errors="coerce").fillna(45)
-            df["is_heavy_repair"] = df["service_time_min"].astype(float).gt(45)
+            df["service_time_min"] = pd.to_numeric(
+                df["service_time_min"], errors="coerce"
+            ).fillna(slot_minutes_per_job)
+            df["is_heavy_repair"] = (
+                df["is_heavy_repair"].fillna(False).astype(bool)
+                | df["service_time_min"].astype(float).ge(
+                    heavy_job_min_service_minutes
+                )
+            )
     return df
 
 
@@ -659,6 +703,9 @@ def _build_response_payload(
     schedule_df: pd.DataFrame,
     diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    slot_minutes_per_job = _routing_policy_int(
+        request_payload, "slot_minutes", DEFAULT_SLOT_MINUTES
+    )
     planning_date = str(request_payload.get("planning_date", "")).strip()
     timezone_offset = str(request_payload.get("options", {}).get("timezone_offset", DEFAULT_TIMEZONE_OFFSET)).strip() or DEFAULT_TIMEZONE_OFFSET
     jobs = list(request_payload.get("jobs", []))
@@ -704,9 +751,16 @@ def _build_response_payload(
                 errors="coerce",
             ).iloc[0]
             service_time_min = pd.to_numeric(
-                pd.Series([row.get("service_time_min", payload_job.get("service_minutes", 45))]),
+                pd.Series(
+                    [
+                        row.get(
+                            "service_time_min",
+                            payload_job.get("service_minutes", slot_minutes_per_job),
+                        )
+                    ]
+                ),
                 errors="coerce",
-            ).fillna(45).iloc[0]
+            ).fillna(slot_minutes_per_job).iloc[0]
             base_service_time_min = pd.to_numeric(
                 pd.Series([row.get("base_service_time_min", payload_job.get("service_minutes", service_time_min))]),
                 errors="coerce",

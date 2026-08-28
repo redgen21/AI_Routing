@@ -281,7 +281,7 @@ class MasterAdminBridgeTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         command, timeout = remote.commands[0]
         self.assertEqual(timeout, console_backend._MASTER_ADMIN_TIMEOUT_SECONDS)
-        self.assertIn("/admin_tools/releases/admin-v20260720", command)
+        self.assertIn("/admin_tools/", command)
         self.assertIn("/development/.venv/bin/python", command)
         self.assertIn(" -B -m admin_tools.db.master_data_backend", command)
         self.assertIn("/development/config_common_vrp.dev.json", command)

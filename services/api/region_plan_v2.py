@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 import base64
+import logging
 from http import HTTPStatus
 from typing import Any
 import hashlib, json
@@ -16,6 +17,8 @@ import os, re, shutil, tempfile
 from pathlib import Path
 
 from smart_routing.common_vrp_db import COMMON_CONFIG_PATH, get_db_connection, load_common_config
+
+LOGGER = logging.getLogger(__name__)
 
 CONTRACT_VERSION = "region-plan/v2"
 POLICY_MODES = {
@@ -26,6 +29,19 @@ POLICY_MODES = {
     "active_roster_type_hard_region_soft/v1": "active_roster_type_hard_region_soft",
     "active_roster_area_type_fallback_region_soft/v1": "active_roster_area_type_fallback_region_soft",
 }
+# The legacy plan-technician table retains a constrained policy_mode column.
+# Region Plan no longer owns routing policy, so new policy-free workbooks use
+# this value only to satisfy the old storage contract; VRP Client ignores it.
+_LEGACY_TECHNICIAN_MODE = "assigned_region_boundary_spillover"
+_LEGACY_TECHNICIAN_MODES = frozenset({
+    "assigned_region_boundary_spillover",
+    "active_roster_type_hard_region_soft",
+    "active_roster_area_type_fallback_region_soft",
+})
+# Area Map upload is the publication boundary.  Every successfully validated
+# topology is immediately selectable by VRP Client; selection is per routing
+# configuration, so importing a Plan must not supersede any existing Plan.
+_IMPORTED_PLAN_STATUS = "active"
 # Subsidiary IDs are machine identifiers.  A strategic city is a legacy
 # business key in the existing DB and legitimately contains spaces, commas,
 # periods, and hyphens (for example ``Atlanta, GA``).  It is still bounded and
@@ -33,7 +49,7 @@ POLICY_MODES = {
 # validated by the console/API route helpers.
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 _SAFE_CITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_ .,&()/-]{0,159}$")
-_MUTATING_OPERATIONS = frozenset({"imports", "adopt", "review", "activate", "rollback", "retire"})
+_MUTATING_OPERATIONS = frozenset({"imports", "adopt", "review", "activate", "rollback", "retire", "delete"})
 
 
 class RegionPlanV2Error(ValueError):
@@ -47,6 +63,17 @@ def _validate_scope_identifiers(metadata: dict[str, Any]) -> None:
         raise RegionPlanV2Error("SUBSIDIARY_ID_INVALID", HTTPStatus.BAD_REQUEST)
     if not _SAFE_CITY.fullmatch(str(metadata.get("target_city_id", ""))):
         raise RegionPlanV2Error("TARGET_CITY_ID_INVALID", HTTPStatus.BAD_REQUEST)
+
+
+def _canonical_city_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Accept the public subsidiary/city contract and retain legacy aliases internally."""
+    result = dict(metadata)
+    city = str(result.get("city_name") or result.get("source_city_id") or result.get("target_city_id") or "").strip()
+    if city:
+        result["city_name"] = city
+        result.setdefault("source_city_id", city)
+        result.setdefault("target_city_id", city)
+    return result
 
 
 def _development_config(config_path: str) -> dict[str, Any]:
@@ -73,12 +100,19 @@ class CandidateRepository:
     """Candidate-only writer; activation remains in the lifecycle repository."""
     def __init__(self, connection_factory): self.connection_factory = connection_factory
     def import_candidate(self, candidate, workbook, *, config_path, principal, idempotency_key):
-        m=candidate["manifest"]; meta=m["city_metadata"]; areas=m["areas"]; techs=m["technicians"]
+        m=candidate["manifest"]; meta=_canonical_city_metadata(m["city_metadata"]); m["city_metadata"]=meta; areas=m["areas"]; techs=m["technicians"]
         if not idempotency_key: raise RegionPlanV2Error("IDEMPOTENCY_KEY_REQUIRED", 400)
         _validate_scope_identifiers(meta)
-        registry_mode=str(meta.get("technician_policy_mode", "")).strip()
-        if not registry_mode or any(t["policy_mode"] != registry_mode for t in techs):
-            raise RegionPlanV2Error("CITY_POLICY_MODE_INVALID")
+        # Routing policy is selected by the VRP Client.  Keep the legacy DB
+        # columns populated for compatibility, but do not require policy
+        # metadata in an uploaded Region Plan.
+        # Upload Area Map Plan always starts with the policy-free default.
+        # Do not let legacy Area Map manifest fields turn a topology upload
+        # into an implicit routing-policy selection.
+        legacy_policy = "home_distance_only"
+        legacy_mode = "home_distance_only"
+        if legacy_mode not in _LEGACY_TECHNICIAN_MODES:
+            legacy_mode = _LEGACY_TECHNICIAN_MODE
         region_values = {}
         for area in areas:
             code = area["region_code"]
@@ -136,10 +170,19 @@ class CandidateRepository:
                 if any(roster[code] != center for code,center in required.items()): raise RegionPlanV2Error("CENTER_TYPE_MISMATCH")
                 c.execute("select distinct employee_code from common_technician_capability_master where subsidiary_name=%s and strategic_city_name=%s and employee_code=any(%s)", (meta["subsidiary_id"],meta["source_city_id"],codes))
                 if {r[0] for r in c.fetchall()} != set(codes): raise RegionPlanV2Error("SOURCE_CAPABILITY_INVALID")
-                c.execute("insert into common_city_context(subsidiary_name,strategic_city_name,source_strategic_city_name,context_version,policy_version,context_status) values(%s,%s,%s,%s,%s,'candidate') on conflict(subsidiary_name,strategic_city_name) do nothing", (meta["subsidiary_id"],meta["target_city_id"],meta["source_city_id"],"region-plan-workflow/v2",meta["policy_version"]))
+                c.execute("insert into common_city_context(subsidiary_name,strategic_city_name,source_strategic_city_name,context_version,policy_version,context_status) values(%s,%s,%s,%s,%s,'active') on conflict(subsidiary_name,strategic_city_name) do update set context_status='active'", (meta["subsidiary_id"],meta["target_city_id"],meta["source_city_id"],"region-plan-workflow/v2",legacy_policy))
                 digest=m["canonical_sha256"]; source=workbook_digest
-                c.execute("""insert into common_region_plan(subsidiary_name,strategic_city_name,plan_id,schema_version,policy_version,source_file_name,source_sha256,manifest_sha256,bundle_sha256,fixed_region_sha256,boundary_policy_sha256,technician_policy_sha256,membership_input_rows,membership_accepted_rows,membership_rejected_rows,unique_postal_count,technician_count,ambiguous_postal_count,import_idempotency_key,imported_by) values(%s,%s,%s,%s,%s,'upload.xlsx',%s,%s,%s,%s,%s,%s,%s,%s,0,%s,%s,%s,%s,%s) on conflict(subsidiary_name,strategic_city_name,plan_id) do update set updated_at=common_region_plan.updated_at where common_region_plan.manifest_sha256=excluded.manifest_sha256 returning revision""", (meta["subsidiary_id"],meta["target_city_id"],m["plan_id"],"region-plan-workflow/v2",meta["policy_version"],source,digest,digest,digest,digest,digest,len(areas),len(areas),len({a["postal_code"] for a in areas}),active_technician_count,sum(1 for a in areas if a["membership_rank"]>1),idempotency_key,principal))
+                c.execute("""insert into common_region_plan(subsidiary_name,strategic_city_name,plan_id,schema_version,policy_version,source_file_name,source_sha256,manifest_sha256,bundle_sha256,fixed_region_sha256,boundary_policy_sha256,technician_policy_sha256,membership_input_rows,membership_accepted_rows,membership_rejected_rows,unique_postal_count,technician_count,ambiguous_postal_count,import_idempotency_key,imported_by,plan_status) values(%s,%s,%s,%s,%s,'upload.xlsx',%s,%s,%s,%s,%s,%s,%s,%s,0,%s,%s,%s,%s,%s,%s) on conflict(subsidiary_name,strategic_city_name,plan_id) do update set plan_status=excluded.plan_status,updated_at=now() where common_region_plan.manifest_sha256=excluded.manifest_sha256 returning revision""", (meta["subsidiary_id"],meta["target_city_id"],m["plan_id"],"region-plan-workflow/v2",legacy_policy,source,digest,digest,digest,digest,digest,len(areas),len(areas),len({a["postal_code"] for a in areas}),active_technician_count,sum(1 for a in areas if a["membership_rank"]>1),idempotency_key,principal,_IMPORTED_PLAN_STATUS))
                 if c.fetchone() is None: raise RegionPlanV2Error("PLAN_IDENTITY_CONFLICT",409)
+                c.execute("select to_regclass('public.common_area_plan')")
+                if c.fetchone()[0] is not None:
+                    c.execute(
+                        """insert into common_area_plan(subsidiary_name,city_name,plan_id,plan_display_name,checksum,plan_status,plan_revision,legacy_storage_city_name)
+                           values(%s,%s,%s,%s,%s,%s,%s,%s)
+                           on conflict(subsidiary_name,legacy_storage_city_name,plan_id)
+                           do update set city_name=excluded.city_name,plan_display_name=excluded.plan_display_name,checksum=excluded.checksum,plan_status=excluded.plan_status,plan_revision=excluded.plan_revision,updated_at=now()""",
+                        (meta["subsidiary_id"],meta["city_name"],m["plan_id"],str(meta.get("plan_display_name") or m["plan_id"]),source,_IMPORTED_PLAN_STATUS,0,meta["target_city_id"]),
+                    )
                 c.executemany("insert into common_region_plan_region(subsidiary_name,strategic_city_name,plan_id,region_seq,region_id,region_name,source_territory,required_center_type) values(%s,%s,%s,%s,%s,%s,%s,%s) on conflict do nothing", [(meta["subsidiary_id"],meta["target_city_id"],m["plan_id"],seq[k],k,v[0],k,v[1]) for k,v in regions])
                 by_postal={}
                 for a in areas: by_postal.setdefault(a["postal_code"],[]).append(a)
@@ -149,10 +192,21 @@ class CandidateRepository:
                     primary.append((meta["subsidiary_id"],meta["target_city_id"],m["plan_id"],postal,seq[main["region_code"]],main["area_type"],len(members),"not_required" if len(members)==1 else "resolved",json.dumps([seq[a["region_code"]] for a in members]),json.dumps(None)))
                     for alt in members:
                         if not alt["is_primary"]:
-                            overflow.append((meta["subsidiary_id"],meta["target_city_id"],m["plan_id"],postal,seq[main["region_code"]],seq[alt["region_code"]],bool(alt["overflow_allowed"]),alt["overflow_penalty_minutes"] if alt["overflow_allowed"] else None,alt["overflow_reason"] or None,meta["policy_version"]))
+                            overflow.append((meta["subsidiary_id"],meta["target_city_id"],m["plan_id"],postal,seq[main["region_code"]],seq[alt["region_code"]],bool(alt["overflow_allowed"]),alt["overflow_penalty_minutes"] if alt["overflow_allowed"] else None,alt["overflow_reason"] or None,legacy_policy))
                 c.executemany("insert into common_region_plan_postal(subsidiary_name,strategic_city_name,plan_id,postal_code,region_seq,area_type,source_membership_count,resolution_status,source_region_seqs,resolution_metadata) values(%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb) on conflict do nothing", primary)
                 if overflow: c.executemany("insert into common_region_plan_boundary_overflow(subsidiary_name,strategic_city_name,plan_id,postal_code,primary_region_seq,alternate_region_seq,allow_overflow,penalty_cost,rationale,policy_version) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) on conflict do nothing", overflow)
-                c.executemany("insert into common_region_plan_technician(subsidiary_name,strategic_city_name,plan_id,employee_code,assigned_region_seq,policy_mode,active_flag) values(%s,%s,%s,%s,%s,%s,%s) on conflict do nothing", [(meta["subsidiary_id"],meta["target_city_id"],m["plan_id"],t["technician_id"],seq[t["region_code"]],t["policy_mode"],t["active"]) for t in techs])
+                technician_rows = [
+                    (
+                        meta["subsidiary_id"], meta["target_city_id"], m["plan_id"],
+                        t["technician_id"], seq[t["region_code"]],
+                        str(t.get("policy_mode") or legacy_mode).strip()
+                        if str(t.get("policy_mode") or legacy_mode).strip() in _LEGACY_TECHNICIAN_MODES
+                        else legacy_mode,
+                        t["active"],
+                    )
+                    for t in techs
+                ]
+                c.executemany("insert into common_region_plan_technician(subsidiary_name,strategic_city_name,plan_id,employee_code,assigned_region_seq,policy_mode,active_flag) values(%s,%s,%s,%s,%s,%s,%s) on conflict do nothing", technician_rows)
                 # Mirror the imported topology into the normalized Region Set
                 # and Routing Plan tables when their schema is installed.
                 c.execute("select to_regclass('public.common_region_set')")
@@ -160,11 +214,11 @@ class CandidateRepository:
                     topology_sha = str(m.get("fixed_region_sha256") or m.get("canonical_sha256") or digest)
                     region_set_id = "rs_" + topology_sha[:24]
                     source_city = str(meta["source_city_id"])
-                    c.execute("insert into common_region_set(subsidiary_name,source_strategic_city_name,region_set_id,region_set_name,region_count,source_sha256,membership_sha256,status) values(%s,%s,%s,%s,%s,%s,%s,'active') on conflict do nothing", (meta["subsidiary_id"],source_city,region_set_id,f"{source_city} Region Set",len(regions),topology_sha,topology_sha))
+                    c.execute("insert into common_region_set(subsidiary_name,source_strategic_city_name,region_set_id,region_set_name,region_count,source_sha256,membership_sha256,status) values(%s,%s,%s,%s,%s,%s,%s,%s) on conflict do nothing", (meta["subsidiary_id"],source_city,region_set_id,f"{source_city} Region Set",len(regions),topology_sha,topology_sha,_IMPORTED_PLAN_STATUS))
                     c.executemany("insert into common_region_set_region(subsidiary_name,source_strategic_city_name,region_set_id,region_seq,region_id,region_name,source_territory,required_center_type,area_type) values(%s,%s,%s,%s,%s,%s,%s,%s,%s) on conflict do nothing", [(meta["subsidiary_id"],source_city,region_set_id,seq[code],code,value[0],code,value[1],value[1]) for code,value in regions])
-                    c.execute("insert into common_routing_plan(subsidiary_name,strategic_city_name,source_strategic_city_name,routing_plan_id,region_set_id,policy_version,overlap_policy,plan_status,revision,source_sha256,manifest_sha256) values(%s,%s,%s,%s,%s,%s,%s,'candidate',1,%s,%s) on conflict do nothing", (meta["subsidiary_id"],meta["target_city_id"],source_city,m["plan_id"],region_set_id,meta["policy_version"],str(meta.get("overlap_policy") or "registry_default"),source,digest))
+                    c.execute("insert into common_routing_plan(subsidiary_name,strategic_city_name,source_strategic_city_name,routing_plan_id,region_set_id,policy_version,overlap_policy,plan_status,revision,source_sha256,manifest_sha256) values(%s,%s,%s,%s,%s,%s,%s,%s,1,%s,%s) on conflict(subsidiary_name,strategic_city_name,routing_plan_id) do update set plan_status=excluded.plan_status,updated_at=now()", (meta["subsidiary_id"],meta["target_city_id"],source_city,m["plan_id"],region_set_id,legacy_policy,str(meta.get("overlap_policy") or "registry_default"),_IMPORTED_PLAN_STATUS,source,digest))
                     c.executemany("insert into common_region_set_postal(subsidiary_name,source_strategic_city_name,region_set_id,postal_code,region_seq,area_type,membership_rank,is_primary) values(%s,%s,%s,%s,%s,%s,%s,true) on conflict do nothing", [(meta["subsidiary_id"],source_city,region_set_id,row[3],row[4],row[5],1) for row in primary])
-                    c.executemany("insert into common_routing_plan_technician(subsidiary_name,strategic_city_name,routing_plan_id,employee_code,assigned_region_seq,policy_mode,active_flag) values(%s,%s,%s,%s,%s,%s,%s) on conflict do nothing", [(meta["subsidiary_id"],meta["target_city_id"],m["plan_id"],t["technician_id"],seq[t["region_code"]],t["policy_mode"],t["active"]) for t in techs])
+                    c.executemany("insert into common_routing_plan_technician(subsidiary_name,strategic_city_name,routing_plan_id,employee_code,assigned_region_seq,policy_mode,active_flag) values(%s,%s,%s,%s,%s,%s,%s) on conflict do nothing", technician_rows)
                 c.execute("select (select count(*) from common_region_plan_region where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s),(select count(*) from common_region_plan_postal where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s),(select count(*) from common_region_plan_technician where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s),(select count(*) from common_region_plan_boundary_overflow where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s)", (meta["subsidiary_id"],meta["target_city_id"],m["plan_id"])*4)
                 if tuple(c.fetchone()) != (len(regions),len(by_postal),len(techs),len(overflow)): raise RegionPlanV2Error("PLAN_ROW_COUNTS_INVALID")
                 content_sha256=_db_content_sha256(c,(meta["subsidiary_id"],meta["target_city_id"],m["plan_id"]))
@@ -315,6 +369,41 @@ def _db_content_sha256(cursor, scope: tuple[str, str, str]) -> str:
     return hashlib.sha256(json.dumps(content,separators=(",",":"),default=str).encode()).hexdigest()
 
 
+def _plan_detail(cursor, scope: tuple[str, str, str]) -> dict[str, list[dict[str, Any]]]:
+    """Return read-only management rows for one immutable Area Plan."""
+    subsidiary, city, plan_id = scope
+    queries = (
+        (
+            "regions",
+            "select region_seq,region_id,region_name,source_territory,"
+            "required_center_type,area_type from common_region_plan_region "
+            "where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s "
+            "order by region_seq",
+            ("region_seq", "region_id", "region_name", "source_territory", "required_center_type", "area_type"),
+        ),
+        (
+            "postals",
+            "select postal_code,region_seq,area_type,source_membership_count,"
+            "resolution_status,source_region_seqs from common_region_plan_postal "
+            "where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s "
+            "order by postal_code,region_seq",
+            ("postal_code", "region_seq", "area_type", "source_membership_count", "resolution_status", "source_region_seqs"),
+        ),
+        (
+            "technicians",
+            "select employee_code,assigned_region_seq,policy_mode,active_flag "
+            "from common_region_plan_technician where subsidiary_name=%s and "
+            "strategic_city_name=%s and plan_id=%s order by employee_code",
+            ("employee_code", "assigned_region_seq", "policy_mode", "active_flag"),
+        ),
+    )
+    result: dict[str, list[dict[str, Any]]] = {}
+    for name, sql, columns in queries:
+        cursor.execute(sql, scope)
+        result[name] = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    return result
+
+
 def handle(operation: str, payload: dict, *, config_path=COMMON_CONFIG_PATH, repository=None) -> tuple[int, dict]:
     try:
         if operation in _MUTATING_OPERATIONS:
@@ -331,18 +420,36 @@ def handle(operation: str, payload: dict, *, config_path=COMMON_CONFIG_PATH, rep
             from tools.data.region_plan_workflow_v2 import canonicalize_workbook, RegionPlanV2ValidationError
             try:
                 workbook = base64.b64decode(encoded, validate=True)
-                metadata = dict(payload.get("city_metadata") or {})
+                metadata = _canonical_city_metadata(dict(payload.get("city_metadata") or {}))
                 _validate_scope_identifiers(metadata)
-                if str(metadata.get("activation_intent", "review_only")) != "review_only":
-                    raise RegionPlanV2Error("ACTIVATION_INTENT_INVALID", HTTPStatus.BAD_REQUEST)
-                if POLICY_MODES.get(str(metadata.get("policy_version", ""))) != str(metadata.get("technician_policy_mode", "")):
-                    raise RegionPlanV2Error("CITY_POLICY_MODE_INVALID", HTTPStatus.FORBIDDEN)
                 candidate = canonicalize_workbook(workbook, metadata)
             except (ValueError, RegionPlanV2ValidationError) as exc:
                 raise RegionPlanV2Error(getattr(exc, "code", "WORKBOOK_FORMAT_INVALID"), HTTPStatus.BAD_REQUEST) from exc
             # Persistence is intentionally delegated to the repository; callers never supply SQL.
             if candidate["manifest"]["status"] == "rejected":
-                return HTTPStatus.UNPROCESSABLE_ENTITY, _envelope("rejected", {"plan_id": candidate["manifest"]["plan_id"], "reject_count": len(candidate["rejects"])}, RegionPlanV2Error("REVIEW_GATE_FAILED"))
+                reject_summary: dict[str, int] = {}
+                for reject in candidate["rejects"]:
+                    key = f"{reject.get('sheet', 'unknown')}:{reject.get('error_code', 'UNKNOWN')}"
+                    reject_summary[key] = reject_summary.get(key, 0) + 1
+                reject_rows = [
+                    {
+                        "sheet": str(reject.get("sheet", "unknown")),
+                        "row_number": int(reject.get("row_number", 0)),
+                        "error_code": str(reject.get("error_code", "UNKNOWN")),
+                    }
+                    for reject in candidate["rejects"][:100]
+                ]
+                return HTTPStatus.UNPROCESSABLE_ENTITY, _envelope(
+                    "rejected",
+                    {
+                        "plan_id": candidate["manifest"]["plan_id"],
+                        "reject_count": len(candidate["rejects"]),
+                        "reject_summary": reject_summary,
+                        "reject_rows": reject_rows,
+                        "plan_errors": list(candidate["manifest"].get("plan_errors") or []),
+                    },
+                    RegionPlanV2Error("REVIEW_GATE_FAILED"),
+                )
             repository = repository or CandidateRepository(get_db_connection)
             if not hasattr(repository, "import_candidate"):
                 raise RegionPlanV2Error("IMPORT_REPOSITORY_UNAVAILABLE", HTTPStatus.SERVICE_UNAVAILABLE)
@@ -350,14 +457,22 @@ def handle(operation: str, payload: dict, *, config_path=COMMON_CONFIG_PATH, rep
             return HTTPStatus.ACCEPTED, _envelope("accepted", dict(result))
         if operation == "cities":
             with get_db_connection(config_path) as conn, conn.cursor() as cur:
-                # Area Plan is the sole Region Plan registry authority.  Do
-                # not expose legacy common_region_master, routing-config, or
-                # technician-only city names as selectable Region Plan cities.
-                # A plan's source city remains selectable so the Area Map
-                # workbook can be reviewed against the original roster city.
+                # Existing Area Map Plans remain the display authority, but a
+                # source roster is also a valid *new Plan* entry point.  This
+                # lets an operator delete every old Plan and still upload the
+                # first fresh Area Map Plan for that city.  Legacy region
+                # master and routing-config values are deliberately excluded.
                 cur.execute(
                     """
-                    with plan_registry as (
+                    with source_rosters as (
+                        select t.subsidiary_name,
+                               t.strategic_city_name as source_city,
+                               count(*)::integer as technician_count
+                          from common_technician_master t
+                         where t.active_flag
+                         group by t.subsidiary_name, t.strategic_city_name
+                    ),
+                    plan_registry as (
                         select p.subsidiary_name,
                                coalesce(c.source_strategic_city_name,
                                         p.strategic_city_name) as source_city,
@@ -376,47 +491,121 @@ def handle(operation: str, payload: dict, *, config_path=COMMON_CONFIG_PATH, rep
                                   coalesce(c.source_strategic_city_name, p.strategic_city_name),
                                   p.strategic_city_name, p.plan_id
                     ),
-                    cities as (
+                    plan_cities as (
                         select subsidiary_name, source_city,
-                               max(region_count)::integer as region_count
+                               max(region_count)::integer as region_count,
+                               array_agg(distinct plan_city order by plan_city) as target_city_ids
                           from plan_registry
                          group by subsidiary_name, source_city
                     )
-                    select c.subsidiary_name, c.source_city,
-                           c.region_count,
-                           coalesce((select count(*) from common_technician_master t
-                                     where t.subsidiary_name=c.subsidiary_name
-                                       and t.strategic_city_name=c.source_city
-                                       and t.active_flag), 0) as technician_count,
-                           array['area_plan'] as registry_sources
-                      from cities c
+                    select r.subsidiary_name, r.source_city,
+                           coalesce(p.region_count, 0)::integer as region_count,
+                           r.technician_count,
+                           case when p.subsidiary_name is null
+                                then array['source_roster']
+                                else array['area_plan'] end as registry_sources,
+                           coalesce(p.target_city_ids, array[]::text[]) as target_city_ids
+                      from source_rosters r
+                      left join plan_cities p
+                        on p.subsidiary_name=r.subsidiary_name
+                       and p.source_city=r.source_city
                      order by 1, 2
                     """
                 )
                 sources = cur.fetchall()
-            cities = [
-                {"subsidiary_id": sub, "source_city_id": city,
-                 "region_count": int(region_count),
-                 "technician_count": int(technician_count),
-                 "registry_sources": list(registry_sources or []),
-                 "migration_status": "ready_for_review" if int(region_count) and int(technician_count) else "needs_review",
-                 "policies": [{"policy_version": policy, "technician_policy_mode": mode} for policy, mode in POLICY_MODES.items()]}
-                for sub, city, region_count, technician_count, registry_sources in sources
-            ]
+            cities = []
+            for row in sources:
+                # Keep compatibility with lightweight/legacy DB adapters that
+                # still return the original five-column city projection.
+                if len(row) >= 6:
+                    sub, city, region_count, technician_count, registry_sources, target_city_ids = row[:6]
+                else:
+                    sub, city, region_count, technician_count, registry_sources = row[:5]
+                    target_city_ids = []
+                cities.append({
+                    "subsidiary_id": sub, "source_city_id": city,
+                    "region_count": int(region_count),
+                    "technician_count": int(technician_count),
+                    "registry_sources": list(registry_sources or []),
+                    "target_city_ids": [str(value) for value in (target_city_ids or [])],
+                    "migration_status": "ready_for_review" if int(region_count) and int(technician_count) else "needs_review",
+                    "policies": [{"policy_version": policy, "technician_policy_mode": mode} for policy, mode in POLICY_MODES.items()],
+                })
             return HTTPStatus.OK, _envelope("completed", {"cities": cities})
         if operation == "list":
-            city = str(payload.get("target_city_id", payload.get("strategic_city_name", ""))).strip()
+            city = str(payload.get("city_name") or payload.get("source_city_id") or payload.get("target_city_id", payload.get("strategic_city_name", ""))).strip()
             subsidiary = str(payload.get("subsidiary_id", payload.get("subsidiary_name", ""))).strip()
-            if not city or not subsidiary: raise RegionPlanV2Error("CITY_METADATA_MISSING", HTTPStatus.BAD_REQUEST)
+            if not subsidiary: raise RegionPlanV2Error("CITY_METADATA_MISSING", HTTPStatus.BAD_REQUEST)
             with get_db_connection(config_path) as conn, conn.cursor() as cur:
-                cur.execute("select plan_id,revision,policy_version,bundle_sha256,plan_status from common_region_plan where subsidiary_name=%s and strategic_city_name=%s and plan_status in ('candidate','reviewed','active','superseded') order by updated_at desc", (subsidiary, city))
+                cur.execute("select to_regclass('public.common_area_plan')")
+                catalog_installed = cur.fetchone()[0] is not None
+                if catalog_installed:
+                    sql = """select city_name,plan_id,plan_revision,checksum,plan_status,legacy_storage_city_name,plan_display_name
+                               from common_area_plan where subsidiary_name=%s"""
+                    params: tuple[Any, ...] = (subsidiary,)
+                    if city:
+                        sql += " and city_name=%s"; params += (city,)
+                    sql += " order by updated_at desc,plan_id"
+                    cur.execute(sql, params)
+                    plans = [
+                        {"city_name": row[0], "plan_id": row[1], "plan_revision": row[2], "checksum": row[3],
+                         "lifecycle": row[4], "legacy_storage_city_name": row[5], "plan_display_name": row[6],
+                         "source_city_id": row[0], "target_city_id": row[5]}
+                        for row in cur.fetchall()
+                    ]
+                    return HTTPStatus.OK, _envelope("completed", {"plans": plans})
+                if city:
+                    cur.execute("select p.strategic_city_name,p.plan_id,p.revision,p.policy_version,p.bundle_sha256,p.plan_status,coalesce(c.source_strategic_city_name,p.strategic_city_name),a.plan_id,a.activation_revision from common_region_plan p left join common_city_context c using(subsidiary_name,strategic_city_name) left join common_region_plan_activation a on a.subsidiary_name=p.subsidiary_name and a.strategic_city_name=p.strategic_city_name and a.active_flag where p.subsidiary_name=%s and p.strategic_city_name=%s order by p.updated_at desc", (subsidiary, city))
+                else:
+                    cur.execute("select p.strategic_city_name,p.plan_id,p.revision,p.policy_version,p.bundle_sha256,p.plan_status,coalesce(c.source_strategic_city_name,p.strategic_city_name),a.plan_id,a.activation_revision from common_region_plan p left join common_city_context c using(subsidiary_name,strategic_city_name) left join common_region_plan_activation a on a.subsidiary_name=p.subsidiary_name and a.strategic_city_name=p.strategic_city_name and a.active_flag where p.subsidiary_name=%s order by p.updated_at desc", (subsidiary,))
                 rows = cur.fetchall()
-            return HTTPStatus.OK, _envelope("completed", {"plans": [dict(zip(("plan_id","plan_revision","policy_version","checksum","lifecycle"), row)) for row in rows]})
+            plans = []
+            for row in rows:
+                if len(row) >= 9:
+                    target, plan_id, revision, policy, checksum, lifecycle, source, active_plan_id, activation_revision = row[:9]
+                elif len(row) >= 7:
+                    target, plan_id, revision, policy, checksum, lifecycle, source = row[:7]
+                    active_plan_id, activation_revision = None, None
+                elif len(row) >= 6:
+                    target, plan_id, revision, policy, checksum, lifecycle = row[:6]
+                    source = target
+                    active_plan_id, activation_revision = None, None
+                else:
+                    target = city
+                    plan_id, revision, policy, checksum, lifecycle = row[:5]
+                    source = target
+                plans.append({
+                    "target_city_id": target,
+                    "source_city_id": source,
+                    "plan_id": plan_id,
+                    "plan_revision": revision,
+                    "policy_version": policy,
+                    "checksum": checksum,
+                    "lifecycle": lifecycle,
+                    "active_plan_id": active_plan_id,
+                    "activation_revision": activation_revision,
+                    "is_current_active": bool(active_plan_id and str(active_plan_id) == str(plan_id)),
+                })
+            if str(payload.get("include_regions", "")).strip().lower() in {"1", "true", "yes"}:
+                with get_db_connection(config_path) as conn, conn.cursor() as cur:
+                    for plan in plans:
+                        cur.execute(
+                            "select region_seq,region_id,region_name,area_type,required_center_type from common_region_plan_region where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s order by region_seq",
+                            (subsidiary, plan["target_city_id"], plan["plan_id"]),
+                        )
+                        plan["regions"] = [
+                            dict(zip(("region_seq", "region_id", "region_name", "area_type", "required_center_type"), region))
+                            for region in cur.fetchall()
+                        ]
+            return HTTPStatus.OK, _envelope("completed", {"plans": plans})
         if operation in {"adopt", "get"}:
             item = _adopt(payload, config_path=config_path)
             if operation == "adopt":
                 item=_bind_adoption(item,config_path=config_path,principal=str(payload["principal"]))
                 _record_adoption(item, config_path=config_path)
+            else:
+                with get_db_connection(config_path) as conn, conn.cursor() as cur:
+                    item.update(_plan_detail(cur, (item["subsidiary_name"], item["strategic_city_name"], item["plan_id"])))
             return HTTPStatus.OK, _envelope("completed", {"plan": item, "verified": True})
         if operation == "active":
             city = str(payload.get("target_city_id", payload.get("strategic_city_name", ""))).strip()
@@ -458,6 +647,128 @@ def handle(operation: str, payload: dict, *, config_path=COMMON_CONFIG_PATH, rep
                     )
                 conn.commit()
             return HTTPStatus.OK, _envelope("completed", {"plan_id": plan_id, "lifecycle": "retired"})
+        if operation == "delete":
+            if not str(payload.get("principal", "")).strip():
+                raise RegionPlanV2Error("AUTHENTICATION_REQUIRED", HTTPStatus.UNAUTHORIZED)
+            subsidiary = str(payload.get("subsidiary_id", payload.get("subsidiary_name", ""))).strip()
+            city = str(payload.get("target_city_id", payload.get("strategic_city_name", ""))).strip()
+            plan_id = str(payload.get("plan_id", "")).strip()
+            if not subsidiary or not city or not plan_id:
+                raise RegionPlanV2Error("PLAN_IDENTITY_MISSING", HTTPStatus.BAD_REQUEST)
+            if str(payload.get("confirmation", "")).strip() != "CONFIRM":
+                raise RegionPlanV2Error("DELETE_CONFIRMATION_REQUIRED", HTTPStatus.BAD_REQUEST)
+            with get_db_connection(config_path) as conn, conn.cursor() as cur:
+                # The public catalog is keyed by operational city while legacy
+                # plan rows can still be stored under a bridge city key. Resolve
+                # either identifier before touching the legacy plan tables.
+                requested_city = city
+                catalog_city = None
+                cur.execute("select to_regclass('public.common_area_plan')")
+                if cur.fetchone()[0] is not None:
+                    cur.execute(
+                        """
+                        select city_name, legacy_storage_city_name
+                          from common_area_plan
+                         where subsidiary_name=%s and plan_id=%s
+                           and (city_name=%s or legacy_storage_city_name=%s)
+                         for update
+                        """,
+                        (subsidiary, plan_id, requested_city, requested_city),
+                    )
+                    catalog = cur.fetchone()
+                    if catalog is not None:
+                        catalog_city = str(catalog[0])
+                        city = str(catalog[1] or catalog[0])
+                cur.execute(
+                    """
+                    select p.plan_status,
+                           exists(
+                               select 1 from common_region_plan_activation a
+                                where a.subsidiary_name=p.subsidiary_name
+                                  and a.strategic_city_name=p.strategic_city_name
+                                  and a.plan_id=p.plan_id
+                                  and a.active_flag
+                           )
+                      from common_region_plan p
+                     where p.subsidiary_name=%s and p.strategic_city_name=%s
+                       and p.plan_id=%s
+                     for update
+                    """,
+                    (subsidiary, city, plan_id),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise RegionPlanV2Error("PLAN_NOT_FOUND", HTTPStatus.NOT_FOUND)
+                active_plan = str(row[0]).lower() == "active" or bool(row[1])
+                if active_plan:
+                    # An old/migrated policy-city context can remain marked
+                    # active even though no VRP City Config selects it.  Such
+                    # a context must be removable one Plan at a time so an
+                    # Area Map Plan can replace the legacy scope.  Never
+                    # permit deletion when any City Config still pins this ID.
+                    cur.execute(
+                        """
+                        select exists(
+                            select 1 from common_routing_config_master
+                             where subsidiary_name=%s and region_plan_id=%s
+                        )
+                        """,
+                        (subsidiary, plan_id),
+                    )
+                    if bool(cur.fetchone()[0]):
+                        raise RegionPlanV2Error(
+                            "ACTIVE_PLAN_REFERENCED_BY_ROUTING_CONFIG",
+                            HTTPStatus.CONFLICT,
+                        )
+                scope = (subsidiary, city, plan_id)
+                deleted_rows = {}
+                cur.execute("delete from common_region_plan_boundary_overflow where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s", scope)
+                deleted_rows["common_region_plan_boundary_overflow"] = cur.rowcount
+                cur.execute("delete from common_region_plan_activation where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s", scope)
+                deleted_rows["common_region_plan_activation"] = cur.rowcount
+                cur.execute("delete from common_region_plan_postal where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s", scope)
+                deleted_rows["common_region_plan_postal"] = cur.rowcount
+                cur.execute("delete from common_region_plan_technician where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s", scope)
+                deleted_rows["common_region_plan_technician"] = cur.rowcount
+                cur.execute("delete from common_region_plan_region where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s", scope)
+                deleted_rows["common_region_plan_region"] = cur.rowcount
+                cur.execute("select to_regclass('public.common_routing_plan')")
+                if cur.fetchone()[0] is not None:
+                    cur.execute("delete from common_routing_plan_activation where subsidiary_name=%s and strategic_city_name=%s and routing_plan_id=%s", scope)
+                    deleted_rows["common_routing_plan_activation"] = cur.rowcount
+                    cur.execute("delete from common_routing_plan_technician where subsidiary_name=%s and strategic_city_name=%s and routing_plan_id=%s", scope)
+                    deleted_rows["common_routing_plan_technician"] = cur.rowcount
+                    cur.execute("delete from common_routing_plan where subsidiary_name=%s and strategic_city_name=%s and routing_plan_id=%s", scope)
+                    deleted_rows["common_routing_plan"] = cur.rowcount
+                cur.execute("delete from common_region_plan where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s", scope)
+                if cur.rowcount != 1:
+                    raise RegionPlanV2Error("PLAN_DELETE_CONFLICT", HTTPStatus.CONFLICT)
+                deleted_rows["common_region_plan"] = cur.rowcount
+                if catalog_city is not None:
+                    cur.execute(
+                        "delete from common_area_plan where subsidiary_name=%s and city_name=%s and plan_id=%s",
+                        (subsidiary, catalog_city, plan_id),
+                    )
+                    deleted_rows["common_area_plan"] = cur.rowcount
+                if active_plan:
+                    cur.execute(
+                        """
+                        update common_city_context
+                           set context_status='candidate', updated_at=now()
+                         where subsidiary_name=%s and strategic_city_name=%s
+                           and not exists(
+                               select 1 from common_region_plan_activation a
+                                where a.subsidiary_name=common_city_context.subsidiary_name
+                                  and a.strategic_city_name=common_city_context.strategic_city_name
+                                  and a.active_flag
+                           )
+                        """,
+                        (subsidiary, city),
+                    )
+                conn.commit()
+            return HTTPStatus.OK, _envelope(
+                "completed", {"plan_id": plan_id, "deleted": True, "deleted_rows": deleted_rows}
+            )
         if not str(payload.get("principal", "")).strip():
             raise RegionPlanV2Error("AUTHENTICATION_REQUIRED", HTTPStatus.UNAUTHORIZED)
         authoritative = None
@@ -492,9 +803,27 @@ def handle(operation: str, payload: dict, *, config_path=COMMON_CONFIG_PATH, rep
             reference = ("rollback:" + str(payload.get("rollback_reason", "")).strip()) if operation == "rollback" else str(payload.get("activation_reference", "v2-activation"))
             identity.update(preview_digest=str(payload.get("preview_token", "")), activated_by=str(payload["principal"]), activation_reference=reference[:500], idempotency_key=str(payload["idempotency_key"]))
             result = repository.activate(identity, environment=environment, dbname=dbname)
+            try:
+                with get_db_connection(config_path) as connection, connection.cursor() as cur:
+                    cur.execute("select to_regclass('public.common_area_plan')")
+                    if cur.fetchone()[0] is not None:
+                        cur.execute(
+                            """update common_area_plan set plan_status='active', plan_revision=%s, updated_at=now()
+                               where subsidiary_name=%s and legacy_storage_city_name=%s and plan_id=%s""",
+                            (identity["expected_plan_revision"], identity["subsidiary_name"], identity["strategic_city_name"], result.plan_id),
+                        )
+                    connection.commit()
+            except Exception:
+                # The catalog is additive during rollout; lifecycle activation
+                # must remain compatible with pre-catalog installations.
+                pass
             lifecycle = "rolled_back" if operation == "rollback" and result.status == "activated" else result.status
             return HTTPStatus.OK, _envelope("completed", {"plan_id": result.plan_id, "activation_revision": result.activation_revision, "lifecycle": lifecycle})
         raise RegionPlanV2Error("NOT_FOUND", HTTPStatus.NOT_FOUND)
     except RegionPlanV2Error as exc: return exc.status, _envelope("rejected", error=exc)
     except ValueError as exc: return HTTPStatus.CONFLICT, _envelope("rejected", error=RegionPlanV2Error(str(exc), HTTPStatus.CONFLICT))
-    except Exception: return HTTPStatus.SERVICE_UNAVAILABLE, _envelope("failed", error=RegionPlanV2Error("DB_RETRYABLE", HTTPStatus.SERVICE_UNAVAILABLE))
+    except Exception:
+        # Preserve the stable public error contract while retaining the full
+        # traceback in the Development service journal for diagnosis.
+        LOGGER.exception("Region Plan v2 request failed during %s", operation)
+        return HTTPStatus.SERVICE_UNAVAILABLE, _envelope("failed", error=RegionPlanV2Error("DB_RETRYABLE", HTTPStatus.SERVICE_UNAVAILABLE))

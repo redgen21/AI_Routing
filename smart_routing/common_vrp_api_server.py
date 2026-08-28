@@ -13,6 +13,7 @@ from .common_vrp_db import (
     list_region_plan_options,
     list_region_set_options,
     list_configured_region_plan_regions,
+    list_configured_region_plan_postals,
     init_schema,
     load_common_config,
     list_routing_request_dates,
@@ -281,7 +282,7 @@ def _region_plan_v2_route(path: str, payload: dict) -> tuple[str, dict] | None:
     chunks = suffix.split("/") if suffix else []
     if len(chunks) == 2 and chunks[0] == "plans" and chunks[1]:
         item = dict(payload); item.setdefault("plan_id", chunks[1]); return "get", item
-    if len(chunks) == 3 and chunks[0] == "plans" and chunks[2] in {"review", "activation-preview", "activate", "retire"}:
+    if len(chunks) == 3 and chunks[0] == "plans" and chunks[2] in {"review", "activation-preview", "activate", "retire", "delete"}:
         item = dict(payload); item.setdefault("plan_id", chunks[1]); return chunks[2], item
     if len(chunks) == 3 and chunks[0] == "cities" and chunks[2] == "active":
         item = dict(payload); item.setdefault("target_city_id", chunks[1]); return "active", item
@@ -310,7 +311,7 @@ def _region_plan_v2_headers(handler: BaseHTTPRequestHandler, payload: dict) -> d
     return normalized
 
 
-_REGION_PLAN_V2_MUTATIONS = {"imports", "adopt", "review", "activate", "rollback", "retire"}
+_REGION_PLAN_V2_MUTATIONS = {"imports", "adopt", "review", "activate", "rollback", "retire", "delete"}
 
 
 def _region_plan_v2_mutation_allowed(handler: BaseHTTPRequestHandler, operation: str) -> bool:
@@ -504,6 +505,12 @@ class CommonVRPRequestHandler(BaseHTTPRequestHandler):
                 strategic_city_name = _query_value(parsed, "strategic_city_name")
                 regions = list_configured_region_plan_regions(subsidiary_name, strategic_city_name)
                 _json_response(self, HTTPStatus.OK, {"rows": regions.to_dict("records")})
+                return
+            if parsed.path == "/api/v1/common/configured-region-plan-postals":
+                subsidiary_name = _query_value(parsed, "subsidiary_name")
+                strategic_city_name = _query_value(parsed, "strategic_city_name")
+                postals = list_configured_region_plan_postals(subsidiary_name, strategic_city_name)
+                _json_response(self, HTTPStatus.OK, {"rows": postals.to_dict("records")})
                 return
             if parsed.path == "/api/v1/common/region-set-options":
                 subsidiary_name = _query_value(parsed, "subsidiary_name")

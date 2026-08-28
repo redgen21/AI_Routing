@@ -1055,13 +1055,37 @@ def list_region_plan_options(
     strategic_city_name: str,
     config_path: Path = COMMON_CONFIG_PATH,
 ) -> pd.DataFrame:
-    """List plans for a physical city, including legacy target-city storage.
+    """List active Area Map Plans available to one operational city.
 
     Older imports used names such as ``Atlanta_6area`` as the Region Plan
     context key.  The new client treats ``Atlanta, GA`` as the physical city,
     but this compatibility query still exposes those plans when their city
     context declares Atlanta as the source city.
     """
+    try:
+        # Canonical Area Plan inventory is keyed by subsidiary + operational
+        # city + plan.  The legacy storage city is only used to join existing
+        # Region/ZIP/Technician detail tables.
+        return _fetch_df(
+            """
+            select ap.plan_id,
+                   ap.plan_revision,
+                   ap.checksum,
+                   ap.plan_status as lifecycle,
+                   ap.legacy_storage_city_name as plan_storage_city_name,
+                   ap.city_name as source_strategic_city_name,
+                   ap.legacy_storage_city_name
+              from common_area_plan ap
+             where ap.subsidiary_name = %s
+               and ap.city_name = %s
+               and ap.plan_status = 'active'
+             order by ap.updated_at desc, ap.plan_id
+            """,
+            (subsidiary_name, strategic_city_name),
+            config_path=config_path,
+        )
+    except Exception:
+        pass
     try:
         return _fetch_df(
             """
@@ -1080,7 +1104,7 @@ def list_region_plan_options(
                and rs.region_set_id = rp.region_set_id
              where rp.subsidiary_name = %s
                and (rp.strategic_city_name = %s or rp.source_strategic_city_name = %s)
-               and rp.plan_status in ('candidate','reviewed','active','superseded')
+               and rp.plan_status = 'active'
              order by case when rp.strategic_city_name = %s then 0 else 1 end,
                       rp.updated_at desc, rp.routing_plan_id
             """,
@@ -1105,7 +1129,7 @@ def list_region_plan_options(
                and c.strategic_city_name = p.strategic_city_name
              where p.subsidiary_name = %s
                and (p.strategic_city_name = %s or c.source_strategic_city_name = %s)
-               and p.plan_status in ('candidate', 'reviewed', 'active', 'superseded')
+               and p.plan_status = 'active'
              order by case when p.strategic_city_name = %s then 0 else 1 end,
                       p.updated_at desc, p.plan_id
             """,
@@ -1144,7 +1168,7 @@ def list_region_set_options(
              where rs.subsidiary_name = %s
                and (rs.source_strategic_city_name = %s
                     or rp.strategic_city_name = %s)
-               and rp.plan_status in ('candidate','reviewed','active','superseded')
+               and rp.plan_status = 'active'
              order by rs.region_set_name, rp.updated_at desc, rp.routing_plan_id
             """,
             (subsidiary_name, strategic_city_name, strategic_city_name),
@@ -1264,6 +1288,8 @@ def get_configured_region_plan_snapshot(
     )
     if reference is None:
         raise RuntimeError("CONFIGURED_REGION_PLAN_NOT_FOUND")
+    if str(reference.get("lifecycle", "")).strip().casefold() != "active":
+        raise RuntimeError("CONFIGURED_REGION_PLAN_NOT_ACTIVE")
     expected_revision = config_row.get("region_plan_revision")
     if expected_revision is not None and str(expected_revision).strip() and pd.notna(expected_revision):
         if int(expected_revision) != int(reference.get("plan_revision")):
@@ -1380,6 +1406,7 @@ def list_engineers(subsidiary_name: str, strategic_city_name: str, config_path: 
                        and c.strategic_city_name=p.strategic_city_name
                      where p.subsidiary_name=t.subsidiary_name
                        and p.plan_id=cfg.region_plan_id
+                       and p.plan_status='active'
                        and (p.strategic_city_name=t.strategic_city_name
                             or c.source_strategic_city_name=t.strategic_city_name)
                      order by case when p.strategic_city_name=t.strategic_city_name then 0 else 1 end,
@@ -1623,6 +1650,47 @@ def list_configured_region_plan_regions(
            where subsidiary_name=%s and strategic_city_name=%s and plan_id=%s
            order by region_seq""",
         (subsidiary_name, _clean_text(reference.get("plan_storage_city_name")) or strategic_city_name, plan_id),
+        config_path=config_path,
+    )
+
+
+def list_configured_region_plan_postals(
+    subsidiary_name: str,
+    strategic_city_name: str,
+    config_path: Path = COMMON_CONFIG_PATH,
+) -> pd.DataFrame:
+    """Return ZIP-to-Region coverage for the configured or active Area Plan."""
+    config_row = get_routing_config(subsidiary_name, strategic_city_name, config_path=config_path) or {}
+    plan_id = _clean_text(config_row.get("region_plan_id"))
+    storage_city = strategic_city_name
+    if plan_id:
+        reference = _region_plan_storage_reference(subsidiary_name, strategic_city_name, plan_id, config_path=config_path)
+        if reference is not None:
+            storage_city = _clean_text(reference.get("plan_storage_city_name")) or strategic_city_name
+        else:
+            plan_id = ""
+    if not plan_id:
+        # The routing runtime itself falls back to the active plan when City
+        # Config has not yet been saved.  The result map must use the same
+        # fallback rather than silently rendering an empty Area layer.
+        try:
+            active = get_active_region_plan_snapshot(
+                subsidiary_name, strategic_city_name, config_path=config_path,
+            )
+        except RuntimeError:
+            active = {}
+        plan_id = _clean_text(active.get("plan_id"))
+    if not plan_id:
+        return pd.DataFrame(columns=["postal_code", "region_seq", "region_name", "area_type"])
+    return _fetch_df(
+        """select p.postal_code, p.region_seq, r.region_name, p.area_type
+             from common_region_plan_postal p
+             join common_region_plan_region r
+               on (r.subsidiary_name, r.strategic_city_name, r.plan_id, r.region_seq)
+                = (p.subsidiary_name, p.strategic_city_name, p.plan_id, p.region_seq)
+            where p.subsidiary_name=%s and p.strategic_city_name=%s and p.plan_id=%s
+            order by p.postal_code, p.region_seq""",
+        (subsidiary_name, storage_city, plan_id),
         config_path=config_path,
     )
 

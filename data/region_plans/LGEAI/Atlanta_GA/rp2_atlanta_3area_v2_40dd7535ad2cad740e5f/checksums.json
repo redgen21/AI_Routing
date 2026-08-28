@@ -1,0 +1,8 @@
+{
+  "canonical.json": "40dd7535ad2cad740e5f19a9882a342f46b81a3e30e07e533dabb9e0374779e8",
+  "manifest.json": "a0424e1734ba35bf5367216bc939f246c6b77995d9afb3a3263c2c021dc91bde",
+  "normalized/area.csv": "f3da8e194f6404047a91a08bb1a2faf7b7bc8069c57ba4d392d4e04fbe0c65a6",
+  "normalized/technician.csv": "1f48e55964f23b2a72bbc880da4e0c10869183d9d939657296f45a9753d549d6",
+  "region_plan.xlsx": "5c675b352f27db32ae856824dedcc700de3baab46eb8a85c6f0b1be6f3a017c0",
+  "rejects.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

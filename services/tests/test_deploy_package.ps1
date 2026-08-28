@@ -35,6 +35,7 @@ try {
         "smart_routing\production_atlanta.py",
         "smart_routing\region_design.py",
         "smart_routing\region_sweep.py",
+        "smart_routing\routing_policy_catalog.py",
         "smart_routing\routing_compare.py",
         "smart_routing\service_preprocess.py",
         "smart_routing\us_geocode_cleaner.py",

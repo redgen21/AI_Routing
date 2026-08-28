@@ -9,6 +9,10 @@ from services.deploy import console_backend
 
 
 class RegionPlanV2ConsoleBackendTests(unittest.TestCase):
+    def setUp(self) -> None:
+        console_backend._clear_region_plan_v2_read_cache()
+        console_backend._mark_region_plan_v2_direct_request_succeeded()
+
     def test_upload_posts_one_workbook_to_v2_api(self) -> None:
         response = {"contract_version": "region-plan/v2", "status": "accepted", "data": {"plan_id": "rp2_LA_6area_abc", "workbook_sha256": "a" * 64, "lifecycle": "candidate"}}
         with mock.patch.object(console_backend, "_region_plan_v2_request", return_value=response) as request:
@@ -21,11 +25,33 @@ class RegionPlanV2ConsoleBackendTests(unittest.TestCase):
         self.assertEqual("/imports", request.call_args.args[1])
         body = json.loads(request.call_args.kwargs["body"])
         self.assertEqual(b"xlsx-bytes", base64.b64decode(body["workbook_base64"]))
-        self.assertEqual("assigned_region_boundary_spillover", body["city_metadata"]["technician_policy_mode"])
+        self.assertEqual("home_distance_only", body["city_metadata"]["policy_version"])
+        self.assertEqual("home_distance_only", body["city_metadata"]["technician_policy_mode"])
         self.assertEqual("application/json", request.call_args.kwargs["headers"]["Content-Type"])
         self.assertIn("Idempotency-Key", request.call_args.kwargs["headers"])
         self.assertNotIn("X-Authenticated-Principal", request.call_args.kwargs["headers"])
         self.assertNotIn("source_sha256", body)
+
+    def test_delete_posts_confirm_token(self) -> None:
+        response = {"contract_version": "region-plan/v2", "status": "completed", "data": {"plan_id": "rp2_LA_6area_abc", "deleted": True}}
+        with mock.patch.object(console_backend, "_region_plan_v2_request", return_value=response) as request:
+            result = console_backend.delete_region_plan_v2(
+                subsidiary_id="LGEAI", target_city_id="LA_6area",
+                plan_id="rp2_LA_6area_abc", confirmation="CONFIRM",
+            )
+        self.assertTrue(result["data"]["deleted"])
+        self.assertEqual("/plans/rp2_LA_6area_abc/delete", request.call_args.args[1])
+        body = json.loads(request.call_args.kwargs["body"])
+        self.assertEqual("CONFIRM", body["confirmation"])
+
+    def test_delete_rejects_wrong_confirmation_before_api_call(self) -> None:
+        with mock.patch.object(console_backend, "_region_plan_v2_request") as request:
+            with self.assertRaisesRegex(ValueError, "CONFIRM"):
+                console_backend.delete_region_plan_v2(
+                    subsidiary_id="LGEAI", target_city_id="LA_6area",
+                    plan_id="rp2_LA_6area_abc", confirmation="wrong",
+                )
+        request.assert_not_called()
 
     def test_la_candidate_adopt_review_preview_activate_uses_only_api_contract(self) -> None:
         calls: list[tuple[str, str, dict]] = []
@@ -62,6 +88,34 @@ class RegionPlanV2ConsoleBackendTests(unittest.TestCase):
         self.assertNotIn("bundle_sha256", activate_body)
         self.assertEqual("reviewed", reviewed["data"]["lifecycle"])
         self.assertTrue(preview["data"]["preview_token"])
+
+    def test_plan_list_response_is_reused_until_write_invalidates_it(self) -> None:
+        listed = {"status": "completed", "data": {"plans": [{"plan_id": "rp2_atlanta"}]}}
+        imported = {"status": "accepted", "data": {"plan_id": "rp2_new"}}
+        with mock.patch.object(
+            console_backend,
+            "_region_plan_v2_request",
+            side_effect=(listed, imported, listed),
+        ) as request:
+            first = console_backend.list_region_plan_v2_candidates(
+                subsidiary_id="LGEAI", city_name="Atlanta, GA"
+            )
+            second = console_backend.list_region_plan_v2_candidates(
+                subsidiary_id="LGEAI", city_name="Atlanta, GA"
+            )
+            console_backend.import_region_plan_v2_workbook(
+                workbook_name="Atlanta.xlsx",
+                workbook_bytes=b"workbook",
+                metadata={"subsidiary_id": "LGEAI", "city_name": "Atlanta, GA"},
+            )
+            third = console_backend.list_region_plan_v2_candidates(
+                subsidiary_id="LGEAI", city_name="Atlanta, GA"
+            )
+
+        self.assertEqual("miss", first["cache_status"])
+        self.assertEqual("hit", second["cache_status"])
+        self.assertEqual("miss", third["cache_status"])
+        self.assertEqual(3, request.call_count)
 
 
 if __name__ == "__main__":

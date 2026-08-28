@@ -4,6 +4,11 @@
                 "port":  8066
             },
     "routing_api_url":  "http://127.0.0.1:8066",
+    "routing_policy":  {
+                           "slot_minutes":  40,
+                           "default_technician_slot_count":  9,
+                           "heavy_job_min_service_minutes":  100
+                       },
     "database":  {
                      "host":  "localhost",
                      "port":  5432,

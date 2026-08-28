@@ -27,6 +27,9 @@ class Repo:
 
 
 class RegionPlanV2ApiTests(unittest.TestCase):
+    def test_uploaded_plan_is_immediately_selectable(self):
+        self.assertEqual("active", api._IMPORTED_PLAN_STATUS)
+
     def test_legacy_city_names_are_valid_scope_keys(self):
         api._validate_scope_identifiers({"subsidiary_id": "LGEAI", "target_city_id": "Atlanta, GA"})
 
@@ -53,9 +56,89 @@ class RegionPlanV2ApiTests(unittest.TestCase):
     def test_console_routes_and_headers(self):
         self.assertEqual("imports", _region_plan_v2_route("/api/region-plans/v2/imports", {})[0])
         self.assertEqual("list", _region_plan_v2_route("/api/region-plans/v2/plans/list", {})[0])
+        self.assertEqual("delete", _region_plan_v2_route("/api/region-plans/v2/plans/rp2_phx/delete", {})[0])
         handler = SimpleNamespace(headers={"X-Authenticated-Principal":"console-user", "Idempotency-Key":"idem-1", "If-Match":"\"7\""})
         bound = _region_plan_v2_headers(handler, {"principal":"spoofed", "plan_revision":1})
         self.assertEqual(("deployment-console","idem-1",7), (bound["principal"],bound["idempotency_key"],bound["plan_revision"]))
+
+    @patch("services.api.region_plan_v2.load_common_config", return_value={"environment": "development", "database": {"dbname": "vrp_db_dev"}})
+    def test_delete_removes_one_non_active_plan_and_children(self, _config):
+        class Cursor:
+            rowcount = 1
+            def __init__(self):
+                self.fetches = [(None,), ("candidate", False), ("common_routing_plan",)]
+                self.sql = []
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+            def execute(self, sql, *_): self.sql.append(sql)
+            def fetchone(self): return self.fetches.pop(0) if self.fetches else None
+
+        class Connection:
+            def __init__(self): self.cursor_value = Cursor(); self.committed = False
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+            def cursor(self): return self.cursor_value
+            def commit(self): self.committed = True
+
+        connection = Connection()
+        with patch.object(api, "get_db_connection", return_value=connection):
+            status, result = api.handle(
+                "delete",
+                {"principal": "operator", "subsidiary_id": "LGEAI",
+                 "target_city_id": "Phoenix_4area", "plan_id": "rp2_phx",
+                 "confirmation": "CONFIRM"},
+                config_path="injected.json",
+            )
+        self.assertEqual(200, status)
+        self.assertTrue(result["data"]["deleted"])
+        self.assertEqual(1, result["data"]["deleted_rows"]["common_region_plan"])
+        self.assertTrue(connection.committed)
+        statements = " ".join(connection.cursor_value.sql)
+        self.assertIn("delete from common_region_plan_boundary_overflow", statements)
+        self.assertIn("delete from common_region_plan_technician", statements)
+        self.assertIn("delete from common_routing_plan", statements)
+
+    @patch("services.api.region_plan_v2.load_common_config", return_value={"environment": "development", "database": {"dbname": "vrp_db_dev"}})
+    def test_delete_requires_confirm_token(self, _config):
+        status, result = api.handle(
+            "delete",
+            {"principal": "operator", "subsidiary_id": "LGEAI",
+             "target_city_id": "Phoenix_4area", "plan_id": "rp2_phx",
+             "confirmation": "wrong"},
+            config_path="injected.json",
+        )
+        self.assertEqual(400, status)
+        self.assertEqual("DELETE_CONFIRMATION_REQUIRED", result["error"]["code"])
+
+    @patch("services.api.region_plan_v2.load_common_config", return_value={"environment": "development", "database": {"dbname": "vrp_db_dev"}})
+    def test_delete_allows_unreferenced_active_legacy_plan(self, _config):
+        class Cursor:
+            rowcount = 1
+            def __init__(self):
+                # catalog absence, plan status/activation, City Config reference, legacy table
+                self.fetches = [(None,), ("active", True), (False,), ("common_routing_plan",)]
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+            def execute(self, *_): pass
+            def fetchone(self): return self.fetches.pop(0) if self.fetches else None
+
+        class Connection:
+            def __init__(self): self.cursor_value = Cursor()
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+            def cursor(self): return self.cursor_value
+            def commit(self): pass
+
+        with patch.object(api, "get_db_connection", return_value=Connection()):
+            status, result = api.handle(
+                "delete",
+                {"principal": "operator", "subsidiary_id": "LGEAI",
+                 "target_city_id": "Atlanta_3area", "plan_id": "atlanta_3area_20260723",
+                 "confirmation": "CONFIRM"},
+                config_path="injected.json",
+            )
+        self.assertEqual(200, status)
+        self.assertTrue(result["data"]["deleted"])
 
     @patch("smart_routing.common_vrp_api_server.load_common_config", return_value={"environment":"development", "database":{"dbname":"vrp_db_dev"}})
     def test_mutations_are_loopback_development_only(self, _config):

@@ -8,7 +8,6 @@ from typing import Any
 
 import pandas as pd
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
-from ortools.util import optional_boolean_pb2
 
 import smart_routing.production_assign_atlanta as base
 
@@ -56,55 +55,10 @@ VRP_RETURN_HOME_FREE_MIN = 45.0
 VRP_RETURN_HOME_SOFT_MIN = 75.0
 VRP_RETURN_HOME_PENALTY_PER_MIN = 30
 VRP_RETURN_HOME_EXTRA_PENALTY_PER_MIN = 90
-# Per-route distance KPI target (average 80 km).  Routes stay penalty-free up
-# to the soft threshold, pay a moderate cost per km between soft and strong,
-# and a much larger cost per km beyond the strong threshold.  Both costs are
-# soft and far below the job drop penalty, so assignment always wins over
-# distance shaping.  Units: objective cost per meter of route distance.
-# The strong tier is deliberately steep (25,000/km = 250 travel-minute
-# equivalents) because the piecewise-convex shape is what spreads remote work
-# across technicians with distance headroom instead of stacking one outlier
-# route; total-distance minimization alone prefers the outlier.  A 200 km
-# route costs ~3.0M — still below one slot drop step (8M), so slot
-# maximization and assignment keep priority over distance shaping.
-VRP_ROUTE_DISTANCE_SOFT_KM = 80.0
-VRP_ROUTE_DISTANCE_STRONG_KM = 90.0
-VRP_ROUTE_DISTANCE_SOFT_PENALTY_PER_M = 2
-VRP_ROUTE_DISTANCE_STRONG_PENALTY_PER_M = 25
 VRP_ROUTE_REORDER_MAX_JOBS = 8
 VRP_OPTIONAL_JOB_DROP_PENALTY = 1_000_000_000
 VRP_RESCHEDULE_JOB_DROP_PENALTY = VRP_OPTIONAL_JOB_DROP_PENALTY * 100
 VRP_FIXED_JOB_DROP_PENALTY = VRP_OPTIONAL_JOB_DROP_PENALTY * 1_000
-# Lexicographic slot component of the drop penalty.  Dropping a job always
-# costs the per-job base above, so minimizing the unassigned-job count stays
-# the first objective.  Each slot beyond the first adds this step, so among
-# solutions with the same unassigned-job count the solver keeps the larger
-# slot total.  Cost-ordering bounds:
-# - above route-shape soft costs: global span (10,000/min effective, so span
-#   differences up to 800 minutes stay below one step; normal routes are hard
-#   capped at ~600 minutes), balance/target penalties (thousands per slot),
-#   long-leg/return-home penalties, preferred-region cost (4,500/job), and
-#   the 80/90 km distance shaping (~3.0M for even a 200 km route);
-# - deliberately below the center-type policy penalties
-#   (VRP_OVERLAP_DMS2_PENALTY_COST 1e7, VRP_DMS_AREA_DMS2_FALLBACK 5e7):
-#   slot maximization must not push DMS-area work onto DMS2 technicians;
-# - worst-case day total stays below one job base, so the unassigned-job
-#   count always wins: 8,000,000 x ~125 extra slots = 1e9 (a real day has
-#   far fewer multi-slot jobs than 125).
-VRP_SLOT_DROP_PENALTY_STEP = 8_000_000
-# Unassigned diagnosis: full route simulation is limited to this many nearest
-# eligible candidates per unassigned job; the remaining candidates still get
-# the cheap slot/capability checks recorded.  The request-level budget below
-# bounds the total number of simulated insertions (each costs up to two
-# route-client/OSRM calls) so a day with many unassigned jobs cannot stack
-# hundreds of sequential network calls onto the response time.
-VRP_UNASSIGNED_DIAGNOSIS_MAX_ROUTE_CANDIDATES = 8
-VRP_UNASSIGNED_DIAGNOSIS_MAX_TOTAL_ROUTE_CHECKS = 80
-# Unassigned rescue: continue the search from the found solution while jobs
-# remain unperformed and each extra slice keeps improving.  Bounded so the
-# worst case adds MAX_ATTEMPTS x TIME_SECONDS to the request.
-VRP_UNASSIGNED_RESCUE_MAX_ATTEMPTS = 3
-VRP_UNASSIGNED_RESCUE_TIME_SECONDS = 20
 VRP_OVERLAP_DMS2_PENALTY_COST = 10_000_000
 VRP_DMS_AREA_DMS2_FALLBACK_PENALTY_COST = 50_000_000
 # 45 minutes of travel-cost equivalent. This keeps Bucket Sim Draft jobs in
@@ -120,96 +74,6 @@ OWN_REGION_WITH_APPROVED_BOUNDARY_OVERFLOW_POLICIES = frozenset({
 })
 VRP_APPROVED_BOUNDARY_OVERFLOW_PENALTY_COST = 4_500
 VRP_UNRESTRICTED_DMS2_WORK_MIN = 24 * 60
-
-
-def _job_drop_penalty(base_penalty: int, job_slot_count: object) -> int:
-    """Return the lexicographic per-job drop cost.
-
-    The base penalty is charged once per dropped job, so the solver first
-    minimizes the number of unassigned jobs.  Each slot beyond the first adds
-    VRP_SLOT_DROP_PENALTY_STEP, so among solutions that drop the same number
-    of jobs the solver prefers dropping smaller-slot jobs — assigned slots are
-    maximized as the second objective, ahead of every soft route cost.
-    """
-
-    try:
-        slot_count = max(1, int(float(job_slot_count)))
-    except (TypeError, ValueError):
-        slot_count = 1
-    return int(base_penalty) + (slot_count - 1) * int(VRP_SLOT_DROP_PENALTY_STEP)
-
-
-def _select_adaptive_objective_policy(
-    *,
-    total_slot_count: int,
-    total_capacity: int,
-    group_sizes: list[int],
-    fixed_slots_by_vehicle: dict[int, int],
-    max_jobs_by_vehicle: list[int],
-) -> dict[str, object]:
-    """Select the soft objective mode from the day's workload shape.
-
-    A large co-location group is more sensitive to load balancing than a
-    normal set of geographically independent jobs: balancing can split a
-    short, local bundle across technicians and increase both distance and
-    unassigned work.  In that case route cohesion is the primary objective.
-    The hard feasibility constraints are unaffected by this selection.
-    """
-    capacity_utilization = float(total_slot_count) / float(max(1, total_capacity))
-    valid_groups = [int(size) for size in group_sizes if int(size) >= 2]
-    co_location_job_count = sum(valid_groups)
-    co_location_ratio = float(co_location_job_count) / float(max(1, total_slot_count))
-    largest_group_size = max(valid_groups or [0])
-
-    if largest_group_size >= 8 or co_location_ratio >= VRP_ADAPTIVE_COLOCATION_RATIO_THRESHOLD:
-        mode = "co_location_first"
-        priority_enabled = False
-        target_multiplier = 0.0
-    elif capacity_utilization < VRP_ADAPTIVE_CAPACITY_LOW_THRESHOLD:
-        mode = "capacity_surplus"
-        priority_enabled = False
-        target_multiplier = VRP_ADAPTIVE_TARGET_MULTIPLIER_LOW
-    elif capacity_utilization < VRP_ADAPTIVE_CAPACITY_HIGH_THRESHOLD:
-        mode = "balanced_load"
-        priority_enabled = True
-        target_multiplier = VRP_ADAPTIVE_TARGET_MULTIPLIER_MID
-    else:
-        mode = "capacity_tight"
-        priority_enabled = True
-        target_multiplier = VRP_ADAPTIVE_TARGET_MULTIPLIER_HIGH
-
-    fixed_load_ratio_by_vehicle = {
-        int(vehicle_idx): float(fixed_slots) / float(max(1, max_jobs_by_vehicle[int(vehicle_idx)]))
-        for vehicle_idx, fixed_slots in fixed_slots_by_vehicle.items()
-        if 0 <= int(vehicle_idx) < len(max_jobs_by_vehicle)
-    }
-    if (
-        priority_enabled
-        and fixed_load_ratio_by_vehicle
-        and max(fixed_load_ratio_by_vehicle.values()) >= VRP_ADAPTIVE_FIXED_LOAD_THRESHOLD
-    ):
-        target_multiplier *= VRP_ADAPTIVE_FIXED_LOAD_MULTIPLIER
-
-    co_location_multiplier = 1.0
-    if largest_group_size >= 4:
-        co_location_multiplier *= VRP_ADAPTIVE_COLOCATION_GROUP_4_MULTIPLIER
-    if largest_group_size >= 8:
-        co_location_multiplier *= VRP_ADAPTIVE_COLOCATION_GROUP_8_MULTIPLIER
-    if co_location_ratio >= VRP_ADAPTIVE_COLOCATION_RATIO_THRESHOLD:
-        co_location_multiplier *= VRP_ADAPTIVE_COLOCATION_RATIO_MULTIPLIER
-
-    return {
-        "mode": mode,
-        "priority_load_objective_enabled": bool(priority_enabled),
-        "capacity_utilization": round(capacity_utilization, 4),
-        "co_location_ratio": round(co_location_ratio, 4),
-        "largest_co_location_group_size": int(largest_group_size),
-        "target_penalty_multiplier": round(float(target_multiplier), 4),
-        "co_location_multiplier": round(float(co_location_multiplier), 4),
-        "fixed_load_ratio_by_vehicle": {
-            str(key): round(value, 4) for key, value in fixed_load_ratio_by_vehicle.items()
-        },
-    }
 
 
 @dataclass
@@ -664,11 +528,21 @@ def _solve_vrp_day(
         else:
             max_home_to_job_min_by_vehicle.append(None)
             max_single_leg_min_by_vehicle.append(None if relax_distance_caps_for_feasibility else float(max_single_leg_min) if max_single_leg_min is not None and float(max_single_leg_min) > 0 else None)
-    total_slot_count = int(sum(job_slots))
-    priority_columns_available = any(
-        "priority_group" in col or col in {"target_jobs"}
-        for col in engineer_df.columns
+    priority_load_enabled = (
+        VRP_ENABLE_PRIORITY_LOAD_OBJECTIVE
+        and any("priority_group" in col or col in {"target_jobs"} for col in engineer_df.columns)
     )
+    total_slot_count = int(sum(job_slots))
+    target_slots_by_vehicle = _allocate_priority_targets(priority_group_by_vehicle, max_jobs_by_vehicle, total_slot_count)
+    minimum_slots_by_vehicle = (
+        _allocate_priority_minimums(priority_group_by_vehicle, max_jobs_by_vehicle, total_slot_count)
+        if priority_load_enabled
+        else [0] * vehicle_count
+    )
+    for vehicle_idx, center_type in enumerate(center_type_by_vehicle):
+        if center_type == base.DMS2_CENTER_TYPE:
+            target_slots_by_vehicle[vehicle_idx] = 0
+            minimum_slots_by_vehicle[vehicle_idx] = 0
     has_area_type_routing = any(area_type in {"DMS", "DMS_CORE", "DMS_ONLY", "OVERLAP", "OVERLAB", "DMS2", "DMS2_EXCLUSIVE", "DMS2_ONLY"} for area_type in area_types_by_job)
     fixed_job_nodes: set[int] = set()
     reschedule_like_priority_job_nodes: set[int] = set()
@@ -736,47 +610,36 @@ def _solve_vrp_day(
     total_capacity = max(1, int(sum(max_jobs_by_vehicle)))
     capacity_utilization = float(total_slot_count) / float(total_capacity)
     group_sizes = [len(items) for items in co_location_groups.values() if len(items) >= 2]
-    objective_policy = _select_adaptive_objective_policy(
-        total_slot_count=total_slot_count,
-        total_capacity=total_capacity,
-        group_sizes=group_sizes,
-        fixed_slots_by_vehicle=fixed_slots_by_vehicle,
-        max_jobs_by_vehicle=max_jobs_by_vehicle,
-    )
-    # Select the load objective from the day's workload shape.  The legacy
-    # VRP_ENABLE_PRIORITY_LOAD_OBJECTIVE constant is retained for diagnostics
-    # and backward-compatible imports, but is no longer a manual gate: the
-    # policy selector decides whether balancing is useful for this day.
-    priority_load_enabled = bool(
-        priority_columns_available
-        and objective_policy["priority_load_objective_enabled"]
-    )
-    adaptive_target_penalty_multiplier = float(objective_policy["target_penalty_multiplier"])
-    adaptive_co_location_multiplier = float(objective_policy["co_location_multiplier"])
+    co_location_job_count = sum(group_sizes)
+    co_location_ratio = float(co_location_job_count) / float(max(1, total_slot_count))
+    largest_group_size = max(group_sizes or [0])
+
+    if capacity_utilization < VRP_ADAPTIVE_CAPACITY_LOW_THRESHOLD:
+        adaptive_target_penalty_multiplier = VRP_ADAPTIVE_TARGET_MULTIPLIER_LOW
+    elif capacity_utilization < VRP_ADAPTIVE_CAPACITY_HIGH_THRESHOLD:
+        adaptive_target_penalty_multiplier = VRP_ADAPTIVE_TARGET_MULTIPLIER_MID
+    else:
+        adaptive_target_penalty_multiplier = VRP_ADAPTIVE_TARGET_MULTIPLIER_HIGH
+
     fixed_load_ratio_by_vehicle = {
-        int(key): float(value)
-        for key, value in (objective_policy["fixed_load_ratio_by_vehicle"] or {}).items()
+        int(vehicle_idx): float(fixed_slots) / float(max(1, max_jobs_by_vehicle[int(vehicle_idx)]))
+        for vehicle_idx, fixed_slots in fixed_slots_by_vehicle.items()
+        if 0 <= int(vehicle_idx) < len(max_jobs_by_vehicle)
     }
-    target_slots_by_vehicle = _allocate_priority_targets(
-        priority_group_by_vehicle, max_jobs_by_vehicle, total_slot_count
-    )
-    minimum_slots_by_vehicle = (
-        _allocate_priority_minimums(priority_group_by_vehicle, max_jobs_by_vehicle, total_slot_count)
-        if priority_load_enabled
-        else [0] * vehicle_count
-    )
-    for vehicle_idx, center_type in enumerate(center_type_by_vehicle):
-        if center_type == base.DMS2_CENTER_TYPE:
-            target_slots_by_vehicle[vehicle_idx] = 0
-            minimum_slots_by_vehicle[vehicle_idx] = 0
-    co_location_ratio = float(objective_policy["co_location_ratio"])
-    largest_group_size = int(objective_policy["largest_co_location_group_size"])
+    if fixed_load_ratio_by_vehicle and max(fixed_load_ratio_by_vehicle.values()) >= VRP_ADAPTIVE_FIXED_LOAD_THRESHOLD:
+        adaptive_target_penalty_multiplier *= VRP_ADAPTIVE_FIXED_LOAD_MULTIPLIER
+
+    adaptive_co_location_multiplier = 1.0
+    if largest_group_size >= 4:
+        adaptive_co_location_multiplier *= VRP_ADAPTIVE_COLOCATION_GROUP_4_MULTIPLIER
+    if largest_group_size >= 8:
+        adaptive_co_location_multiplier *= VRP_ADAPTIVE_COLOCATION_GROUP_8_MULTIPLIER
+    if co_location_ratio >= VRP_ADAPTIVE_COLOCATION_RATIO_THRESHOLD:
+        adaptive_co_location_multiplier *= VRP_ADAPTIVE_COLOCATION_RATIO_MULTIPLIER
     adaptive_co_location_split_penalty = int(round(
         float(VRP_CO_LOCATION_SPLIT_PENALTY) * adaptive_co_location_multiplier
     ))
     setattr(route_client, "_vrp_objective_diagnostics", {
-        "mode": objective_policy["mode"],
-        "priority_load_objective_enabled": bool(priority_load_enabled),
         "capacity_utilization": round(capacity_utilization, 4),
         "co_location_ratio": round(co_location_ratio, 4),
         "largest_co_location_group_size": int(largest_group_size),
@@ -839,6 +702,8 @@ def _solve_vrp_day(
 
     def _return_home_penalty_cost(vehicle_idx: int, from_node: int, to_node: int) -> int:
         if to_node not in end_nodes or from_node >= job_count:
+            return 0
+        if vehicle_idx in fixed_vehicle_indices:
             return 0
         return_home_min = _return_home_minutes(vehicle_idx, from_node)
         soft_over_min = max(0.0, return_home_min - VRP_RETURN_HOME_FREE_MIN)
@@ -1020,6 +885,9 @@ def _solve_vrp_day(
         if _is_unrestricted_dms2_vehicle(vehicle_idx):
             vehicle_hard_work_limits_min.append(float(VRP_UNRESTRICTED_DMS2_WORK_MIN))
             continue
+        if vehicle_idx in fixed_vehicle_indices:
+            vehicle_hard_work_limits_min.append(float(VRP_UNRESTRICTED_DMS2_WORK_MIN))
+            continue
         configured_max = float(max_minutes_by_vehicle[vehicle_idx])
         standard_hard_limit = max(
             configured_max,
@@ -1082,7 +950,7 @@ def _solve_vrp_day(
     ):
         def _make_travel_time_callback(vehicle_idx: int):
             def travel_time_callback(from_index: int, to_index: int) -> int:
-                if _is_unrestricted_dms2_vehicle(vehicle_idx):
+                if vehicle_idx in fixed_vehicle_indices or _is_unrestricted_dms2_vehicle(vehicle_idx):
                     return 0
                 from_node = manager.IndexToNode(from_index)
                 to_node = manager.IndexToNode(to_index)
@@ -1105,7 +973,7 @@ def _solve_vrp_day(
     ):
         def _make_travel_distance_callback(vehicle_idx: int):
             def travel_distance_callback(from_index: int, to_index: int) -> int:
-                if _is_unrestricted_dms2_vehicle(vehicle_idx):
+                if vehicle_idx in fixed_vehicle_indices or _is_unrestricted_dms2_vehicle(vehicle_idx):
                     return 0
                 from_node = manager.IndexToNode(from_index)
                 to_node = manager.IndexToNode(to_index)
@@ -1119,75 +987,6 @@ def _solve_vrp_day(
         ]
         travel_distance_limit = max(1, int(round(float(max_travel_km_per_sm_day) * 1000)))
         routing.AddDimensionWithVehicleTransits(travel_distance_callback_indices, 0, travel_distance_limit, True, "TravelDistance")
-
-    # Per-route distance shaping toward the 80 km average KPI (design doc
-    # section 6 / open-issues doc section 6).  Unlike the optional
-    # TravelDistance hard cap above — which is skipped for area-type routing
-    # days — these soft bounds apply on every operating day.  Two dimensions
-    # implement the piecewise cost: a moderate per-meter cost beyond the soft
-    # threshold and an additional strong cost beyond the strong threshold.
-    # Both stay far below the job drop penalty, so assignment always wins.
-    def _make_route_distance_soft_callback(vehicle_idx: int):
-        def route_distance_soft_callback(from_index: int, to_index: int) -> int:
-            # Unrestricted DMS2 vehicles are NOT exempted here on purpose.
-            # They are exempt from the hard work/travel caps, which otherwise
-            # makes them the only legal destination for remote work — the
-            # solver then stacks every far job on the DMS2 technician and
-            # builds one extreme route.  The soft distance shaping must keep
-            # pressing on those routes; being soft, it never blocks a DMS2
-            # assignment that has no alternative.
-            from_node = manager.IndexToNode(from_index)
-            to_node = manager.IndexToNode(to_index)
-            return int(round(_travel_km(from_node, to_node) * 1000))
-
-        return route_distance_soft_callback
-
-    route_distance_soft_callback_indices = [
-        routing.RegisterTransitCallback(_make_route_distance_soft_callback(vehicle_idx))
-        for vehicle_idx in range(vehicle_count)
-    ]
-    # The dimension capacity is 10,000 km — far beyond any reachable route
-    # (work time hard-caps the day) — so the capacity itself never binds,
-    # even on relax_distance_caps_for_feasibility retries.
-    routing.AddDimensionWithVehicleTransits(
-        route_distance_soft_callback_indices, 0, 10_000_000, True, "RouteDistanceSoft"
-    )
-    routing.AddDimensionWithVehicleTransits(
-        route_distance_soft_callback_indices, 0, 10_000_000, True, "RouteDistanceStrong"
-    )
-    route_distance_soft_dimension = routing.GetDimensionOrDie("RouteDistanceSoft")
-    route_distance_strong_dimension = routing.GetDimensionOrDie("RouteDistanceStrong")
-    # The configured daily travel-distance cap must hold on every operating
-    # day.  The TravelDistance dimension above is skipped for area-type
-    # routing days, which silently allowed routes past the configured cap
-    # (observed: 202 km with max_travel_km_per_sm_day=200).  Policy: a job
-    # that cannot be reached within the cap stays unassigned for the add-on
-    # pass instead of forcing an extreme route.  The relaxation retry still
-    # lifts this cap to avoid full-day failure.
-    apply_hard_route_km_cap = (
-        not relax_distance_caps_for_feasibility
-        and max_travel_km_per_sm_day is not None
-        and float(max_travel_km_per_sm_day) > 0
-    )
-    for vehicle_idx in range(vehicle_count):
-        # The hard daily km cap keeps the DMS2 exemption (its floating TV
-        # coverage may legitimately require long routes), but the soft 80/90
-        # km shaping below applies to every vehicle including DMS2 so remote
-        # work is not silently concentrated on the unrestricted technician.
-        if apply_hard_route_km_cap and not _is_unrestricted_dms2_vehicle(vehicle_idx):
-            route_distance_soft_dimension.CumulVar(routing.End(vehicle_idx)).SetMax(
-                max(1, int(round(float(max_travel_km_per_sm_day) * 1000)))
-            )
-        route_distance_soft_dimension.SetCumulVarSoftUpperBound(
-            routing.End(vehicle_idx),
-            int(round(float(VRP_ROUTE_DISTANCE_SOFT_KM) * 1000)),
-            int(VRP_ROUTE_DISTANCE_SOFT_PENALTY_PER_M),
-        )
-        route_distance_strong_dimension.SetCumulVarSoftUpperBound(
-            routing.End(vehicle_idx),
-            int(round(float(VRP_ROUTE_DISTANCE_STRONG_KM) * 1000)),
-            int(VRP_ROUTE_DISTANCE_STRONG_PENALTY_PER_M),
-        )
 
     if not relax_distance_caps_for_feasibility and max_single_leg_min is not None and float(max_single_leg_min) > 0:
         solver = routing.solver()
@@ -1384,16 +1183,10 @@ def _solve_vrp_day(
             routing.VehicleVar(node_index).SetValues([int(vehicle_idx) for vehicle_idx in allowed_vehicle_indices])
         elif is_reschedule_like_priority_job:
             routing.VehicleVar(node_index).SetValues([-1] + [int(vehicle_idx) for vehicle_idx in allowed_vehicle_indices])
-            routing.AddDisjunction(
-                [manager.NodeToIndex(job_idx)],
-                _job_drop_penalty(VRP_RESCHEDULE_JOB_DROP_PENALTY, job_slots[job_idx]),
-            )
+            routing.AddDisjunction([manager.NodeToIndex(job_idx)], VRP_RESCHEDULE_JOB_DROP_PENALTY)
         else:
             routing.VehicleVar(node_index).SetValues([-1] + [int(vehicle_idx) for vehicle_idx in allowed_vehicle_indices])
-            routing.AddDisjunction(
-                [manager.NodeToIndex(job_idx)],
-                _job_drop_penalty(VRP_OPTIONAL_JOB_DROP_PENALTY, job_slots[job_idx]),
-            )
+            routing.AddDisjunction([manager.NodeToIndex(job_idx)], VRP_OPTIONAL_JOB_DROP_PENALTY)
 
     required_vehicle_indices = [
         vehicle_idx
@@ -1408,71 +1201,11 @@ def _solve_vrp_day(
     search_params = pywrapcp.DefaultRoutingSearchParameters()
     search_params.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PARALLEL_CHEAPEST_INSERTION
     search_params.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
-    # Compound re-insertion operators are off by default.  They move an
-    # active node aside to make room for an unperformed node, or swap the
-    # two directly — exactly the move chain needed to bring a dropped job
-    # back when the nearby technicians are slot-full (slot fragmentation).
-    # Without them the metaheuristic must cross a worse intermediate state
-    # to rescue a dropped job and often runs out of time first.
-    search_params.local_search_operators.use_relocate_and_make_active = optional_boolean_pb2.BOOL_TRUE
-    search_params.local_search_operators.use_extended_swap_active = optional_boolean_pb2.BOOL_TRUE
     search_params.time_limit.FromSeconds(int(time_limit_seconds))
     stage_timings["solver_invocation_count"] += 1
     solver_started = time.perf_counter()
     solution = routing.SolveWithParameters(search_params)
     _record_stage("solver_search_ms", time.perf_counter() - solver_started)
-
-    def _count_unperformed_jobs(candidate_solution) -> int:
-        unperformed = 0
-        for job_idx in range(job_count):
-            index = manager.NodeToIndex(job_idx)
-            if candidate_solution.Value(routing.NextVar(index)) == index:
-                unperformed += 1
-        return unperformed
-
-    if solution is not None and _count_unperformed_jobs(solution) > 0:
-        # Every drop costs at least the 1e9 job base, which dominates all
-        # soft route costs, so a remaining unperformed job here means the
-        # metaheuristic ran out of time, not that assignment is infeasible.
-        # Continue the guided local search from the found solution with
-        # bounded extra time slices while it keeps improving.  Each slice is
-        # a warm-start continuation, not a from-scratch re-solve, and the
-        # loop stops as soon as a slice brings no improvement.
-        rescue_unperformed_before = _count_unperformed_jobs(solution)
-        rescue_params = pywrapcp.DefaultRoutingSearchParameters()
-        rescue_params.CopyFrom(search_params)
-        rescue_params.time_limit.FromSeconds(
-            max(1, min(int(VRP_UNASSIGNED_RESCUE_TIME_SECONDS), int(time_limit_seconds)))
-        )
-        rescue_attempts = 0
-        rescue_accepted_count = 0
-        while (
-            rescue_attempts < int(VRP_UNASSIGNED_RESCUE_MAX_ATTEMPTS)
-            and _count_unperformed_jobs(solution) > 0
-        ):
-            rescue_attempts += 1
-            stage_timings["solver_invocation_count"] += 1
-            rescue_started = time.perf_counter()
-            rescue_solution = routing.SolveFromAssignmentWithParameters(solution, rescue_params)
-            _record_stage("unassigned_rescue_search_ms", time.perf_counter() - rescue_started)
-            improved = rescue_solution is not None and (
-                _count_unperformed_jobs(rescue_solution) < _count_unperformed_jobs(solution)
-                or rescue_solution.ObjectiveValue() < solution.ObjectiveValue()
-            )
-            if not improved:
-                break
-            solution = rescue_solution
-            rescue_accepted_count += 1
-        objective_diagnostics = getattr(route_client, "_vrp_objective_diagnostics", None)
-        if isinstance(objective_diagnostics, dict):
-            objective_diagnostics["unassigned_rescue"] = {
-                "attempted": True,
-                "attempts": int(rescue_attempts),
-                "accepted": bool(rescue_accepted_count > 0),
-                "accepted_count": int(rescue_accepted_count),
-                "unperformed_before": int(rescue_unperformed_before),
-                "unperformed_after": int(_count_unperformed_jobs(solution)),
-            }
     if solution is None:
         if enforce_priority_minimums and any(int(value) > 0 for value in minimum_slots_by_vehicle):
             return _solve_vrp_day(
@@ -2194,23 +1927,11 @@ def _solve_vrp_day(
         result["vrp_visit_seq"] = range(1, len(result) + 1)
         return result
 
-    def _repair_route_feasibility(
-        engineer_code: str,
-        rows_df: pd.DataFrame,
-    ) -> tuple[bool, str, dict[str, object]]:
-        """Evaluate the add-on feasibility checks and report which one fails.
-
-        Returns (feasible, rejection_reason, measured_values).  The reason is
-        empty when feasible.  The measured values carry the actual route
-        numbers so unassigned diagnostics can show why a technician with free
-        slots still cannot take the job (open-issues doc section 4).
-        """
+    def _repair_route_is_feasible(engineer_code: str, rows_df: pd.DataFrame) -> bool:
         vehicle_idx = vehicle_index_by_code.get(str(engineer_code).strip())
         job_indices = _repair_job_indices(rows_df)
-        if vehicle_idx is None:
-            return False, "TECHNICIAN_NOT_IN_MODEL", {}
-        if not job_indices:
-            return True, "", {}
+        if vehicle_idx is None or not job_indices:
+            return vehicle_idx is not None
         home_to_job_limit = max_home_to_job_min_by_vehicle[vehicle_idx]
         ordered = rows_df.sort_values(["vrp_visit_seq", "GSFS_RECEIPT_NO"])
         if home_to_job_limit is not None:
@@ -2230,10 +1951,7 @@ def _solve_vrp_day(
                     ],
                 )
                 if first_leg_min > float(home_to_job_limit):
-                    return False, "HOME_TO_FIRST_EXCEEDED", {
-                        "home_to_first_min": round(float(first_leg_min), 1),
-                        "home_to_first_limit_min": round(float(home_to_job_limit), 1),
-                    }
+                    return False
         # Recalculate the complete candidate route with the actual routing
         # engine, including the return home leg.  This is intentionally done
         # after the route order has been optimized.
@@ -2254,23 +1972,12 @@ def _solve_vrp_day(
             float(vehicle_hard_work_limits_min[vehicle_idx]),
             float(VRP_ABSOLUTE_WORK_MIN),
         )
-        measured = {
-            "candidate_travel_km": round(float(travel_km), 1),
-            "candidate_travel_min": round(float(travel_min), 1),
-            "candidate_service_min": round(float(service_min), 1),
-            "candidate_total_work_min": round(float(travel_min + service_min), 1),
-            "work_limit_min": round(float(repair_hard_limit), 1),
-        }
         if travel_min + service_min > repair_hard_limit + 1e-6:
-            return False, "WORK_LIMIT_EXCEEDED", measured
+            return False
         # The primary route's daily travel and single-leg caps are not reused
         # for this pass.  The add-on policy is: preserve eligibility, home
         # reachability, slots, and the actual 600-minute total-work hard limit.
-        return True, "", measured
-
-    def _repair_route_is_feasible(engineer_code: str, rows_df: pd.DataFrame) -> bool:
-        feasible, _, _ = _repair_route_feasibility(engineer_code, rows_df)
-        return feasible
+        return True
 
     def _repair_adjust_row(row: pd.Series, engineer_code: str) -> pd.Series:
         adjusted = row.copy()
@@ -2321,157 +2028,27 @@ def _solve_vrp_day(
         return _repair_route_cost(engineer_code, ordered), ordered
 
     repair_started = time.perf_counter()
-    remaining_repair_rows = repair_rows.sort_values("GSFS_RECEIPT_NO").copy()
-    while not remaining_repair_rows.empty:
-        # Build a cheap proximity shortlist for every remaining job/technician
-        # pair.  This avoids running a full route reorder for every possible
-        # insertion.  The final selected pair is still checked with the actual
-        # route and the 600-minute hard limit below.
-        proximity_options: list[tuple[float, float, str, str, pd.Series]] = []
-        for _, original_row in remaining_repair_rows.iterrows():
-            receipt = str(original_row.get("GSFS_RECEIPT_NO", "")).strip()
-            matching = job_df.index[
-                job_df["GSFS_RECEIPT_NO"].astype(str).str.strip() == receipt
-            ].tolist()
-            if not matching:
-                continue
-            repair_row = original_row.copy()
-            repair_row["_vrp_job_idx"] = int(matching[0])
-            candidate_df = base._candidate_engineers(repair_row, engineer_df)
-            candidate_codes = set(candidate_df["SVC_ENGINEER_CODE"].astype(str).str.strip())
-            slots = _repair_slots(repair_row)
-            job_idx = int(repair_row["_vrp_job_idx"])
-            for code in vehicle_codes:
-                code = str(code).strip()
-                if code not in candidate_codes:
-                    continue
-                vehicle_idx = vehicle_index_by_code.get(code)
-                if vehicle_idx is None:
-                    continue
-                current = assignment_df[
-                    assignment_df["assigned_sm_code"].astype(str).eq(code)
-                ].sort_values(["vrp_visit_seq", "GSFS_RECEIPT_NO"])
-                current_slots = int(
-                    pd.to_numeric(
-                        current.get("job_slot_count", pd.Series(1, index=current.index)),
-                        errors="coerce",
-                    ).fillna(1).astype(int).clip(lower=1).sum()
-                )
-                if current_slots + slots > int(max_jobs_by_vehicle[vehicle_idx]):
-                    continue
-                duration_anchors = [
-                    float(duration_mat_min[vehicle_idx][vehicle_count + job_idx])
-                ]
-                distance_anchors = [
-                    float(distance_mat_km[vehicle_idx][vehicle_count + job_idx])
-                ]
-                for _, assigned_row in current.iterrows():
-                    assigned_idx = pd.to_numeric(
-                        pd.Series([assigned_row.get("_vrp_job_idx")]), errors="coerce"
-                    ).iloc[0]
-                    if pd.isna(assigned_idx):
-                        continue
-                    assigned_idx = int(assigned_idx)
-                    duration_anchors.extend([
-                        float(duration_mat_min[vehicle_count + assigned_idx][vehicle_count + job_idx]),
-                        float(duration_mat_min[vehicle_count + job_idx][vehicle_count + assigned_idx]),
-                    ])
-                    distance_anchors.extend([
-                        float(distance_mat_km[vehicle_count + assigned_idx][vehicle_count + job_idx]),
-                        float(distance_mat_km[vehicle_count + job_idx][vehicle_count + assigned_idx]),
-                    ])
-                proximity_options.append((
-                    min(duration_anchors),
-                    min(distance_anchors),
-                    receipt,
-                    code,
-                    repair_row,
-                ))
-
-        if not proximity_options:
-            break
-        proximity_options.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
-        committed = False
-        for _, _, receipt, code, repair_row in proximity_options:
-            current = assignment_df[
-                assignment_df["assigned_sm_code"].astype(str).eq(code)
-            ].sort_values(["vrp_visit_seq", "GSFS_RECEIPT_NO"])
-            moved = _repair_adjust_row(repair_row, code)
-            candidate = pd.concat([current, pd.DataFrame([moved])], ignore_index=True)
-            optimized = _repair_reorder_candidate(code, candidate)
-            if optimized is None:
-                continue
-            _, optimized_candidate = optimized
-            moved = optimized_candidate[
-                optimized_candidate["GSFS_RECEIPT_NO"].astype(str).eq(receipt)
-            ].iloc[0].copy()
-            mask = assignment_df["assigned_sm_code"].astype(str).eq(code)
-            existing_seq = pd.to_numeric(assignment_df["vrp_visit_seq"], errors="coerce").fillna(0)
-            moved_seq = int(moved.get("vrp_visit_seq", 1))
-            shift_mask = mask & (existing_seq >= moved_seq)
-            assignment_df.loc[shift_mask, "vrp_visit_seq"] = existing_seq[shift_mask] + 1
-            assignment_df = pd.concat([assignment_df, pd.DataFrame([moved])], ignore_index=True)
-            remaining_repair_rows = remaining_repair_rows[
-                remaining_repair_rows["GSFS_RECEIPT_NO"].astype(str).str.strip().ne(receipt)
-            ].copy()
-            committed = True
-            break
-        if not committed:
-            break
-
-    _record_stage("add_on_repair_ms", time.perf_counter() - repair_started)
-
-    # ------------------------------------------------------------------
-    # Candidate-level unassigned diagnosis (open-issues doc section 4).
-    # Every job still unassigned after the add-on pass is re-evaluated
-    # against each technician's final route with the same checks the add-on
-    # pass uses, and the first violated constraint is recorded with its
-    # measured values.  This separates "no remaining slots" from
-    # "600-minute total work" and "home-to-first cap" in the result payload
-    # instead of the single opaque NO_FEASIBLE_ROUTE reason.
-    diagnosis_started = time.perf_counter()
-    unassigned_candidate_analysis: list[dict[str, object]] = []
-    assigned_receipts_after_repair = (
-        set(assignment_df["GSFS_RECEIPT_NO"].astype(str).str.strip())
-        if not assignment_df.empty
-        else set()
-    )
-    diagnosis_rows = service_day_df[
-        ~service_day_df["GSFS_RECEIPT_NO"].astype(str).str.strip().isin(assigned_receipts_after_repair)
-    ].copy()
-    total_route_checks = 0
-    for _, original_row in diagnosis_rows.iterrows():
-        receipt = str(original_row.get("GSFS_RECEIPT_NO", "")).strip()
+    for _, repair_row in repair_rows.sort_values("GSFS_RECEIPT_NO").iterrows():
+        receipt = str(repair_row.get("GSFS_RECEIPT_NO", "")).strip()
         matching = job_df.index[
             job_df["GSFS_RECEIPT_NO"].astype(str).str.strip() == receipt
         ].tolist()
         if not matching:
             continue
-        diagnosis_row = original_row.copy()
-        diagnosis_row["_vrp_job_idx"] = int(matching[0])
-        job_idx = int(matching[0])
-        slots = _repair_slots(diagnosis_row)
-        candidate_df = base._candidate_engineers(diagnosis_row, engineer_df)
-        candidate_codes = set(candidate_df["SVC_ENGINEER_CODE"].astype(str).str.strip())
-        candidate_records: list[dict[str, object]] = []
-        vehicle_order = sorted(
-            (
-                (float(duration_mat_min[vehicle_index_by_code[str(code).strip()]][vehicle_count + job_idx]), str(code).strip())
-                for code in vehicle_codes
-                if str(code).strip() in vehicle_index_by_code
-            ),
+        repair_row = repair_row.copy()
+        repair_row["_vrp_job_idx"] = int(matching[0])
+        candidate_df = base._candidate_engineers(repair_row, engineer_df)
+        candidate_codes = set(
+            candidate_df["SVC_ENGINEER_CODE"].astype(str).str.strip()
         )
-        route_checks_done = 0
-        for home_to_job_min, code in vehicle_order:
-            vehicle_idx = vehicle_index_by_code[code]
-            record: dict[str, object] = {
-                "technician_code": code,
-                "technician_name": str(engineer_df.iloc[vehicle_idx].get("Name", "")),
-                "home_to_job_min": round(float(home_to_job_min), 1),
-            }
+        slots = _repair_slots(repair_row)
+        best: tuple[float, str, pd.Series] | None = None
+        for code in vehicle_codes:
+            code = str(code).strip()
             if code not in candidate_codes:
-                record["rejection_reason"] = "CAPABILITY_OR_POLICY_MISMATCH"
-                candidate_records.append(record)
+                continue
+            vehicle_idx = vehicle_index_by_code.get(code)
+            if vehicle_idx is None:
                 continue
             current = assignment_df[
                 assignment_df["assigned_sm_code"].astype(str).eq(code)
@@ -2482,44 +2059,36 @@ def _solve_vrp_day(
                     errors="coerce",
                 ).fillna(1).astype(int).clip(lower=1).sum()
             )
-            max_slots = int(max_jobs_by_vehicle[vehicle_idx])
-            record["current_slots"] = current_slots
-            record["max_slots"] = max_slots
-            record["remaining_slots"] = max(0, max_slots - current_slots)
-            if current_slots + slots > max_slots:
-                record["rejection_reason"] = "SLOT_CAPACITY_EXCEEDED"
-                candidate_records.append(record)
+            if current_slots + slots > int(max_jobs_by_vehicle[vehicle_idx]):
                 continue
-            if (
-                route_checks_done >= int(VRP_UNASSIGNED_DIAGNOSIS_MAX_ROUTE_CANDIDATES)
-                or total_route_checks >= int(VRP_UNASSIGNED_DIAGNOSIS_MAX_TOTAL_ROUTE_CHECKS)
-            ):
-                record["rejection_reason"] = "NOT_EVALUATED_PROXIMITY_CUTOFF"
-                candidate_records.append(record)
+            moved = _repair_adjust_row(repair_row, code)
+            candidate = pd.concat(
+                [current, pd.DataFrame([moved])],
+                ignore_index=True,
+            )
+            optimized = _repair_reorder_candidate(code, candidate)
+            if optimized is None:
                 continue
-            route_checks_done += 1
-            total_route_checks += 1
-            moved = _repair_adjust_row(diagnosis_row, code)
-            candidate = pd.concat([current, pd.DataFrame([moved])], ignore_index=True)
-            ordered = _actual_reorder_group(candidate)
-            feasible, rejection_reason, measured = _repair_route_feasibility(code, ordered)
-            record.update(measured)
-            if feasible:
-                # The add-on pass should have committed a feasible insertion;
-                # seeing this reason in production indicates a repair gap.
-                record["rejection_reason"] = "INSERTION_FEASIBLE_NOT_COMMITTED"
-            else:
-                record["rejection_reason"] = rejection_reason
-            candidate_records.append(record)
-        unassigned_candidate_analysis.append(
-            {
-                "receipt_no": receipt,
-                "job_slot_count": int(slots),
-                "candidates": candidate_records,
-            }
-        )
-    setattr(route_client, "_vrp_unassigned_candidate_analysis", unassigned_candidate_analysis)
-    _record_stage("unassigned_diagnosis_ms", time.perf_counter() - diagnosis_started)
+            optimized_cost, optimized_candidate = optimized
+            score = (optimized_cost, code, optimized_candidate)
+            if best is None or score[:2] < best[:2]:
+                best = score
+        if best is None:
+            continue
+        _, code, candidate = best
+        moved = candidate[
+            candidate["GSFS_RECEIPT_NO"].astype(str).eq(receipt)
+        ].iloc[0].copy()
+        mask = assignment_df["assigned_sm_code"].astype(str).eq(code)
+        existing_seq = pd.to_numeric(
+            assignment_df["vrp_visit_seq"], errors="coerce"
+        ).fillna(0)
+        moved_seq = int(moved.get("vrp_visit_seq", 1))
+        shift_mask = mask & (existing_seq >= moved_seq)
+        assignment_df.loc[shift_mask, "vrp_visit_seq"] = existing_seq[shift_mask] + 1
+        assignment_df = pd.concat([assignment_df, pd.DataFrame([moved])], ignore_index=True)
+
+    _record_stage("add_on_repair_ms", time.perf_counter() - repair_started)
 
     # Preserve the morning Smart Routing optimizer for the primary solution.
     # Actual-route ordering is used only while evaluating a newly attached

@@ -102,13 +102,21 @@ def _sheet_rows(sheet, expected: tuple[str,...], sheet_name: str):
 
 def canonicalize_workbook(workbook_bytes: bytes, city_metadata: Mapping[str,Any]) -> dict[str,Any]:
     """Validate an uploaded .xlsx and return an immutable, JSON-safe candidate payload."""
-    required=("subsidiary_id","target_city_id","source_city_id","policy_version","technician_policy_mode")
+    city_metadata = dict(city_metadata)
+    city_name = _value(city_metadata.get("city_name") or city_metadata.get("source_city_id") or city_metadata.get("target_city_id"))
+    if city_name:
+        city_metadata["city_name"] = city_name
+        city_metadata.setdefault("source_city_id", city_name)
+        city_metadata.setdefault("target_city_id", city_name)
+    required=("subsidiary_id","target_city_id","source_city_id")
     if any(not _value(city_metadata.get(k)) for k in required): raise RegionPlanV2ValidationError("CITY_METADATA_MISSING")
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", _value(city_metadata["subsidiary_id"])) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", _value(city_metadata["target_city_id"])):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", _value(city_metadata["subsidiary_id"])) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_ .,&()/-]{0,159}", city_name):
         raise RegionPlanV2ValidationError("CITY_METADATA_INVALID")
-    selected_mode=_value(city_metadata["technician_policy_mode"])
-    if selected_mode not in POLICY_MODES or _value(city_metadata["policy_version"]) not in POLICY_VERSIONS_BY_MODE[selected_mode]:
-        raise RegionPlanV2ValidationError("CITY_METADATA_MISMATCH")
+    selected_mode=_value(city_metadata.get("technician_policy_mode"))
+    selected_policy=_value(city_metadata.get("policy_version"))
+    if selected_mode or selected_policy:
+        if selected_mode not in POLICY_MODES or selected_policy not in POLICY_VERSIONS_BY_MODE[selected_mode]:
+            raise RegionPlanV2ValidationError("CITY_METADATA_MISMATCH")
     if not workbook_bytes.startswith(b"PK") or load_workbook is None: raise RegionPlanV2ValidationError("WORKBOOK_FORMAT_INVALID")
     try: wb=load_workbook(io.BytesIO(workbook_bytes), read_only=True, data_only=True)
     except Exception as e: raise RegionPlanV2ValidationError("WORKBOOK_FORMAT_INVALID") from e
@@ -181,7 +189,10 @@ def canonicalize_workbook(workbook_bytes: bytes, city_metadata: Mapping[str,Any]
             if not x["region_code"]: raise RegionPlanV2ValidationError("TECHNICIAN_ASSIGNMENT_BLANK")
             if x["technician_id"] in assigned or x["region_code"] not in regions: raise ValueError
             assigned.add(x["technician_id"]); x["active"]=_bool(x["active"] or "true")
-            if x["policy_mode"] and x["policy_mode"] != selected_mode: raise RegionPlanV2ValidationError("CITY_METADATA_MISMATCH")
+            # The selected Plan policy is authoritative.  Area Map workbooks
+            # may have been generated under an earlier policy; technician
+            # membership is reusable and must not make a new Plan impossible
+            # to create under a different, explicitly selected policy.
             x["policy_mode"]=selected_mode
             start=date.fromisoformat(x["effective_from"]) if x["effective_from"] else None
             end=date.fromisoformat(x["effective_to"]) if x["effective_to"] else None
@@ -191,10 +202,22 @@ def canonicalize_workbook(workbook_bytes: bytes, city_metadata: Mapping[str,Any]
         except Exception: rejects.append({"sheet":"Technician","row_number":row,"error_code":"TECHNICIAN_ROW_INVALID"})
     accounting={"Area":{"physical_rows":ap,"input_rows":len(areas),"accepted_rows":len(normalized_areas),"rejected_rows":sum(r['sheet']=='Area' for r in rejects)},"Technician":{"physical_rows":tp,"input_rows":len(techs),"accepted_rows":len(normalized_techs),"rejected_rows":sum(r['sheet']=='Technician' for r in rejects)}}
     if not any(t["active"] for t in normalized_techs): plan_errors.append("NO_ACTIVE_TECHNICIAN")
-    manifest={"schema_version":SCHEMA_VERSION,"importer_version":IMPORTER_VERSION,"city_metadata":dict(city_metadata),"source_workbook_sha256":_sha(workbook_bytes),"areas":sorted(normalized_areas,key=lambda x:(x['postal_code'],x['region_code'])),"technicians":sorted(normalized_techs,key=lambda x:x['technician_id']),"row_accounting":accounting,"plan_errors":sorted(set(plan_errors))}
+    metadata = dict(city_metadata)
+    # A policy city can host several Area Plans (for example Atlanta_GA hosts
+    # Atlanta_3area and Atlanta_6area).  Keep the Area Plan name independent
+    # from target_city_id and make it part of the human-readable immutable ID.
+    # The checksum suffix still makes every changed candidate distinct.
+    display_name = _value(metadata.get("plan_display_name"))
+    plan_key = re.sub(r"[^A-Za-z0-9]+", "_", display_name).strip("_").lower()
+    if not plan_key:
+        plan_key = re.sub(r"[^A-Za-z0-9]+", "_", _value(metadata["target_city_id"])).strip("_").lower()
+    if not plan_key:
+        raise RegionPlanV2ValidationError("PLAN_DISPLAY_NAME_INVALID")
+    metadata["plan_display_name"] = display_name or _value(metadata["target_city_id"])
+    manifest={"schema_version":SCHEMA_VERSION,"importer_version":IMPORTER_VERSION,"city_metadata":metadata,"source_workbook_sha256":_sha(workbook_bytes),"areas":sorted(normalized_areas,key=lambda x:(x['postal_code'],x['region_code'])),"technicians":sorted(normalized_techs,key=lambda x:x['technician_id']),"row_accounting":accounting,"plan_errors":sorted(set(plan_errors))}
     fatal_rejects=[r for r in rejects if r["error_code"] != "TECHNICIAN_ASSIGNMENT_BLANK"]
     manifest["excluded_rows"]={"TECHNICIAN_ASSIGNMENT_BLANK":sum(r["error_code"]=="TECHNICIAN_ASSIGNMENT_BLANK" for r in rejects)}
-    canonical_bytes=json.dumps(manifest,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode(); canonical_sha=_sha(canonical_bytes); manifest["canonical_sha256"]=canonical_sha; manifest["plan_id"]=f"rp2_{city_metadata['target_city_id']}_{canonical_sha[:20]}"; manifest["status"]="rejected" if fatal_rejects or plan_errors else "candidate"
+    canonical_bytes=json.dumps(manifest,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode(); canonical_sha=_sha(canonical_bytes); manifest["canonical_sha256"]=canonical_sha; manifest["plan_id"]=f"rp2_{plan_key[:80]}_{canonical_sha[:20]}"; manifest["status"]="rejected" if fatal_rejects or plan_errors else "candidate"
     return {"manifest":manifest,"rejects":rejects,"artifacts":{"canonical.json":canonical_bytes,"rejects.jsonl":b"".join(json.dumps(r,sort_keys=True).encode()+b"\n" for r in rejects)}}
 
 def adopt_legacy_candidate(metadata: Mapping[str,Any], *, expected_area_count: int, expected_technician_count: int, expected_filenames: tuple[str,...]) -> dict[str,Any]:

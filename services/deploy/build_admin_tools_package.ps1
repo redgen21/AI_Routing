@@ -91,6 +91,7 @@ module_names = (
     "admin_tools.db.data_catalog",
     "admin_tools.db.heavy_repair",
     "admin_tools.db.runners.reset_common_vrp_data",
+    "admin_tools.db.runners.upsert_profile_capabilities",
     "admin_tools.db.seeds.build_la_bucket_vrp_inputs",
     "admin_tools.db.seeds.import_asia_technician_centroids",
 )
@@ -103,6 +104,9 @@ if technician_profile_backend.is_file():
 region_plan_schema_backend = staging / "admin_tools" / "db" / "region_plan_schema_backend.py"
 if region_plan_schema_backend.is_file():
     module_names += ("admin_tools.db.region_plan_schema_backend",)
+region_plan_v2_backend = staging / "admin_tools" / "db" / "region_plan_v2_backend.py"
+if region_plan_v2_backend.is_file():
+    module_names += ("admin_tools.db.region_plan_v2_backend",)
 modules = tuple(importlib.import_module(name) for name in module_names)
 for module in modules:
     location = Path(module.__file__).resolve()
@@ -230,10 +234,13 @@ $PackageSourcePaths = @(
     "admin_tools/db/migrations/V002__region_plan_unbounded_region_seq.sql",
     "admin_tools/db/migrations/V003__region_plan_technician_source_id.sql",
     "admin_tools/db/migrations/V004__region_plan_area_type_region_soft.sql",
+    "admin_tools/db/migrations/V005__area_plan_catalog.sql",
     "admin_tools/db/region_plan_schema_backend.py",
     "admin_tools/db/region_plan_schema_v2.sql",
+    "admin_tools/db/region_plan_v2_backend.py",
     "admin_tools/db/runners/__init__.py",
     "admin_tools/db/runners/reset_common_vrp_data.py",
+    "admin_tools/db/runners/upsert_profile_capabilities.py",
     "admin_tools/db/seeds/__init__.py",
     "admin_tools/db/seeds/build_la_bucket_vrp_inputs.py",
     "admin_tools/db/seeds/import_asia_technician_centroids.py",
@@ -359,6 +366,7 @@ if ($PackageSourcePaths -contains $TechnicianProfileBackend) {
 # schema reconciler. Do not advertise its historical per-migration CLI as an
 # executable release surface.
 $Entrypoints += "admin_tools.db.region_plan_schema_backend"
+$Entrypoints += "admin_tools.db.region_plan_v2_backend"
 $Manifest = [ordered]@{
     package_name = $PackageName
     artifact_type = "db-admin-tools"
@@ -366,7 +374,7 @@ $Manifest = [ordered]@{
     source_revision = $SourceRevision
     source_dirty = [bool]$SourceDirty
     promotable = [bool](-not $SourceDirty)
-    target_root = "/home/csda/AI_Routing/admin_tools/releases/$Version"
+    target_root = "/home/csda/AI_Routing"
     contains_secrets = $false
     contains_data = $false
     entrypoints = @($Entrypoints)

@@ -7,6 +7,7 @@ import io
 import json
 from pathlib import Path
 import re
+import shutil
 from typing import Mapping
 
 import folium
@@ -34,6 +35,7 @@ from smart_routing.routing_policy_catalog import (
     routing_policy_description,
     routing_policy_label,
 )
+from smart_routing.region_candidate_planner import build_city_region_candidate, load_city_technician_roster
 from tools.data.atlanta_6area_plan import (
     Atlanta6AreaPlanError,
     parse_atlanta_6area_workbook,
@@ -67,6 +69,14 @@ DEFAULT_CITY_OSRM_URLS = {
     "Atlanta, GA": "http://20.51.244.68:5002",
 }
 REGION_PLAN_ROOT = Path("data/region_plans")
+REGION_CANDIDATE_SERVICE_FILE = Path("260310/input/Service_202606151658_final_geocoded.csv")
+REGION_CANDIDATE_PROFILE_FILE = Path("260310/production_input/Top 10_DMS_DMS2_Profile_20260317_production.xlsx")
+REGION_CANDIDATE_OUTPUT_ROOT = na_data_path("region_candidates_dir") / "home_allocation"
+REGION_SUMMARY_DISPLAY_COLUMNS = (
+    "region_seq", "AREA_NAME", "postal_count", "area_km2", "annual_service_count",
+    "avg_daily_jobs", "assigned_technician_count", "avg_daily_jobs_per_assigned_technician",
+    "assigned_technician_names",
+)
 COUNTRY_ROUTE_KEYS = {"THAILAND", "INDONESIA", "MALAYSIA"}
 ROUTE_CITY_ALIASES = {
     "North Jersey, NJ": "Northeast",
@@ -1899,17 +1909,6 @@ def _render_legacy_region_plan_builder(selected_subsidiary: str, selected_city: 
                 "정책 도시 / Plan ID 대상", value=default_target_city,
                 key="area-map-region-plan-target-city",
             ).strip()
-        policy_labels = {
-            policy: routing_policy_label(policy)
-            for policy in REGION_PLAN_POLICY_MODES
-        }
-        policy_version = st.selectbox(
-            "Region Plan 정책",
-            list(REGION_PLAN_POLICY_MODES),
-            format_func=lambda value: policy_labels.get(value, "기존/미등록 정책"),
-            key="area-map-region-plan-policy",
-        )
-        st.info(routing_policy_description(policy_version))
         penalty = st.number_input(
             "중복 우편번호 overflow penalty",
             min_value=1, value=4500, step=1,
@@ -1930,7 +1929,7 @@ def _render_legacy_region_plan_builder(selected_subsidiary: str, selected_city: 
                     subsidiary_id=subsidiary_id,
                     source_city_id=source_city_id,
                     target_city_id=target_city_id,
-                    policy_version=policy_version,
+                    plan_display_name=target_city_id,
                     overflow_penalty_minutes=int(penalty),
                 )
                 output_dir = save_area_map_region_plan(export, REGION_PLAN_ROOT)
@@ -2094,6 +2093,15 @@ def _update_candidate_display_name(candidate: Mapping[str, object], display_name
     return manifest_path
 
 
+def _delete_local_area_plan_candidate(candidate: Mapping[str, object]) -> None:
+    """Delete one managed local Area Plan candidate, never a DB Plan."""
+    plan_dir = Path(str(candidate.get("path") or "")).resolve()
+    root = REGION_PLAN_ROOT.resolve()
+    if plan_dir == root or root not in plan_dir.parents or not (plan_dir / "manifest.json").is_file():
+        raise ValueError("Area Plan candidate path is invalid")
+    shutil.rmtree(plan_dir)
+
+
 def _adapt_region_source_city(region_name: str, region_bytes: bytes, target_city_id: str) -> tuple[str, bytes]:
     """Keep source-city lineage; the builder accepts source or legacy target IDs.
 
@@ -2115,6 +2123,13 @@ def _render_area_plan_sidebar(selected_subsidiary: str, selected_city: str) -> d
         labels,
         key=f"area-plan-select::{selected_subsidiary}::{selected_city}",
     )
+    preview_selection_key = f"area-plan-preview-selection::{selected_subsidiary}::{selected_city}"
+    previous_selection = st.session_state.get(preview_selection_key)
+    if previous_selection is not None and previous_selection != selected_label:
+        # A newly selected saved plan must not remain hidden behind the last
+        # New Cluster preview for the same city.
+        st.session_state.pop("area-plan-cluster-result", None)
+    st.session_state[preview_selection_key] = selected_label
     selected = label_to_candidate.get(selected_label)
     action_cols = st.columns(2)
     if action_cols[0].button(
@@ -2141,12 +2156,525 @@ def _render_area_plan_sidebar(selected_subsidiary: str, selected_city: str) -> d
             "candidate_path": str(selected["path"]) if selected else "",
         }
         st.rerun()
+    if st.button(
+        "New Cluster",
+        disabled=selected_city in {ALL_OPTION, BLANK_CITY_OPTION, ALL_CITIES},
+        key=f"area-plan-new-cluster::{selected_subsidiary}::{selected_city}",
+        help="Create a candidate-only ZIP region and technician-home allocation plan.",
+    ):
+        st.session_state["area-plan-cluster-editor"] = {
+            "selected_city": selected_city,
+            "selected_subsidiary": selected_subsidiary,
+        }
+        st.rerun()
     if selected:
         manifest = selected.get("manifest") or {}
         reasons = ((manifest.get("quality") or {}).get("needs_review_reasons") or []) if isinstance(manifest, Mapping) else []
         if reasons:
             st.caption("검토 필요: " + ", ".join(map(str, reasons[:2])))
     return selected
+
+
+def _region_summary_display_frame(summary: pd.DataFrame) -> pd.DataFrame:
+    """Keep candidate and saved-plan summaries on one comparable, compact schema."""
+    result = summary.copy()
+    for column in REGION_SUMMARY_DISPLAY_COLUMNS:
+        if column not in result.columns:
+            result[column] = pd.NA
+    for column in ("area_km2", "avg_daily_jobs", "avg_daily_jobs_per_assigned_technician"):
+        result[column] = pd.to_numeric(result[column], errors="coerce").round(3)
+    return result.loc[:, list(REGION_SUMMARY_DISPLAY_COLUMNS)].sort_values("region_seq").reset_index(drop=True)
+
+
+def _render_candidate_cluster_editor(selected_subsidiary: str, selected_city: str) -> None:
+    """Render the candidate-only clustering workflow in the main page area."""
+    editor = st.session_state.get("area-plan-cluster-editor")
+    if not isinstance(editor, Mapping):
+        return
+    city_name = str(editor.get("selected_city") or selected_city).strip()
+    if city_name in {"", ALL_OPTION, BLANK_CITY_OPTION, ALL_CITIES}:
+        st.warning("Select one STRATEGIC_CITY_NAME before creating a cluster candidate.")
+        return
+    token = re.sub(r"[^A-Za-z0-9]+", "_", city_name).strip("_").lower() or "city"
+    st.divider()
+    heading_cols = st.columns([5, 1])
+    heading_cols[0].subheader("New Cluster")
+    if heading_cols[1].button("Close", key=f"candidate-cluster-close::{token}"):
+        st.session_state.pop("area-plan-cluster-editor", None)
+        st.rerun()
+    st.caption(
+        "Candidate only: approved Area Plans and runtime masters are not changed. "
+        "Selected technicians are assigned once using home-to-region-centroid distance."
+    )
+    if not REGION_CANDIDATE_SERVICE_FILE.is_file():
+        st.error(f"Configured North America service source is unavailable: `{REGION_CANDIDATE_SERVICE_FILE}`")
+        return
+    if not REGION_CANDIDATE_PROFILE_FILE.is_file():
+        st.error(f"Configured technician Address profile is unavailable: `{REGION_CANDIDATE_PROFILE_FILE}`")
+        return
+    try:
+        technician_roster = load_city_technician_roster(REGION_CANDIDATE_PROFILE_FILE, city_name)
+    except (OSError, ValueError, KeyError, pd.errors.ParserError) as exc:
+        st.error(f"Technician roster could not be loaded: {exc}")
+        return
+    option_cols = st.columns([1, 1, 2])
+    region_count = int(option_cols[0].number_input("Region count", min_value=1, max_value=30, value=4, step=1))
+    max_daily_jobs = int(
+        option_cols[0].number_input(
+            "Max daily jobs / technician",
+            min_value=1,
+            max_value=100,
+            value=8,
+            step=1,
+            help="Used with each region's p95 observed daily demand to calculate the required technician count. Rare peak days are retained as reviewable exceptions.",
+        )
+    )
+    algorithm = option_cols[1].selectbox(
+        "Clustering method",
+        ["center_shared_radial", "contiguous_balanced", "weighted_kmeans_staffing"],
+        format_func=lambda value: {
+            "contiguous_balanced": "Contiguous compact growth (geographic baseline)",
+            "weighted_kmeans_staffing": "Weighted K-Means seeds + contiguous growth",
+            "center_shared_radial": "Shared-centre radial balance (recommended)",
+        }[value],
+        key=f"candidate-clustering-method::{token}",
+    )
+    algorithm_descriptions = {
+        "center_shared_radial": (
+            "**Recommended for single-core, radial cities such as Atlanta.** Uses the service-demand-weighted city centre "
+            "and creates continuous radial sectors from the core to the suburbs. It balances service demand, ZIP count, "
+            "and polygon area. Avoid it as the first choice for multi-centre metros because one centre can create long wedges.\n\n"
+            "**애틀란타처럼 단일 중심지에서 방사형으로 확장된 도시에 권장합니다.** 서비스 수요 가중 중심점을 기준으로 "
+            "중심부에서 외곽까지 이어지는 방사형 권역을 만들며, 서비스량·ZIP 수·면적을 함께 균형화합니다. 여러 중심지가 "
+            "분산된 도시는 긴 부채꼴 권역이 생길 수 있으므로 우선 선택하지 않는 편이 좋습니다."
+        ),
+        "contiguous_balanced": (
+            "**Best for continuous service areas where simple connected boundaries and local travel compactness matter most.** "
+            "It grows only through touching ZIPs and favours ZIPs closest to the evolving regional centre. Service and area "
+            "targets limit overgrowth, but compactness is the priority; a dense central ZIP can still make one region larger.\n\n"
+            "**단순하고 연결된 경계와 가까운 이동거리가 중요한 연속 생활권에 적합합니다.** 인접 ZIP만 붙이고 권역 중심에서 "
+            "가까운 ZIP을 우선 선택합니다. 서비스량·면적 목표로 과성장을 억제하지만 컴팩트한 경계가 우선입니다. 고밀도 "
+            "중심 ZIP이 있으면 한 권역이 다소 커질 수 있습니다."
+        ),
+        "weighted_kmeans_staffing": (
+            "**Best for multi-centre metros such as Los Angeles.** It uses demand-weighted K-Means to identify separate "
+            "service centres, then expands each through adjacent ZIPs. Choose it when demand is split across hubs such as "
+            "downtown, the Valley, and Long Beach; region area can vary when a hub is sparse or geographically broad.\n\n"
+            "**LA처럼 여러 서비스 중심지가 분산된 다핵 도시에 적합합니다.** 수요 가중 K-Means로 분리된 서비스 중심지를 "
+            "찾고, 각 중심지에서 인접 ZIP으로 확장합니다. 도심·밸리·롱비치처럼 별도 수요 거점이 있을 때 선택합니다. "
+            "한 거점의 밀도가 낮거나 범위가 넓으면 권역 면적 편차가 생길 수 있습니다."
+        ),
+    }
+    option_cols[1].info(algorithm_descriptions[algorithm])
+    option_cols[2].caption("Technicians to include")
+    roster_editor = technician_roster[["SVC_ENGINEER_CODE", "SVC_ENGINEER_NAME", "City "]].copy()
+    roster_editor.insert(0, "Include", True)
+    selected_roster = option_cols[2].data_editor(
+        roster_editor,
+        column_config={
+            "Include": st.column_config.CheckboxColumn("Include", help="Unchecked technicians are excluded from this candidate."),
+            "SVC_ENGINEER_CODE": st.column_config.TextColumn("Technician code"),
+            "SVC_ENGINEER_NAME": st.column_config.TextColumn("Name"),
+            "City ": st.column_config.TextColumn("Home city"),
+        },
+        disabled=["SVC_ENGINEER_CODE", "SVC_ENGINEER_NAME", "City "],
+        hide_index=True,
+        width="stretch",
+        key=f"candidate-technician-roster::{token}",
+    )
+    st.caption(f"Service: `{REGION_CANDIDATE_SERVICE_FILE}`")
+    st.caption(f"Technician home profile: `{REGION_CANDIDATE_PROFILE_FILE}` / sheet `4. Address`")
+    submitted = st.button(
+        "Create cluster candidate",
+        type="primary",
+        key=f"candidate-cluster-submit::{token}",
+    )
+    if submitted:
+        try:
+            with st.spinner("Clustering ZIP demand and allocating technicians by home distance..."):
+                result = build_city_region_candidate(
+                    service_file=REGION_CANDIDATE_SERVICE_FILE,
+                    profile_file=REGION_CANDIDATE_PROFILE_FILE,
+                    city_name=city_name,
+                    region_count=region_count,
+                    algorithm=algorithm,
+                    output_root=REGION_CANDIDATE_OUTPUT_ROOT,
+                    max_daily_jobs_per_technician=max_daily_jobs,
+                    selected_technician_codes=set(
+                        selected_roster.loc[selected_roster["Include"].astype(bool), "SVC_ENGINEER_CODE"].astype(str)
+                    ),
+                )
+            st.session_state["area-plan-cluster-result"] = {
+                "city": city_name,
+                "plan_id": result.plan_id,
+                "output_dir": str(result.output_dir),
+                "region_postals": str(result.region_postals_path),
+                "technician_assignments": str(result.technician_assignments_path),
+                "region_summary": str(result.region_summary_path),
+                "evidence": str(result.evidence_path),
+                "rejects": str(result.rejects_path),
+                "manifest": str(result.manifest_path),
+            }
+            manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+            missing_coordinates = int(
+                ((manifest.get("row_accounting") or {}).get("coverage_postals_excluded_missing_coordinates") or 0)
+            )
+            st.session_state["area-plan-cluster-result"]["coverage_postals_excluded_missing_coordinates"] = missing_coordinates
+            st.success(f"Candidate plan created: `{result.output_dir}`")
+            if missing_coordinates:
+                st.warning(
+                    f"{missing_coordinates} Coverage ZIP code(s) without service/ZCTA coordinates were excluded "
+                    "from candidate clustering and map preview. See rejects.csv."
+                )
+        except (OSError, ValueError, KeyError, pd.errors.ParserError) as exc:
+            st.error(f"Candidate clustering failed: {exc}")
+    created = st.session_state.get("area-plan-cluster-result")
+    if not isinstance(created, Mapping) or str(created.get("city")) != city_name:
+        return
+    st.json(dict(created))
+    missing_coordinates = int(created.get("coverage_postals_excluded_missing_coordinates") or 0)
+    if missing_coordinates:
+        st.warning(
+            f"Map preview excludes {missing_coordinates} Coverage ZIP code(s) without usable coordinates."
+        )
+    summary_path = Path(str(created.get("region_summary") or ""))
+    technician_path = Path(str(created.get("technician_assignments") or ""))
+    if summary_path.is_file():
+        st.subheader("Candidate region summary")
+        st.dataframe(_region_summary_display_frame(pd.read_csv(summary_path, encoding="utf-8-sig")), width="stretch", hide_index=True)
+    if technician_path.is_file():
+        st.subheader("Candidate technician assignments")
+        st.dataframe(pd.read_csv(technician_path, encoding="utf-8-sig"), width="stretch", hide_index=True)
+
+    st.subheader("Create Area Plan artifact")
+    st.caption(
+        "Convert this reviewed clustering candidate into the immutable Area Plan workbook used by Admin Tools. "
+        "This step writes only a local candidate under `data/region_plans`; it does not upload, activate, or change the database."
+    )
+    default_target_city_id = re.sub(r"[^A-Za-z0-9]+", "_", city_name).strip("_") or "city"
+    artifact_cols = st.columns(2)
+    subsidiary_id = artifact_cols[0].text_input(
+        "Subsidiary ID",
+        value=selected_subsidiary if selected_subsidiary not in {ALL_OPTION, BLANK_CITY_OPTION} else "",
+        key=f"candidate-area-plan-subsidiary::{token}",
+    ).strip()
+    target_city_id = artifact_cols[1].text_input(
+        "Target city ID",
+        value=default_target_city_id,
+        key=f"candidate-area-plan-target-city::{token}",
+        help="Stable policy-city identifier used by Region Plans v2, for example Atlanta_GA.",
+    ).strip()
+    plan_display_name = st.text_input(
+        "Area Plan name",
+        value=str(created.get("plan_id") or default_target_city_id),
+        key=f"candidate-area-plan-name::{token}",
+    ).strip()
+    if st.button(
+        "Create Area Plan from candidate",
+        type="primary",
+        disabled=not subsidiary_id or not target_city_id or not plan_display_name,
+        key=f"candidate-area-plan-create::{token}",
+    ):
+        try:
+            postal_path = Path(str(created.get("region_postals") or ""))
+            if not postal_path.is_file() or not technician_path.is_file():
+                raise FileNotFoundError("Candidate ZIP or technician artifact is unavailable.")
+            export = build_area_map_region_plan(
+                postal_path.name,
+                postal_path.read_bytes(),
+                technician_path.name,
+                technician_path.read_bytes(),
+                subsidiary_id=subsidiary_id,
+                source_city_id=city_name,
+                target_city_id=target_city_id,
+                plan_display_name=plan_display_name,
+            )
+            output_dir = save_area_map_region_plan(export, REGION_PLAN_ROOT)
+            created = dict(created)
+            created["area_plan"] = {
+                "plan_id": export.manifest.get("plan_id"),
+                "output_dir": str(output_dir),
+                "workbook": str(output_dir / "region_plan.xlsx"),
+                "target_city_id": target_city_id,
+            }
+            st.session_state["area-plan-cluster-result"] = created
+            st.success(f"Area Plan candidate created: `{output_dir}`")
+        except (AreaMapRegionPlanError, OSError, ValueError, pd.errors.ParserError) as exc:
+            st.error(f"Area Plan creation failed: {exc}")
+    area_plan = created.get("area_plan")
+    if isinstance(area_plan, Mapping):
+        st.success(
+            "Area Plan is ready for Admin Tools → Region Plans v2 → Add. "
+            "Upload it, review it, activate it, then select it in VRP Client → City Routing Config."
+        )
+        st.json(dict(area_plan))
+
+
+def _build_candidate_cluster_map(candidate: Mapping[str, object]) -> tuple[folium.Map, gpd.GeoDataFrame, int]:
+    """Render a candidate ZIP assignment without promoting it to an Area Plan."""
+    postal_path = Path(str(candidate.get("region_postals") or ""))
+    summary_path = Path(str(candidate.get("region_summary") or ""))
+    evidence_path = Path(str(candidate.get("evidence") or ""))
+    if not postal_path.is_file() or not summary_path.is_file():
+        raise FileNotFoundError("Candidate cluster artifacts are unavailable.")
+    postals = pd.read_csv(postal_path, encoding="utf-8-sig", dtype={"POSTAL_CODE": str})
+    required = {"POSTAL_CODE", "AREA_NAME", "region_seq", "region_id"}
+    if not required.issubset(postals.columns):
+        raise ValueError("Candidate ZIP artifact does not match the area-map contract.")
+    postals["POSTAL_CODE"] = postals["POSTAL_CODE"].astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(5)
+    summary = pd.read_csv(summary_path, encoding="utf-8-sig")
+    required_summary = {"region_seq", "centroid_latitude", "centroid_longitude"}
+    if not required_summary.issubset(summary.columns):
+        raise ValueError("Candidate region summary lacks centroid coordinates.")
+    zip_geometry = _area_map_load_zcta_geometry(postals["POSTAL_CODE"].tolist(), config_section=AREA_MAP_CONFIG_SECTION)
+    zip_layer = zip_geometry.merge(postals, on="POSTAL_CODE", how="inner") if not zip_geometry.empty else gpd.GeoDataFrame()
+    missing_geometry = int(len(postals) - zip_layer["POSTAL_CODE"].nunique()) if not zip_layer.empty else int(len(postals))
+    if not zip_layer.empty:
+        try:
+            area_km2 = (
+                zip_layer.to_crs("EPSG:6933")
+                .assign(_area_km2=lambda frame: frame.geometry.area / 1_000_000.0)
+                .groupby("region_seq", as_index=False)["_area_km2"].sum()
+            )
+            summary = summary.merge(area_km2, on="region_seq", how="left")
+        except (ValueError, TypeError):
+            summary["_area_km2"] = pd.NA
+    else:
+        summary["_area_km2"] = pd.NA
+    center_lat = float(summary["centroid_latitude"].mean())
+    center_lon = float(summary["centroid_longitude"].mean())
+    map_obj = folium.Map(location=[center_lat, center_lon], zoom_start=10, tiles="cartodbpositron")
+    color_map = _generate_color_map(postals["AREA_NAME"].astype(str).tolist())
+    if not zip_layer.empty:
+        folium.GeoJson(
+            zip_layer,
+            name="Candidate ZIP Regions",
+            style_function=lambda feature: {
+                "fillColor": color_map.get(feature["properties"].get("AREA_NAME", ""), "#0f766e"),
+                "color": color_map.get(feature["properties"].get("AREA_NAME", ""), "#0f766e"),
+                "weight": 1.0,
+                "fillOpacity": 0.22,
+            },
+            highlight_function=lambda feature: {"color": "#111111", "weight": 2.0, "fillOpacity": 0.35},
+            tooltip=folium.GeoJsonTooltip(
+                fields=["AREA_NAME", "POSTAL_CODE", "region_id"], aliases=["Candidate Area", "ZIP", "Region ID"]
+            ),
+        ).add_to(map_obj)
+    for _, row in summary.iterrows():
+        area_name = str(row.get("AREA_NAME", f"Region {row.get('region_seq', '')}"))
+        area_value = pd.to_numeric(pd.Series([row.get("_area_km2")]), errors="coerce").iloc[0]
+        postal_count = int(row.get("postal_count", 0) or 0)
+        if pd.notna(area_value):
+            area_text = f"{float(area_value):,.1f} km² (ZIP {postal_count})"
+        else:
+            area_text = f"Area unavailable (ZIP {postal_count})"
+        technician_count = int(row.get("assigned_technician_count", 0) or 0)
+        technician_names = html.escape(str(row.get("assigned_technician_names", "") or "(none)"))
+        popup_html = (
+            f"<b>{html.escape(area_name)}</b><br>"
+            f"<b>Area</b>: {area_text}<br>"
+            f"<b>Service</b>: {int(row.get('annual_service_count', 0) or 0):,} total / "
+            f"{float(row.get('avg_daily_jobs', 0.0) or 0.0):,.2f} daily average<br>"
+            f"<b>Technicians</b>: {technician_count}<br>"
+            f"<b>Names</b>: {technician_names}"
+        )
+        folium.Marker(
+            location=[float(row["centroid_latitude"]), float(row["centroid_longitude"])],
+            icon=folium.DivIcon(
+                html=(
+                    f"<div style='background:{color_map.get(area_name, '#0f766e')};color:white;border:2px solid white;"
+                    "border-radius:12px;padding:3px 7px;font-size:11px;font-weight:700;white-space:nowrap;'>"
+                    f"{html.escape(area_name)}</div>"
+                )
+            ),
+            tooltip=f"{area_name} candidate center",
+            popup=folium.Popup(popup_html, max_width=420),
+        ).add_to(map_obj)
+    if evidence_path.is_file():
+        evidence = pd.read_csv(evidence_path, encoding="utf-8-sig")
+        if {"latitude", "longitude", "SVC_ENGINEER_CODE", "AREA_NAME"}.issubset(evidence.columns):
+            homes = folium.FeatureGroup(name="Candidate Technician Homes", show=True)
+            for _, row in evidence.dropna(subset=["latitude", "longitude"]).iterrows():
+                area_name = str(row.get("AREA_NAME", ""))
+                folium.CircleMarker(
+                    location=[float(row["latitude"]), float(row["longitude"])],
+                    radius=5,
+                    color=color_map.get(area_name, "#111827"),
+                    fill=True,
+                    fill_color=color_map.get(area_name, "#111827"),
+                    fill_opacity=0.95,
+                    tooltip=f"{row['SVC_ENGINEER_CODE']} → {area_name}",
+                ).add_to(homes)
+            homes.add_to(map_obj)
+    folium.LayerControl(collapsed=False).add_to(map_obj)
+    return map_obj, zip_layer, missing_geometry
+
+
+def _build_selected_area_plan_preview(
+    candidate: Mapping[str, object],
+    area_layer: gpd.GeoDataFrame,
+    service_df: pd.DataFrame,
+    city_name: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Create candidate-style, read-only facts for a selected Area Plan."""
+    if area_layer.empty or "AREA_NAME" not in area_layer.columns:
+        return pd.DataFrame(), pd.DataFrame()
+    areas = area_layer.copy()
+    areas["AREA_NAME"] = areas["AREA_NAME"].astype(str).str.strip()
+    areas = areas[areas["AREA_NAME"].ne("")].copy()
+    if areas.empty:
+        return pd.DataFrame(), pd.DataFrame()
+    if "region_seq" not in areas.columns:
+        areas["region_seq"] = pd.NA
+    areas["region_seq"] = pd.to_numeric(areas["region_seq"], errors="coerce")
+    missing_sequence = areas["region_seq"].isna()
+    if missing_sequence.any():
+        sequence_map = {name: index + 1 for index, name in enumerate(sorted(areas.loc[missing_sequence, "AREA_NAME"].unique()))}
+        areas.loc[missing_sequence, "region_seq"] = areas.loc[missing_sequence, "AREA_NAME"].map(sequence_map)
+    areas["region_seq"] = areas["region_seq"].astype(int)
+    if "region_id" not in areas.columns:
+        areas["region_id"] = ""
+    areas["region_id"] = areas["region_id"].astype(str).str.strip()
+
+    summary_rows: list[dict[str, object]] = []
+    working_service = service_df.copy()
+    job_column = "GSFS_RECEIPT_NO" if "GSFS_RECEIPT_NO" in working_service.columns else None
+    for (_, area_name), group in areas.groupby(["region_seq", "AREA_NAME"], sort=True):
+        geometry = group.geometry.dropna().union_all() if "geometry" in group else None
+        point = geometry.representative_point() if geometry is not None and not geometry.is_empty else None
+        try:
+            area_km2 = float(gpd.GeoSeries([geometry], crs=areas.crs).to_crs("EPSG:6933").area.iloc[0] / 1_000_000.0)
+        except (AttributeError, TypeError, ValueError):
+            area_km2 = pd.NA
+        service_group = working_service[working_service.get("AREA_NAME", pd.Series(index=working_service.index, dtype=str)).astype(str).eq(area_name)]
+        if job_column:
+            annual_service_count = int(service_group[job_column].dropna().astype(str).nunique())
+            daily = (
+                service_group.groupby("service_date_key")[job_column].agg(lambda values: values.dropna().astype(str).nunique())
+                if "service_date_key" in service_group.columns else pd.Series(dtype=float)
+            )
+        else:
+            annual_service_count = int(len(service_group))
+            daily = service_group.groupby("service_date_key").size() if "service_date_key" in service_group.columns else pd.Series(dtype=float)
+        summary_rows.append({
+            "region_seq": int(group["region_seq"].iloc[0]),
+            "region_id": str(group["region_id"].iloc[0]),
+            "AREA_NAME": area_name,
+            "postal_count": int(
+                pd.to_numeric(group["postal_count"], errors="coerce").fillna(0).sum()
+                if "postal_count" in group.columns else 0
+            ),
+            "annual_service_count": annual_service_count,
+            "avg_daily_jobs": round(float(daily.mean()) if not daily.empty else 0.0, 3),
+            "area_km2": area_km2,
+            "centroid_latitude": float(point.y) if point is not None else pd.NA,
+            "centroid_longitude": float(point.x) if point is not None else pd.NA,
+        })
+    summary = pd.DataFrame(summary_rows).sort_values("region_seq").reset_index(drop=True)
+
+    technician_path = Path(str(candidate.get("path") or "")) / "normalized" / "technician.csv"
+    if not technician_path.is_file():
+        summary["assigned_technician_count"] = 0
+        summary["assigned_technician_names"] = ""
+        summary["avg_daily_jobs_per_assigned_technician"] = pd.NA
+        return summary, pd.DataFrame()
+    try:
+        technicians = pd.read_csv(technician_path, dtype=str, keep_default_na=False)
+    except (OSError, ValueError, pd.errors.ParserError):
+        technicians = pd.DataFrame()
+    required = {"technician_id", "region_code"}
+    if technicians.empty or not required.issubset(technicians.columns):
+        summary["assigned_technician_count"] = 0
+        summary["assigned_technician_names"] = ""
+        summary["avg_daily_jobs_per_assigned_technician"] = pd.NA
+        return summary, pd.DataFrame()
+    technicians = technicians.copy()
+    if "active" in technicians.columns:
+        technicians = technicians[technicians["active"].astype(str).str.casefold().isin({"true", "1", "yes", "y"})].copy()
+    technicians["employee_code"] = technicians["technician_id"].astype(str).str.strip()
+    technicians["region_id"] = technicians["region_code"].astype(str).str.strip()
+    technicians = technicians.merge(
+        summary[["region_seq", "region_id", "AREA_NAME"]], on="region_id", how="left"
+    ).rename(columns={"AREA_NAME": "assigned_region_name", "region_seq": "assigned_region_seq"})
+    technicians["policy_mode"] = technicians["policy_mode"].astype(str) if "policy_mode" in technicians.columns else ""
+    profile = _load_profile_home_geocode_df()
+    if not profile.empty:
+        profile["SVC_ENGINEER_CODE"] = profile["SVC_ENGINEER_CODE"].astype(str).str.strip()
+        name_column = "Name" if "Name" in profile.columns else None
+        if name_column:
+            name_lookup = profile.drop_duplicates("SVC_ENGINEER_CODE").set_index("SVC_ENGINEER_CODE")[name_column].fillna("").astype(str).to_dict()
+        else:
+            name_lookup = {}
+    else:
+        name_lookup = {}
+    technicians["SVC_ENGINEER_NAME"] = technicians["employee_code"].map(name_lookup).fillna("")
+    home_lookup = get_home_location_lookup(city_name, tuple(technicians["employee_code"].tolist()))
+    technicians["longitude"] = technicians["employee_code"].map(lambda code: (home_lookup.get(code) or {}).get("coord", (pd.NA, pd.NA))[0])
+    technicians["latitude"] = technicians["employee_code"].map(lambda code: (home_lookup.get(code) or {}).get("coord", (pd.NA, pd.NA))[1])
+    technicians = technicians[[
+        "employee_code", "SVC_ENGINEER_NAME", "assigned_region_seq", "region_id", "assigned_region_name",
+        "policy_mode", "latitude", "longitude",
+    ]].sort_values(["assigned_region_seq", "employee_code"], na_position="last").reset_index(drop=True)
+    counts = technicians.groupby("assigned_region_seq")["employee_code"].nunique()
+    names = technicians.groupby("assigned_region_seq")["SVC_ENGINEER_NAME"].agg(
+        lambda values: " | ".join(sorted({str(value).strip() or "(name unavailable)" for value in values}))
+    )
+    summary["assigned_technician_count"] = summary["region_seq"].map(counts).fillna(0).astype(int)
+    summary["assigned_technician_names"] = summary["region_seq"].map(names).fillna("")
+    daily_jobs = pd.to_numeric(summary["avg_daily_jobs"], errors="coerce")
+    technician_counts = pd.to_numeric(summary["assigned_technician_count"], errors="coerce")
+    summary["avg_daily_jobs_per_assigned_technician"] = (daily_jobs / technician_counts.mask(technician_counts.eq(0))).round(3)
+    return summary, technicians
+
+
+def _build_selected_area_plan_preview_map(
+    area_layer: gpd.GeoDataFrame,
+    summary: pd.DataFrame,
+    technicians: pd.DataFrame,
+) -> folium.Map:
+    """Render the selected plan with the same region centers and home layer as a candidate."""
+    display_areas = area_layer.drop(
+        columns=[column for column in ["postal_count", "service_count"] if column in area_layer.columns]
+    ).merge(summary, on=["region_seq", "region_id", "AREA_NAME"], how="inner")
+    center_lat = float(summary["centroid_latitude"].dropna().mean()) if not summary.empty else 39.0
+    center_lon = float(summary["centroid_longitude"].dropna().mean()) if not summary.empty else -98.0
+    map_obj = folium.Map(location=[center_lat, center_lon], zoom_start=10, tiles="cartodbpositron")
+    colors = _generate_color_map(summary["AREA_NAME"].astype(str).tolist()) if not summary.empty else {}
+    if not display_areas.empty:
+        folium.GeoJson(
+            display_areas,
+            name="Area Plan Regions",
+            style_function=lambda feature: {
+                "fillColor": colors.get(feature["properties"].get("AREA_NAME", ""), "#0f766e"),
+                "color": colors.get(feature["properties"].get("AREA_NAME", ""), "#0f766e"),
+                "weight": 1.0, "fillOpacity": 0.22,
+            },
+            tooltip=folium.GeoJsonTooltip(fields=["AREA_NAME", "postal_count"], aliases=["Area", "ZIP count"]),
+        ).add_to(map_obj)
+    for _, row in summary.dropna(subset=["centroid_latitude", "centroid_longitude"]).iterrows():
+        name = str(row["AREA_NAME"])
+        popup = (
+            f"<b>{html.escape(name)}</b><br><b>ZIPs</b>: {int(row['postal_count']):,}<br>"
+            f"<b>Service</b>: {int(row['annual_service_count']):,} total / {float(row['avg_daily_jobs']):,.2f} daily average<br>"
+            f"<b>Technicians</b>: {int(row['assigned_technician_count'])}<br>"
+            f"<b>Names</b>: {html.escape(str(row['assigned_technician_names'] or '(none)'))}"
+        )
+        folium.Marker(
+            location=[float(row["centroid_latitude"]), float(row["centroid_longitude"])],
+            icon=folium.DivIcon(html=f"<div style='background:{colors.get(name, '#0f766e')};color:white;border:2px solid white;border-radius:12px;padding:3px 7px;font-size:11px;font-weight:700;white-space:nowrap;'>{html.escape(name)}</div>"),
+            popup=folium.Popup(popup, max_width=420), tooltip=f"{name} center",
+        ).add_to(map_obj)
+    homes = folium.FeatureGroup(name="Area Plan Technician Homes", show=True)
+    for _, row in technicians.dropna(subset=["latitude", "longitude"]).iterrows():
+        name = str(row.get("assigned_region_name") or "")
+        folium.CircleMarker(
+            location=[float(row["latitude"]), float(row["longitude"])], radius=5,
+            color=colors.get(name, "#111827"), fill=True, fill_color=colors.get(name, "#111827"), fill_opacity=0.95,
+            tooltip=f"{row['employee_code']} → {name}",
+        ).add_to(homes)
+    homes.add_to(map_obj)
+    folium.LayerControl(collapsed=False).add_to(map_obj)
+    return map_obj
 
 
 def _render_region_plan_editor(selected_subsidiary: str, selected_city: str) -> None:
@@ -2182,17 +2710,31 @@ def _render_region_plan_editor(selected_subsidiary: str, selected_city: str) -> 
         or manifest.get("policy_version")
         or "explicit_workbook_membership/v1"
     )
-    if policy_default not in REGION_PLAN_POLICY_MODES:
-        policy_default = "explicit_workbook_membership/v1"
     token = re.sub(r"[^A-Za-z0-9]+", "_", str(editor.get("candidate_path") or "new")).strip("_")[-80:]
 
     st.divider()
     st.subheader("Area Plan " + ("추가" if mode == "add" else "수정"))
     st.caption("저장 시 데이터가 바뀌면 새로운 checksum Plan으로 저장되고, 이름만 바꾸면 현재 Plan의 표시 이름이 갱신됩니다.")
-    close_col, _ = st.columns([1, 5])
+    close_col, delete_col, _ = st.columns([1, 1, 4])
     if close_col.button("닫기", key=f"area-plan-editor-close::{token}"):
         st.session_state.pop("area-plan-editor", None)
         st.rerun()
+    if mode == "edit" and candidate is not None:
+        with delete_col.popover("Delete"):
+            st.warning("Deletes only this local Area Map candidate. DB data is not deleted.")
+            if st.button(
+                "Confirm delete",
+                type="secondary",
+                key=f"area-plan-delete::{token}",
+            ):
+                try:
+                    _delete_local_area_plan_candidate(candidate)
+                    st.session_state.pop("area-plan-editor", None)
+                    st.session_state.pop("area-plan-editor-result", None)
+                    st.success("Local Area Plan candidate deleted.")
+                    st.rerun()
+                except (OSError, ValueError) as exc:
+                    st.error(f"Area Plan delete failed: {exc}")
 
     metadata_cols = st.columns(4)
     subsidiary_id = metadata_cols[0].text_input(
@@ -2201,20 +2743,12 @@ def _render_region_plan_editor(selected_subsidiary: str, selected_city: str) -> 
     source_city_id = metadata_cols[1].text_input(
         "source_strategic_city_name", value=source_city_default, key=f"area-plan-source-city::{token}"
     ).strip()
-    target_city_id = metadata_cols[2].text_input(
-        "정책 도시 ID", value=target_default, key=f"area-plan-target-city::{token}"
-    ).strip()
+    # Area Plans are keyed by their operational city; the historical target
+    # city ID is no longer an operator input.
+    target_city_id = source_city_id
     plan_display_name = metadata_cols[3].text_input(
         "Plan 이름", value=name_default, key=f"area-plan-name::{token}"
     ).strip()
-    policy_version = st.selectbox(
-        "Region Plan 정책",
-        list(REGION_PLAN_POLICY_MODES),
-        index=list(REGION_PLAN_POLICY_MODES).index(policy_default),
-        format_func=routing_policy_label,
-        key=f"area-plan-policy::{token}",
-    )
-    st.info(routing_policy_description(policy_version))
     existing_region = _plan_source_bytes(candidate, "region") if candidate else None
     existing_technician = _plan_source_bytes(candidate, "technician") if candidate else None
     if existing_region:
@@ -2274,16 +2808,10 @@ def _render_region_plan_editor(selected_subsidiary: str, selected_city: str) -> 
             or manifest.get("target_city_id")
             or ""
         ).strip()
-        original_policy = str(
-            metadata.get("policy_version")
-            or manifest.get("policy_version")
-            or "explicit_workbook_membership/v1"
-        ).strip()
         metadata_changed = (
             subsidiary_id != original_subsidiary
             or source_city_id != original_source_city
             or target_city_id != original_target_city
-            or policy_version != original_policy
         )
         if (
             mode == "edit"
@@ -2316,7 +2844,7 @@ def _render_region_plan_editor(selected_subsidiary: str, selected_city: str) -> 
                     subsidiary_id=subsidiary_id,
                     source_city_id=source_city_id,
                     target_city_id=target_city_id,
-                    policy_version=policy_version,
+                    plan_display_name=plan_display_name,
                     overflow_penalty_minutes=4500,
                 )
                 export.manifest["plan_display_name"] = plan_display_name
@@ -2652,19 +3180,67 @@ def main():
         st.dataframe(area_count_df, width="stretch", height=220)
 
     _render_region_plan_editor(selected_subsidiary, selected_strategic_city)
+    _render_candidate_cluster_editor(selected_subsidiary, selected_strategic_city)
 
-    map_obj, filtered_service_df, filtered_area_layer, route_groups = build_map(
-        city_name=city_name,
-        subsidiary_name=selected_subsidiary,
-        strategic_city_name=selected_strategic_city,
-        region_count=selected_region_count,
-        area_names=selected_area_names,
-        selected_area_types=selected_area_types,
-        selected_date=selected_date,
-        selected_sm=selected_sm,
-        selected_center_buckets=selected_center_buckets,
-        area_plan_candidate=selected_area_plan,
-    )
+    candidate_preview = st.session_state.get("area-plan-cluster-result")
+    selected_plan_summary = pd.DataFrame()
+    selected_plan_technicians = pd.DataFrame()
+    if isinstance(candidate_preview, Mapping) and str(candidate_preview.get("city")) == selected_strategic_city:
+        try:
+            map_obj, filtered_area_layer, missing_candidate_geometry = _build_candidate_cluster_map(candidate_preview)
+            filtered_service_df = service_df.copy()
+            route_groups = []
+            st.info("Showing the unapproved candidate cluster map. Select or create an Area Plan to return to the approved-plan map.")
+            if missing_candidate_geometry:
+                st.warning(f"Candidate ZIP geometry is unavailable for {missing_candidate_geometry} ZIP code(s).")
+        except (OSError, ValueError, pd.errors.ParserError) as exc:
+            st.error(f"Candidate cluster map could not be rendered: {exc}")
+            map_obj, filtered_service_df, filtered_area_layer, route_groups = build_map(
+                city_name=city_name,
+                subsidiary_name=selected_subsidiary,
+                strategic_city_name=selected_strategic_city,
+                region_count=selected_region_count,
+                area_names=selected_area_names,
+                selected_area_types=selected_area_types,
+                selected_date=selected_date,
+                selected_sm=selected_sm,
+                selected_center_buckets=selected_center_buckets,
+                area_plan_candidate=selected_area_plan,
+            )
+    else:
+        map_obj, filtered_service_df, filtered_area_layer, route_groups = build_map(
+            city_name=city_name,
+            subsidiary_name=selected_subsidiary,
+            strategic_city_name=selected_strategic_city,
+            region_count=selected_region_count,
+            area_names=selected_area_names,
+            selected_area_types=selected_area_types,
+            selected_date=selected_date,
+            selected_sm=selected_sm,
+            selected_center_buckets=selected_center_buckets,
+            area_plan_candidate=selected_area_plan,
+        )
+    if (
+        not (isinstance(candidate_preview, Mapping) and str(candidate_preview.get("city")) == selected_strategic_city)
+        and selected_area_plan is not None
+    ):
+        try:
+            selected_plan_summary, selected_plan_technicians = _build_selected_area_plan_preview(
+                selected_area_plan,
+                filtered_area_layer,
+                service_df,
+                selected_strategic_city,
+            )
+            if not selected_plan_summary.empty:
+                map_obj = _build_selected_area_plan_preview_map(
+                    filtered_area_layer,
+                    selected_plan_summary,
+                    selected_plan_technicians,
+                )
+                route_groups = []
+                st.info("Showing Area Plan regions, plan technician assignments, and technician homes.")
+        except (OSError, ValueError, KeyError, pd.errors.ParserError) as exc:
+            st.warning(f"Area Plan summary preview could not be rendered: {exc}")
 
     metric_cols = st.columns(4)
     area_count_value = (
@@ -2681,6 +3257,16 @@ def main():
     metric_cols[3].metric("Visible Routes", len(route_groups))
 
     st.iframe(map_obj.get_root().render(), height=880)
+
+    if selected_area_plan is not None and not selected_plan_summary.empty:
+        st.subheader("Area Plan region summary")
+        st.dataframe(_region_summary_display_frame(selected_plan_summary), width="stretch", hide_index=True)
+        st.subheader("Technician assignments")
+        if selected_plan_technicians.empty:
+            st.caption("This Area Plan has no active technician policy records.")
+        else:
+            st.dataframe(selected_plan_technicians, width="stretch", hide_index=True)
+        return
 
     candidate_col, summary_col, detail_col = st.columns([1.25, 1.0, 1.75], gap="medium")
     with candidate_col:

@@ -1,0 +1,421 @@
+﻿region_code,region_name,region_seq,postal_code,area_type,required_center_type,membership_rank,is_primary,overflow_allowed,overflow_penalty_minutes,overflow_reason
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30002,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30002,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30003,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30004,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30005,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30005,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30006,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30007,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30007,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30008,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30009,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30010,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30011,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30012,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30012,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30013,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30013,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30014,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30014,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30015,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30016,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30016,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30017,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30018,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30019,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30021,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30021,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30022,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30022,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30023,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30024,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30024,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30025,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30026,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30028,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30028,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30030,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30031,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30032,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30033,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30033,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30034,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30035,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30036,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30037,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30038,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30039,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30039,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30040,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30040,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30041,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30041,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30042,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30043,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30043,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30044,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30044,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30045,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30046,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30047,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30047,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30048,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30049,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30052,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30052,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30054,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30054,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30055,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30056,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30058,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30060,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30060,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30061,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30062,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30062,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30063,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30064,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30064,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30065,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30066,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30066,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30067,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30067,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30068,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30068,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30069,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30070,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30071,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30071,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30072,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30072,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30074,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30075,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30076,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30076,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30078,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30079,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30079,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30080,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30081,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30082,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30083,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30083,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30084,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30084,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30085,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30086,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30087,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30087,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30088,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30088,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30090,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30091,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30092,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30092,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30093,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30093,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30094,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30095,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30096,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30096,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30097,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30097,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30098,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30101,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30101,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30102,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30102,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30106,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30107,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30107,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30109,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30110,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30111,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30112,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30114,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30115,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30116,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30117,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30118,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30119,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30120,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30120,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30122,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30126,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30127,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30132,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30133,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30134,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30135,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30135,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30137,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30137,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30141,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30142,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30143,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30144,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30144,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30146,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30148,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30151,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30152,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30152,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30154,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30156,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30157,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30160,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30160,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30168,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30169,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30175,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30177,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30179,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30180,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30185,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30187,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30188,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30188,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30189,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30189,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30205,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30212,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30213,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30213,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30214,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30214,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30215,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30216,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30223,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30224,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30228,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30229,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30233,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30234,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30236,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30237,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30238,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30248,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30250,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30252,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30253,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30260,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30263,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30263,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30264,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30265,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30265,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30268,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30268,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30269,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30269,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30270,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30271,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30273,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30274,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30275,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30276,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30276,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30277,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30277,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30281,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30284,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30287,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30288,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30289,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30290,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30290,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30291,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30291,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30294,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30296,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30296,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30297,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30298,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30301,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30302,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30303,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30303,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30304,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30305,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30305,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30306,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30306,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30307,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30308,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30308,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30309,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30309,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30310,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30310,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30311,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30311,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30312,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30312,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30313,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30313,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30314,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30314,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30315,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30315,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30316,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30317,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30318,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30318,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30319,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30319,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30320,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30321,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30322,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30324,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30324,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30325,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30326,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30326,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30327,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30327,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30328,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30328,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30329,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30329,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30331,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30331,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30332,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30332,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30333,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30334,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30336,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30336,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30337,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30337,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30338,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30338,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30339,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30339,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30340,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30340,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30341,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30341,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30342,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30342,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30343,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30344,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30344,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30345,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30345,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30346,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30346,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30348,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30349,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30349,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30350,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30350,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30353,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30354,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30354,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30355,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30356,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30356,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30357,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30358,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30358,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30360,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30360,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30361,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30361,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30362,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r04,Atlanta_Zone 4,4,30363,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30363,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30364,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30366,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30368,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30369,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30370,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30371,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30374,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30375,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30377,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,30378,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30380,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30384,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30388,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30396,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30398,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30501,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30502,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30503,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30504,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30506,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30507,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30510,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30512,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30513,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,30515,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30517,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30518,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30518,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,30519,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30519,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30522,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30523,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30527,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30528,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30531,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30533,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30534,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30535,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30536,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30540,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30542,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30545,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30548,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30549,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30554,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30560,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30564,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30566,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30567,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30572,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r03,Atlanta_Zone 3,3,30597,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30601,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30602,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30603,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30604,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30605,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30606,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30607,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30608,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30609,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30612,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30619,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30620,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30621,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30622,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30623,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30628,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30638,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30641,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30645,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30650,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30655,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30656,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30663,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30666,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30677,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30680,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,30683,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r05,Atlanta_Zone 5,5,31085,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,31136,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,31141,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,31144,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,31145,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,31146,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,31150,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,31156,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r02,Atlanta_Zone 2,2,31156,DMS,DMS,2,False,True,4500,explicit duplicate postal membership from Area Map source
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,31169,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,31193,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,31195,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r01,Atlanta_Zone 1,1,31196,DMS,DMS,1,True,False,,
+atlanta_6area_overlab_r06,Atlanta_PO Box,6,39901,DMS,DMS,1,True,False,,

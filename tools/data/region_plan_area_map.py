@@ -205,15 +205,16 @@ def build_area_map_region_plan(
     subsidiary_id: str,
     source_city_id: str,
     target_city_id: str,
-    policy_version: str,
+    city_name: str = "",
+    policy_version: str = "",
+    plan_display_name: str = "",
     overflow_penalty_minutes: int = 4500,
 ) -> AreaMapRegionPlanExport:
     """Normalize Area Map source files into a common Region Plan workbook."""
     subsidiary_id = _safe_part(subsidiary_id, field="subsidiary_id", pattern=SAFE_ID)
-    source_city_id = _safe_part(source_city_id, field="source_city_id", pattern=SAFE_CITY)
-    target_city_id = _safe_part(target_city_id, field="target_city_id", pattern=SAFE_ID)
-    if policy_version not in POLICY_MODES:
-        raise AreaMapRegionPlanError("POLICY_VERSION_INVALID")
+    city_name = _safe_part(city_name or source_city_id or target_city_id, field="city_name", pattern=SAFE_CITY)
+    source_city_id = city_name
+    target_city_id = city_name
     try:
         penalty = int(overflow_penalty_minutes)
     except (TypeError, ValueError) as exc:
@@ -370,17 +371,17 @@ def build_area_map_region_plan(
     if unknown_assignment.any():
         raise AreaMapRegionPlanError("TECHNICIAN_ASSIGNMENT_UNKNOWN")
     technician_df = tech_values.assign(
-        active="true", policy_mode=POLICY_MODES[policy_version], effective_from="", effective_to=""
+        active="true", policy_mode="", effective_from="", effective_to=""
     )[["technician_id", "region_code", "active", "policy_mode", "effective_from", "effective_to"]]
 
     metadata = {
         "subsidiary_id": subsidiary_id,
+        "city_name": city_name,
         "target_city_id": target_city_id,
         "source_city_id": source_city_id,
-        "policy_version": policy_version,
-        "technician_policy_mode": POLICY_MODES[policy_version],
         "overlap_policy": "area_map_duplicate_postal_explicit_overflow",
         "activation_intent": "review_only",
+        "plan_display_name": str(plan_display_name).strip() or target_city_id,
     }
     workbook_bytes = _write_workbook(area_df, technician_df)
     result = _validate_workbook(workbook_bytes, metadata)

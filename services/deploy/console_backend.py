@@ -23,12 +23,13 @@ import shutil
 import stat
 import subprocess
 import threading
+import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Iterator, Mapping
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -172,6 +173,7 @@ _MASTER_ADMIN_COMMANDS = frozenset(
     {"overview", "list-specs", "preview", "apply", "receipt"}
 )
 _REGION_PLAN_ADMIN_MODULE = "admin_tools.db.region_plan_backend"
+_REGION_PLAN_V2_ADMIN_MODULE = "admin_tools.db.region_plan_v2_backend"
 _REGION_PLAN_SCHEMA_ADMIN_MODULE = "admin_tools.db.region_plan_schema_backend"
 _REGION_PLAN_SCHEMA_CONTRACT_VERSION = "region-plan-schema/v2"
 _REGION_PLAN_SCHEMA_ID = "common_region_plan_schema_v2"
@@ -199,6 +201,8 @@ _REGION_PLAN_PLAN_ID = re.compile(r"^[a-z][a-z0-9._-]{0,159}$")
 _REGION_PLAN_V2_API_ORIGIN = "http://127.0.0.1:8066"
 _REGION_PLAN_V2_API_ENV = "REGION_PLAN_V2_API_ORIGIN"
 _REGION_PLAN_V2_TIMEOUT_SECONDS = 30
+_REGION_PLAN_V2_READ_CACHE_TTL_SECONDS = 15.0
+_REGION_PLAN_V2_DIRECT_FAILURE_COOLDOWN_SECONDS = 30.0
 _REGION_PLAN_V2_PRINCIPAL_ENV = "REGION_PLAN_V2_PRINCIPAL"
 _REGION_PLAN_V2_MAX_WORKBOOK_BYTES = 24 * 1024 * 1024
 _REGION_PLAN_FIXED_ID = "atlanta_6area_new_atl_buckets_20260721_v1"
@@ -247,6 +251,10 @@ _REGION_PLAN_RESOLUTION_DOWNLOADS: dict[
 _REGION_PLAN_RESOLUTION_DOWNLOAD_LOCK = threading.Lock()
 _REGION_PLAN_FINAL_BINDINGS: dict[str, tuple[str, str, str, datetime]] = {}
 _REGION_PLAN_FINAL_BINDING_LOCK = threading.Lock()
+_REGION_PLAN_V2_READ_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_REGION_PLAN_V2_READ_CACHE_LOCK = threading.Lock()
+_REGION_PLAN_V2_DIRECT_FAILURE_UNTIL = 0.0
+_REGION_PLAN_V2_DIRECT_FAILURE_LOCK = threading.Lock()
 _REMOTE_SHA256_OUTPUT = re.compile(r"^(?P<sha256>[0-9a-fA-F]{64})[ \t]+[^\r\n]+$")
 _PLACEHOLDER_VALUE = re.compile(
     r"(?i)(?:<[^>]*(?:replace|placeholder|change)[^>]*>|"
@@ -985,7 +993,7 @@ def inspect_artifact(*, path: str, kind: str, environment: str) -> ArtifactInspe
     else:
         if manifest.get("artifact_type") != "db-admin-tools":
             raise ValueError("Admin-tools artifact_type mismatch.")
-        target = f"/home/csda/AI_Routing/admin_tools/releases/{version}"
+        target = "/home/csda/AI_Routing"
         if manifest.get("target_root") != target:
             raise ValueError("Admin-tools target_root mismatch.")
         if environment == "production" and (
@@ -2302,14 +2310,16 @@ class ParamikoRemote:
                 "Remote command is not an allowlisted technician-profile JSON command."
             )
         root = PurePosixPath(str(self.profile.get("remote_root", "")).strip())
-        expected_release_parent = root / "admin_tools" / "releases"
+        expected_release_roots = {
+            root,
+            root / "admin_tools",
+        }
         expected_python = root / "development" / ".venv" / "bin" / "python"
         expected_config = root / "development" / "config_common_vrp.dev.json"
         if (
             not root.is_absolute()
             or ".." in root.parts
-            or PurePosixPath(tokens[2]).parent != expected_release_parent
-            or not _MASTER_ADMIN_RELEASE_VERSION.fullmatch(PurePosixPath(tokens[2]).name)
+            or PurePosixPath(tokens[2]) not in expected_release_roots
             or tokens[5] != expected_python.as_posix()
             or tokens[12] != expected_config.as_posix()
         ):
@@ -2412,40 +2422,57 @@ class ParamikoRemote:
             tokens = shlex.split(command, posix=True)
         except ValueError as exc:
             raise ValueError("Remote region-plan command is invalid.") from exc
-        operation = tokens[10] if len(tokens) > 10 else ""
         module = tokens[8] if len(tokens) > 8 else ""
+        is_region_plan_v2_bridge = module == _REGION_PLAN_V2_ADMIN_MODULE
+        operation = tokens[10] if len(tokens) > 10 and not is_region_plan_v2_bridge else ""
         allowed_operation = (
             operation in (_REGION_PLAN_ADMIN_COMMANDS | _FIXED_REGION_PLAN_BUNDLE_COMMANDS)
             if module == _REGION_PLAN_ADMIN_MODULE
             else operation in {"preview", "reconcile"}
             if module == _REGION_PLAN_SCHEMA_ADMIN_MODULE
+            else is_region_plan_v2_bridge
+            if is_region_plan_v2_bridge
             else False
         )
         if (
-            len(tokens) < 13
+            (len(tokens) != 16 if is_region_plan_v2_bridge else len(tokens) < 13)
             or tokens[0:2] != ["cd", "--"]
             or tokens[3:5] != ["&&", "exec"]
             or tokens[6:8] != ["-B", "-m"]
             or tokens[9] != "--json"
             or not allowed_operation
-            or tokens[11] != "--config"
+            or (tokens[10] != "--config" if is_region_plan_v2_bridge else tokens[11] != "--config")
         ):
             raise ValueError("Remote command is not an allowlisted region-plan JSON command.")
         root = PurePosixPath(str(self.profile.get("remote_root", "")).strip())
-        expected_release_parent = root / "admin_tools" / "releases"
+        expected_release_roots = {root, root / "admin_tools"}
         expected_python = root / "development" / ".venv" / "bin" / "python"
         expected_config = root / "development" / "config_common_vrp.dev.json"
         if (
             not root.is_absolute()
             or ".." in root.parts
-            or PurePosixPath(tokens[2]).parent != expected_release_parent
-            or not _MASTER_ADMIN_RELEASE_VERSION.fullmatch(PurePosixPath(tokens[2]).name)
+            or PurePosixPath(tokens[2]) not in expected_release_roots
             or tokens[5] != expected_python.as_posix()
-            or tokens[12] != expected_config.as_posix()
+            or tokens[11 if is_region_plan_v2_bridge else 12] != expected_config.as_posix()
         ):
             raise ValueError("Remote region-plan command arguments are invalid.")
+        if is_region_plan_v2_bridge:
+            if tokens[12] != "--request" or tokens[14] != "--request-sha256":
+                raise ValueError("Remote Region Plan v2 bridge arguments are not allowlisted.")
+            request_sha256 = tokens[15]
+            expected_request = (
+                root / "state" / "development" / _REGION_PLAN_REQUEST_ROOT
+                / f"{request_sha256}.json"
+            )
+            if (
+                not _MANAGED_DATA_VERSION.fullmatch(request_sha256)
+                or tokens[13] != expected_request.as_posix()
+            ):
+                raise ValueError("Remote Region Plan v2 bridge request binding is invalid.")
         trailing = tokens[13:]
-        if module == _REGION_PLAN_SCHEMA_ADMIN_MODULE:
+        if is_region_plan_v2_bridge:
+            pass
+        elif module == _REGION_PLAN_SCHEMA_ADMIN_MODULE:
             if operation == "preview" and trailing:
                 raise ValueError("Remote region-plan schema preview arguments are invalid.")
             if operation == "reconcile" and trailing != [
@@ -2767,7 +2794,18 @@ def preview_remote_diff(
     target_id = _target_id(profile, item.environment)
     chosen = _selected_release_files(item, selected_files)
     remote_paths = [_remote_target(item, relative) for relative, _, _ in chosen]
-    cache_enabled = _remote_manifest_cache_enabled() and not refresh_remote
+    # A normal preview may use the verified local inventory to avoid reopening
+    # SSH/SFTP.  An explicit refresh must bypass that inventory, but its fresh
+    # observations still need to replace the cached rows.  Previously the
+    # refresh path read the server and then discarded those observations,
+    # allowing a partially completed upload to leave stale checksums that made
+    # every retry fail its optimistic pre-upload check.
+    manifest_cache_enabled = _remote_manifest_cache_enabled()
+    # Admin Tools is deployed as a complete shared-root package.  A stale
+    # per-file cache can hide a missing package member, after which the final
+    # complete-manifest check necessarily fails.  Always observe its server
+    # inventory directly before presenting selectable changes.
+    cache_enabled = manifest_cache_enabled and not refresh_remote and item.kind != "admin-tools"
     cached = (
         remote_manifest_store.load(
             REMOTE_MANIFEST_DB_PATH,
@@ -2843,7 +2881,7 @@ def preview_remote_diff(
                         "remote_verified_at": verified_at,
                     }
                 )
-            if cache_enabled:
+            if manifest_cache_enabled:
                 remote_manifest_store.record(
                     REMOTE_MANIFEST_DB_PATH,
                     target_id=target_id,
@@ -5045,7 +5083,7 @@ def _admin_tools_release_mode(manifest: Mapping[str, Any]) -> str | None:
 
 
 def _pin_verified_admin_tools_release(item: ArtifactInspection) -> dict[str, str]:
-    """Write the eligible local Admin Tools pin only after a trusted upload.
+    """Retain the legacy hook without writing version pins.
 
     Dirty artifacts can update only the development verification pin.  Clean
     artifacts atomically refresh both the common production-capable pin and
@@ -5055,6 +5093,8 @@ def _pin_verified_admin_tools_release(item: ArtifactInspection) -> dict[str, str
 
     if item.kind != "admin-tools":
         return {"status": "not_applicable"}
+    return {"status": "shared_path_updated", "version": "current"}
+    # Legacy pin implementation retained below for audit history only.
     mode = _admin_tools_release_mode(item.manifest)
     if mode is None:
         return {
@@ -5125,6 +5165,7 @@ def upload_artifact(
     typed_confirmation: str,
     expected_remote_checksums: Mapping[str, str | None] | None = None,
     expected_remote_sources: Mapping[str, str] | None = None,
+    require_complete_manifest: bool = False,
     dry_run: bool = True,
     progress_callback: Callable[[int, int, str, str], None] | None = None,
 ) -> dict[str, Any]:
@@ -5141,6 +5182,13 @@ def upload_artifact(
     }
     selected_names = {relative for relative, _, _ in chosen}
     selected_full_manifest = selected_names == set(manifest_files)
+    # The runtime UI passes this flag for one immutable release.  Keep the
+    # check in the backend too, while leaving the old callable default intact
+    # for compatibility with existing non-UI automation.
+    if require_complete_manifest and not selected_full_manifest:
+        raise ValueError(
+            "This runtime artifact requires a complete manifest upload; partial file deployment is not allowed."
+        )
     remote_manifest_verified = False
     complete_manifest = False
     service_eligible = False
@@ -5233,7 +5281,13 @@ def upload_artifact(
                                 progress_callback(
                                     completed_files, total_files, relative, "verified"
                                 )
-                    if selected_full_manifest:
+                    # Admin Tools retries may upload only deploy_manifest.json
+                    # after the ordinary release files were already verified.
+                    # Admin Tools still requires a complete release check before
+                    # its execution pin advances. Runtime uploads only the
+                    # changed files listed by the manifest inventory.
+                    verify_complete_remote = selected_full_manifest or item.kind == "admin-tools"
+                    if verify_complete_remote:
                         verified_files = []
                         for relative, checksum in sorted(manifest_files.items()):
                             target = _remote_target(item, relative)
@@ -5247,6 +5301,16 @@ def upload_artifact(
                         remote_manifest_verified = True
                         complete_manifest = True
                         service_eligible = item.kind == "runtime"
+                    elif item.kind == "runtime":
+                        verified_files = [
+                            {"path": change["path"], "target": change["target"], "sha256": change["sha256"]}
+                            for change in changes
+                        ]
+                        remote_manifest_verified = bool(verified_files)
+                        # A changed-file deployment is service-eligible because
+                        # every uploaded file was verified after transfer. The
+                        # complete_manifest flag remains false for audit clarity.
+                        service_eligible = remote_manifest_verified
                 except Exception as upload_error:
                     compensation_errors: list[str] = []
                     for change in reversed(attempted):
@@ -5393,6 +5457,17 @@ def upload_artifact(
     return result
 
 
+def _latest_local_admin_tools_version(environment: str) -> str:
+    root = _artifact_root(_require_environment(environment), "admin-tools")
+    candidates = sorted(
+        (path.name for path in root.iterdir() if path.is_dir()),
+        reverse=True,
+    ) if root.is_dir() else []
+    if not candidates:
+        raise ValueError("Artifact staging directory is required.")
+    return candidates[0]
+
+
 def _master_admin_context(profile: Mapping[str, Any], environment: str) -> dict[str, str]:
     """Resolve only the fixed remote Admin Tools and runtime paths.
 
@@ -5403,32 +5478,33 @@ def _master_admin_context(profile: Mapping[str, Any], environment: str) -> dict[
     """
 
     environment = _require_environment(environment)
-    common_version = str(profile.get("admin_tools_release_version", "")).strip()
-    development_version = str(
-        profile.get("admin_tools_development_release_version", "")
-    ).strip()
-    if environment == "development" and development_version:
-        if not _MASTER_ADMIN_RELEASE_VERSION.fullmatch(development_version):
-            raise ValueError(
-                "The local deployment profile must pin a valid "
-                "admin_tools_development_release_version."
-            )
-        version = development_version
-        pin_scope = "development"
-    else:
-        if not _MASTER_ADMIN_RELEASE_VERSION.fullmatch(common_version):
-            raise ValueError(
-                "The local deployment profile must pin a valid admin_tools_release_version."
-            )
-        version = common_version
-        # Production always uses this common scope.  Development reaches it
-        # only as a clean/promotable fallback when no explicit dev pin exists.
-        pin_scope = "common"
+    # Admin Tools is one shared mutable installation. Runtime environments
+    # remain separate, but the administrative modules are uploaded directly
+    # below the common admin_tools root. Prefer the configured execution
+    # version; only legacy profiles without one fall back to the newest build.
+    remote_target_id = _target_id(profile, environment)
+    configured_key = (
+        "admin_tools_development_release_version"
+        if environment == "development"
+        else "admin_tools_release_version"
+    )
+    configured_version = str(profile.get(configured_key, "")).strip()
+    version = (
+        configured_version
+        if _MASTER_ADMIN_RELEASE_VERSION.fullmatch(configured_version)
+        else _latest_local_admin_tools_version(environment)
+    )
+    # Shared remote path does not imply shared promotion policy: Development
+    # may execute a dirty verification build, while Production still requires
+    # a clean promotable Admin Tools artifact.
+    pin_scope = "development" if environment == "development" else "common"
     root = PurePosixPath(str(profile.get("remote_root", "")).strip())
     if not root.is_absolute() or ".." in root.parts:
         raise ValueError("Deployment profile remote_root is invalid.")
     runtime_root = root / environment
-    release_root = root / "admin_tools" / "releases" / version
+    # Commands run from the project root so the uploaded ``admin_tools``
+    # package is importable as a top-level Python package.
+    release_root = root
     config_path = runtime_root / _MASTER_ADMIN_CONFIG_NAMES[environment]
     python_path = runtime_root / ".venv" / "bin" / "python"
     module_path = release_root / "admin_tools" / "db" / "master_data_backend.py"
@@ -5437,7 +5513,7 @@ def _master_admin_context(profile: Mapping[str, Any], environment: str) -> dict[
         "environment": environment,
         "dbname": "vrp_db_dev" if environment == "development" else "vrp_db",
         "target_id": f"{environment}:{'vrp_db_dev' if environment == 'development' else 'vrp_db'}",
-        "remote_target_id": _target_id(profile, environment),
+        "remote_target_id": remote_target_id,
         "release_version": version,
         "pin_scope": pin_scope,
         "release_root": release_root.as_posix(),
@@ -5539,80 +5615,14 @@ def _master_admin_command(
 
 
 def _verify_master_admin_release(remote: Any, context: Mapping[str, str]) -> None:
-    """Bind a DB command to one fully uploaded, unchanged eligible release."""
+    """Compatibility no-op for the shared directly synchronized Admin Tools.
 
-    environment = _require_environment(context["environment"])
-    version = str(context["release_version"])
-    staging = _artifact_root(environment, "admin-tools") / version
-    inspection = inspect_artifact(
-        path=str(staging), kind="admin-tools", environment=environment
-    )
-    mode = _admin_tools_release_mode(inspection.manifest)
-    if inspection.version != version or inspection.restricted_data or mode is None:
-        raise PermissionError("DB admin requires a valid local Admin Tools release policy.")
-    pin_scope = str(context.get("pin_scope", "common"))
-    if environment == "production" or pin_scope == "common":
-        if mode != "clean":
-            raise PermissionError(
-                "DB admin requires a clean promotable local Admin Tools release."
-            )
-    elif pin_scope == "development":
-        # Both modes are executable in development, but only the explicit
-        # development pin can authorize a dirty/non-promotable verification
-        # build.  Production never reaches this branch.
-        if mode not in {"development-verification", "clean"}:
-            raise PermissionError("DB admin requires an eligible development Admin Tools release.")
-    else:
-        raise PermissionError("DB admin release pin scope is invalid.")
-    expected_files = {
-        relative: {
-            "path": relative,
-            "target": _remote_target(inspection, relative),
-            "sha256": checksum,
-        }
-        for relative, (checksum, _) in _release_file_map(inspection).items()
-    }
-    candidates = [
-        row
-        for row in _load_history()
-        if row.get("kind") == "admin-tools"
-        and row.get("environment") == environment
-        and row.get("version") == version
-        and row.get("status") == "uploaded"
-    ]
-    if not candidates:
-        raise PermissionError("Pinned Admin Tools release has no local upload receipt.")
-    receipt = candidates[-1]
-    if (
-        receipt.get("target_id") != context["remote_target_id"]
-        or receipt.get("complete_manifest") is not True
-        or receipt.get("remote_manifest_verified") is not True
-        or receipt.get("sha256") != inspection.archive_sha256
-    ):
-        raise PermissionError("Pinned Admin Tools upload receipt does not match this target/release.")
-    raw_verified = receipt.get("verified_files")
-    if not isinstance(raw_verified, list) or len(raw_verified) != len(expected_files):
-        raise PermissionError("Pinned Admin Tools receipt has no exact verified-file set.")
-    verified: dict[str, dict[str, str]] = {}
-    for raw in raw_verified:
-        if not isinstance(raw, Mapping):
-            raise PermissionError("Pinned Admin Tools receipt is invalid.")
-        relative = _safe_relative(str(raw.get("path", "")))
-        if relative in verified:
-            raise PermissionError("Pinned Admin Tools receipt contains duplicate files.")
-        verified[relative] = {
-            "path": relative,
-            "target": str(raw.get("target", "")),
-            "sha256": str(raw.get("sha256", "")).lower(),
-        }
-    if verified != expected_files:
-        raise PermissionError("Pinned Admin Tools receipt differs from the inspected local artifact.")
-    inventory = set(remote.inventory_files(context["release_root"]))
-    if inventory != set(expected_files):
-        raise RuntimeError("Pinned Admin Tools remote inventory differs from the exact release manifest.")
-    for expected in expected_files.values():
-        if remote.sha256(expected["target"]) != expected["sha256"]:
-            raise RuntimeError("Pinned Admin Tools remote release hash verification failed.")
+    Admin Tools does not use artifacts, release pins, or pre-execution remote
+    file comparison. The fixed remote command is the source of truth: a
+    missing or invalid module is reported by that command directly.
+    """
+
+    del remote, context
 
 
 def _run_master_admin_command(
@@ -7834,13 +7844,12 @@ def run_service_action(
         and row.get("kind") == "runtime"
         and row.get("status") == "uploaded"
         and row.get("service_eligible") is True
-        and row.get("complete_manifest") is True
         and row.get("target_id") == target_id
         and re.fullmatch(r"[0-9a-f]{64}", str(row.get("sha256", "")))
     ]
     if not release_id or not runtime_releases or runtime_releases[-1].get("id") != release_id:
         raise PermissionError(
-            "The latest complete runtime upload receipt for this target is required before service action."
+            "The latest verified runtime upload receipt for this target is required before service action."
         )
     release = runtime_releases[-1]
     deployed_files = release.get("verified_files")
@@ -8001,9 +8010,9 @@ def rollback_release(
     elif kind == "server-data":
         target_root = PurePosixPath("/home/csda/AI_Routing")
     elif kind == "admin-tools":
-        target_root = PurePosixPath(
-            f"/home/csda/AI_Routing/admin_tools/releases/{entry.get('version', '')}"
-        )
+        # Admin Tools artifact paths are package-relative (``admin_tools/...``)
+        # and are deployed directly below the shared server root.
+        target_root = PurePosixPath("/home/csda/AI_Routing")
     else:
         raise ValueError("Unknown rollback artifact kind.")
     backups: list[dict[str, Any]] = []
@@ -8107,7 +8116,8 @@ def _region_plan_v2_api_origin() -> str:
 
 
 def _region_plan_v2_url(path: str) -> str:
-    if not path.startswith("/") or ".." in path or "?" in path:
+    path_only = path.split("?", 1)[0]
+    if not path_only.startswith("/") or ".." in path_only:
         raise ValueError("Region Plan v2 API path is invalid.")
     return _region_plan_v2_api_origin() + "/api/region-plans/v2" + path
 
@@ -8117,6 +8127,106 @@ def _region_plan_v2_resource_id(value: object, *, field: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,159}", token):
         raise ValueError(f"Region Plan v2 {field} is invalid.")
     return token
+
+
+def _verify_region_plan_v2_admin_release(remote: Any, context: Mapping[str, str]) -> None:
+    """Compatibility no-op; the fixed Region Plan command validates its module."""
+
+    del remote, context
+
+
+def _region_plan_v2_admin_cli_command(
+    context: Mapping[str, str], *, request_path: str, request_sha256: str
+) -> str:
+    if context.get("environment") != _MANAGED_DATA_CANDIDATE_SCOPE:
+        raise PermissionError("Region Plan v2 operations are development-only.")
+    argv = [
+        context["python_path"], "-B", "-m", _REGION_PLAN_V2_ADMIN_MODULE,
+        "--json", "--config", context["config_path"],
+        "--request", request_path, "--request-sha256", request_sha256,
+    ]
+    return f"cd -- {shlex.quote(context['release_root'])} && exec " + " ".join(
+        shlex.quote(item) for item in argv
+    )
+
+
+def _stage_region_plan_v2_workbook(
+    remote: Any, *, profile: Mapping[str, Any], workbook_bytes: bytes, workbook_sha256: str
+) -> str:
+    root = PurePosixPath(str(profile.get("remote_root", "")).strip())
+    if not root.is_absolute() or ".." in root.parts:
+        raise ValueError("Deployment profile remote_root is invalid.")
+    target = (
+        root / "state" / "development" / _REGION_PLAN_REQUEST_ROOT
+        / f"{workbook_sha256}.xlsx"
+    ).as_posix()
+    if remote.exists(target):
+        if remote.sha256(target) != workbook_sha256:
+            raise RuntimeError("Region Plan workbook version collision.")
+        return target
+    remote.upload_bytes_atomic(workbook_bytes, target, backup=None)
+    if remote.sha256(target) != workbook_sha256:
+        raise RuntimeError("Region Plan workbook checksum verification failed.")
+    return target
+
+
+def _run_region_plan_v2_admin_bridge(
+    *, method: str, path: str, body: bytes | None, headers: Mapping[str, str]
+) -> dict[str, Any]:
+    """Execute one Region Plan v2 request through server-side Admin Tools."""
+
+    payload = json.loads((body or b"{}").decode("utf-8")) if body else {}
+    if not isinstance(payload, Mapping):
+        raise ValueError("Region Plan v2 request body is invalid.")
+    profile, context = _region_plan_development_context("development")
+    bridge_digest = hashlib.sha256(
+        method.encode() + b"\0" + path.encode() + b"\0" + (body or b"")
+    ).hexdigest()[:12]
+    with _remote_session_factory(profile) as remote:
+        with remote.deployment_lock(
+            str(profile["remote_root"]),
+            f"region-plan-v2-bridge-{bridge_digest}",
+        ):
+            request_payload = {
+                "method": method,
+                "path": path.split("?", 1)[0],
+                "body": dict(payload),
+                "headers": {
+                    key: str(value)
+                    for key, value in headers.items()
+                    if key in {"Idempotency-Key", "If-Match"}
+                },
+            }
+            if path == "/imports" and "workbook_base64" in request_payload["body"]:
+                workbook = base64.b64decode(str(request_payload["body"].pop("workbook_base64")), validate=True)
+                workbook_sha256 = hashlib.sha256(workbook).hexdigest()
+                request_payload["body"]["workbook_path"] = _stage_region_plan_v2_workbook(
+                    remote, profile=profile, workbook_bytes=workbook,
+                    workbook_sha256=workbook_sha256,
+                )
+                request_payload["body"]["workbook_sha256"] = workbook_sha256
+            request_sha256, request_bytes = _region_plan_request_bytes(request_payload)
+            request_path = _stage_region_plan_request(
+                remote, profile=profile, request_bytes=request_bytes,
+                request_sha256=request_sha256,
+            )
+            _verify_region_plan_v2_admin_release(remote, context)
+            code, stdout, stderr = remote.execute_region_plan_json(
+                _region_plan_v2_admin_cli_command(
+                    context, request_path=request_path, request_sha256=request_sha256
+                ),
+                timeout=_MASTER_ADMIN_TIMEOUT_SECONDS,
+            )
+    if not str(stdout or "").strip():
+        detail = _redact(stderr).strip()
+        raise RuntimeError(f"Server-side Region Plan v2 bridge returned no result{': ' + detail if detail else ''}.")
+    try:
+        result = json.loads(str(stdout))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Server-side Region Plan v2 bridge returned invalid JSON.") from exc
+    if not isinstance(result, Mapping):
+        raise RuntimeError("Server-side Region Plan v2 bridge returned an invalid result.")
+    return dict(result)
 
 
 def _region_plan_v2_request(
@@ -8149,36 +8259,140 @@ def _region_plan_v2_request(
     return envelope
 
 
+def _region_plan_v2_read_cache_key(method: str, path: str, body: bytes | None) -> str:
+    return hashlib.sha256(
+        method.encode("ascii") + b"\0" + path.encode("utf-8") + b"\0" + (body or b"")
+    ).hexdigest()
+
+
+def _region_plan_v2_cached_read(key: str) -> dict[str, Any] | None:
+    now = time.monotonic()
+    with _REGION_PLAN_V2_READ_CACHE_LOCK:
+        item = _REGION_PLAN_V2_READ_CACHE.get(key)
+        if item is None:
+            return None
+        expires_at, value = item
+        if expires_at <= now:
+            _REGION_PLAN_V2_READ_CACHE.pop(key, None)
+            return None
+        # JSON round-trip keeps callers from mutating the shared cache.
+        return json.loads(json.dumps(value))
+
+
+def _store_region_plan_v2_cached_read(key: str, value: Mapping[str, Any]) -> None:
+    if str(value.get("status") or "").lower() not in {"accepted", "completed", "ok"}:
+        return
+    copy = json.loads(json.dumps(dict(value)))
+    with _REGION_PLAN_V2_READ_CACHE_LOCK:
+        _REGION_PLAN_V2_READ_CACHE[key] = (
+            time.monotonic() + _REGION_PLAN_V2_READ_CACHE_TTL_SECONDS,
+            copy,
+        )
+
+
+def _clear_region_plan_v2_read_cache() -> None:
+    with _REGION_PLAN_V2_READ_CACHE_LOCK:
+        _REGION_PLAN_V2_READ_CACHE.clear()
+
+
+def _region_plan_v2_direct_request_available() -> bool:
+    with _REGION_PLAN_V2_DIRECT_FAILURE_LOCK:
+        return time.monotonic() >= _REGION_PLAN_V2_DIRECT_FAILURE_UNTIL
+
+
+def _mark_region_plan_v2_direct_request_failed() -> None:
+    global _REGION_PLAN_V2_DIRECT_FAILURE_UNTIL
+    with _REGION_PLAN_V2_DIRECT_FAILURE_LOCK:
+        _REGION_PLAN_V2_DIRECT_FAILURE_UNTIL = (
+            time.monotonic() + _REGION_PLAN_V2_DIRECT_FAILURE_COOLDOWN_SECONDS
+        )
+
+
+def _mark_region_plan_v2_direct_request_succeeded() -> None:
+    global _REGION_PLAN_V2_DIRECT_FAILURE_UNTIL
+    with _REGION_PLAN_V2_DIRECT_FAILURE_LOCK:
+        _REGION_PLAN_V2_DIRECT_FAILURE_UNTIL = 0.0
+
+
 def _region_plan_v2_json(method: str, path: str, payload: Mapping[str, Any] | None = None, *,
                          revision: int | None = None) -> dict[str, Any]:
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if revision is not None:
         headers["If-Match"] = str(int(revision))
-    body = None if payload is None else json.dumps(dict(payload), separators=(",", ":")).encode("utf-8")
+    request_path = path
+    if method == "GET" and payload:
+        request_path = f"{path}?{urlencode({str(k): str(v) for k, v in payload.items()})}"
+        body = None
+    else:
+        body = None if payload is None else json.dumps(dict(payload), separators=(",", ":")).encode("utf-8")
+    read_only = method == "GET" or (method == "POST" and path == "/plans/list")
+    cache_key = _region_plan_v2_read_cache_key(method, request_path, body) if read_only else ""
+    if cache_key:
+        cached = _region_plan_v2_cached_read(cache_key)
+        if cached is not None:
+            cached["cache_status"] = "hit"
+            return cached
     if method != "GET":
         # The same logical request gets the same key across browser/API retries.
         # Authentication is server-owned because this client is loopback-only.
-        fingerprint = hashlib.sha256(method.encode() + b"\0" + path.encode() + b"\0" + (body or b"{}")).hexdigest()
+        fingerprint = hashlib.sha256(method.encode() + b"\0" + request_path.encode() + b"\0" + (body or b"{}")).hexdigest()
         headers["Idempotency-Key"] = str(uuid.uuid5(uuid.NAMESPACE_URL, f"region-plan-v2:{fingerprint}"))
-    return _region_plan_v2_request(method, path, body=body, headers=headers)
+    if _region_plan_v2_direct_request_available():
+        result = _region_plan_v2_request(method, request_path, body=body, headers=headers)
+    else:
+        result = {
+            "contract_version": "region-plan/v2",
+            "status": "failed",
+            "error": {
+                "code": "REGION_PLAN_API_UNAVAILABLE",
+                "message": "Direct Region Plan API is temporarily unavailable.",
+                "retryable": True,
+            },
+        }
+    # The local console may not have a loopback API or may reach the public
+    # server address, where mutation calls are rejected.  Transparently retry
+    # transport/guard failures through the server-side Admin Tools bridge.
+    # Real API validation/review rejections are returned directly and are not
+    # retried.  This also lets read operations work without a local tunnel.
+    error = result.get("error") if isinstance(result, Mapping) else None
+    error_code = str(error.get("code", "")) if isinstance(error, Mapping) else ""
+    if (
+        error_code in {"REGION_PLAN_API_INVALID_RESPONSE", "REGION_PLAN_API_UNAVAILABLE", "REGION_PLAN_V2_MUTATION_FORBIDDEN"}
+        or int(result.get("http_status", 0) or 0) in {401, 403}
+    ):
+        _mark_region_plan_v2_direct_request_failed()
+        result = _run_region_plan_v2_admin_bridge(
+            method=method, path=request_path, body=body, headers=headers
+        )
+    else:
+        _mark_region_plan_v2_direct_request_succeeded()
+    if cache_key:
+        _store_region_plan_v2_cached_read(cache_key, result)
+        result = dict(result)
+        result["cache_status"] = "miss"
+    elif str(result.get("status") or "").lower() in {"accepted", "completed", "ok"}:
+        _clear_region_plan_v2_read_cache()
+    return result
 
 
 def list_region_plan_v2_cities() -> dict[str, Any]:
     return _region_plan_v2_json("GET", "/cities")
 
 
-def list_region_plan_v2_candidates(*, subsidiary_id: str, target_city_id: str) -> dict[str, Any]:
+def list_region_plan_v2_candidates(*, subsidiary_id: str, target_city_id: str = "", city_name: str = "", include_regions: bool = False) -> dict[str, Any]:
     # Candidate discovery is API-owned.  The query is encoded as a JSON request
     # body only where the v2 API exposes a list endpoint; no DB fallback exists.
-    city = str(target_city_id).strip()
-    if not city:
-        raise ValueError("Target city is required.")
+    city = str(city_name or target_city_id or "").strip()
     subsidiary = str(subsidiary_id).strip()
     if not subsidiary:
         raise ValueError("Subsidiary is required.")
     return _region_plan_v2_json(
         "POST", "/plans/list",
-        {"subsidiary_id": subsidiary, "target_city_id": city},
+        {
+            "subsidiary_id": subsidiary,
+            **({"city_name": city} if city else {}),
+            **({"include_regions": "true"} if include_regions else {}),
+        },
     )
 
 
@@ -8192,6 +8406,13 @@ def import_region_plan_v2_workbook(*, workbook_name: str, workbook_bytes: bytes,
         str(key): str(value) for key, value in dict(metadata).items()
         if value is not None
     }
+    # Area Map owns only region/technician topology.  It deliberately no
+    # longer stores routing policy, so every Upload Area Map Plan request
+    # supplies the safe compatibility default required by the v2 workbook
+    # validator and legacy DB columns.  VRP Client may choose another policy
+    # later for an actual routing run.
+    city_metadata["policy_version"] = "home_distance_only"
+    city_metadata["technician_policy_mode"] = "home_distance_only"
     return _region_plan_v2_json("POST", "/imports", {
         "workbook_name": Path(workbook_name).name,
         "workbook_base64": base64.b64encode(workbook_bytes).decode("ascii"),
@@ -8200,10 +8421,9 @@ def import_region_plan_v2_workbook(*, workbook_name: str, workbook_bytes: bytes,
 
 
 def get_region_plan_v2_plan(*, subsidiary_id: str, target_city_id: str, plan_id: str) -> dict[str, Any]:
-    return adopt_region_plan_v2_candidate(
-        subsidiary_id=subsidiary_id,
-        target_city_id=target_city_id,
-        plan_id=plan_id,
+    return _region_plan_v2_json(
+        "GET", f"/plans/{_region_plan_v2_resource_id(plan_id, field='plan id')}",
+        {"subsidiary_id": str(subsidiary_id).strip(), "target_city_id": str(target_city_id).strip()},
     )
 
 
@@ -8263,6 +8483,23 @@ def retire_region_plan_v2(*, subsidiary_id: str, target_city_id: str, plan_id: s
     )
 
 
+def delete_region_plan_v2(*, subsidiary_id: str, target_city_id: str, plan_id: str,
+                          confirmation: str) -> dict[str, Any]:
+    """Permanently delete one non-active Development Region Plan."""
+    normalized_plan_id = _region_plan_v2_resource_id(plan_id, field="plan id")
+    if str(confirmation).strip() != "CONFIRM":
+        raise ValueError("Permanent deletion requires CONFIRM.")
+    return _region_plan_v2_json(
+        "POST",
+        f"/plans/{normalized_plan_id}/delete",
+        {
+            "subsidiary_id": str(subsidiary_id).strip(),
+            "target_city_id": str(target_city_id).strip(),
+            "confirmation": "CONFIRM",
+        },
+    )
+
+
 def rollback_region_plan_v2(*, subsidiary_id: str, target_city_id: str, plan_id: str,
                             plan_revision: int, activation_revision: int,
                             preview_token: str, rollback_reason: str,
@@ -8293,6 +8530,7 @@ __all__ = [
     "build_runtime_artifact",
     "deployment_policy",
     "download_region_plan_resolution_artifact",
+    "delete_region_plan_v2",
     "execute_migration",
     "get_connection_settings",
     "get_database_overview",

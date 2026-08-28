@@ -30,7 +30,7 @@ from smart_routing.osrm_routing import OSRMConfig, OSRMTripClient
 from smart_routing.routing_policy_catalog import (
     ROUTING_POLICY_BY_VALUE,
     ROUTING_POLICY_VALUES,
-    routing_policy_description,
+    routing_policy_bilingual_description,
     routing_policy_label,
 )
 from services.api.common_vrp_config import (
@@ -49,12 +49,8 @@ if not _config_path_value:
 CONFIG_COMMON_PATH = Path(_config_path_value).expanduser().resolve()
 
 
-def _load_configured_common_server_url(config_path: Path = CONFIG_COMMON_PATH) -> str:
-    cfg = load_and_validate_common_config(config_path)
-    return configured_api_url(cfg)
-
-
-DEFAULT_COMMON_SERVER_URL = _load_configured_common_server_url()
+COMMON_CLIENT_CONFIG = load_and_validate_common_config(CONFIG_COMMON_PATH)
+DEFAULT_COMMON_SERVER_URL = configured_api_url(COMMON_CLIENT_CONFIG)
 MASTER_PATH = na_data_path("client_master")
 PROFILE_SOURCE_PATH = na_data_path("profile_production")
 DEFAULT_SUBSIDIARY_NAME = "LGEAI"
@@ -76,6 +72,23 @@ DEFAULT_STRATEGIC_CITY_OPTIONS = [
 ]
 KM_TO_MILES = 0.621371
 FORCE_ASSIGN_PREVIEW_KEY = "common_vrp_force_assign_preview"
+
+
+def _routing_policy_value(name: str) -> int:
+    """Return the validated Common VRP policy value for UI defaults/calculations."""
+    return int(COMMON_CLIENT_CONFIG["routing_policy"][name])
+
+
+def _default_technician_slot_count() -> int:
+    return _routing_policy_value("default_technician_slot_count")
+
+
+def _slot_minutes() -> int:
+    return _routing_policy_value("slot_minutes")
+
+
+def _heavy_job_min_service_minutes() -> int:
+    return _routing_policy_value("heavy_job_min_service_minutes")
 
 JOB_REQUIRED_COLUMNS = [
     "SVC_ENGINEER_CODE",
@@ -143,7 +156,8 @@ def _build_engineer_slot_capacity_lookup(engineer_master_df: pd.DataFrame) -> di
         return capacity_lookup
     for _, row in engineer_master_df.iterrows():
         code = str(row.get("employee_code", "")).strip()
-        capacity = pd.to_numeric(pd.Series([row.get(capacity_col, 8)]), errors="coerce").fillna(8).iloc[0]
+        default_capacity = _default_technician_slot_count()
+        capacity = pd.to_numeric(pd.Series([row.get(capacity_col, default_capacity)]), errors="coerce").fillna(default_capacity).iloc[0]
         if code:
             capacity_lookup[code] = max(0, int(capacity))
     return capacity_lookup
@@ -190,7 +204,9 @@ def _fixed_slot_capacity_warnings(jobs_df: pd.DataFrame, engineer_master_df: pd.
         .reset_index()
     )
     capacity_lookup = _build_engineer_slot_capacity_lookup(engineer_master_df)
-    summary_df["slot_capacity"] = summary_df["svc_engineer_code"].map(lambda code: capacity_lookup.get(str(code).strip(), 8))
+    summary_df["slot_capacity"] = summary_df["svc_engineer_code"].map(
+        lambda code: capacity_lookup.get(str(code).strip(), _default_technician_slot_count())
+    )
     warning_df = summary_df[summary_df["fixed_slot_count"].astype(int) > summary_df["slot_capacity"].astype(int)].copy()
     return warning_df.sort_values(["promise_date", "fixed_slot_count"], ascending=[False, False]).reset_index(drop=True)
 
@@ -740,16 +756,17 @@ def _build_region_staffing_view(service_df: pd.DataFrame) -> pd.DataFrame:
 
 def _estimate_service_time_min(row: pd.Series) -> float:
     is_heavy = _coerce_bool_value(row.get("is_heavy_repair", False))
+    heavy_min_service_minutes = float(_heavy_job_min_service_minutes())
     for col in ("service_time_min", "service_minutes"):
         if col in row.index:
             value = pd.to_numeric(pd.Series([row.get(col)]), errors="coerce").iloc[0]
             if pd.notna(value) and float(value) > 0:
-                return max(float(value), 100.0 if is_heavy else 45.0)
+                return max(float(value), heavy_min_service_minutes) if is_heavy else float(value)
     if "job_slot_count" in row.index or "two_slot_job" in row.index or "2slot_job" in row.index:
         job_slot_count = _coerce_job_slot_count_value(row.get("job_slot_count", 2 if _coerce_bool_value(row.get("two_slot_job", row.get("2slot_job", False))) else 1))
-        slot_minutes = 50.0 * job_slot_count if job_slot_count >= 2 else 45.0
-        return max(slot_minutes, 100.0 if is_heavy else 45.0)
-    return 100.0 if is_heavy else 45.0
+        service_minutes = float(_slot_minutes() * job_slot_count)
+        return max(service_minutes, heavy_min_service_minutes) if is_heavy else service_minutes
+    return heavy_min_service_minutes if is_heavy else float(_slot_minutes())
 
 
 def _normalize_heavy_repair_slots(df: pd.DataFrame) -> pd.DataFrame:
@@ -762,11 +779,11 @@ def _normalize_heavy_repair_slots(df: pd.DataFrame) -> pd.DataFrame:
     if "is_heavy_repair" in working.columns:
         heavy_mask = working["is_heavy_repair"].map(_coerce_bool_value)
     # Some Actual payloads do not carry the heavy-repair flag, but retain the
-    # normalized service duration.  A 100-minute service is the same two-slot
-    # service convention used by Smart Routing.
+    # Normalized service duration can identify heavy work when the source flag
+    # is absent; the threshold follows the configured heavy-job policy.
     if "service_time_min" in working.columns:
         service_minutes = pd.to_numeric(working["service_time_min"], errors="coerce").fillna(0)
-        heavy_mask = heavy_mask | service_minutes.ge(100)
+        heavy_mask = heavy_mask | service_minutes.ge(_heavy_job_min_service_minutes())
     if heavy_mask.any():
         working.loc[heavy_mask, "job_slot_count"] = working.loc[heavy_mask, "job_slot_count"].clip(lower=2)
     return working
@@ -787,7 +804,7 @@ def build_map(
     if zip_layer.empty:
         debug = zip_layer.attrs.get("area_debug", {}) if hasattr(zip_layer, "attrs") else {}
         st.warning(
-            "Area layer is empty. Check common_region_master rows and ZIP geometry match "
+            "Area layer is empty. Check the configured or active Area Plan and ZIP geometry match "
             f"for {strategic_city_name}. region_zip_rows={len(region_zip_df)} "
             f"debug={debug}"
         )
@@ -1491,7 +1508,7 @@ def _normalize_technician_rows(
         start_location_address = _clean_text(row.get("start_location_address"))
         if start_location_type == "Home" and _clean_text(master_row.get("home_address")):
             start_location_address = _clean_text(master_row.get("home_address"))
-        slot_count = pd.to_numeric(row.get("slot_count", 8), errors="coerce")
+        slot_count = pd.to_numeric(row.get("slot_count", _default_technician_slot_count()), errors="coerce")
         priority_group = _coerce_priority_group_value(row.get("priority_group", master_row.get("priority_group", "B")))
         max_minutes = pd.to_numeric(row.get("max_minutes", 540), errors="coerce")
         active_flag = _coerce_bool_value(master_row.get("active_flag", True))
@@ -1508,7 +1525,7 @@ def _normalize_technician_rows(
                 "available": available,
                 "shift_start": _clean_text(row.get("shift_start")) or "09:00",
                 "shift_end": _clean_text(row.get("shift_end")) or "18:00",
-                "slot_count": int(slot_count) if pd.notna(slot_count) and float(slot_count) >= 0 else 8,
+                "slot_count": int(slot_count) if pd.notna(slot_count) and float(slot_count) >= 0 else _default_technician_slot_count(),
                 "priority_group": priority_group,
                 "preferred_region_name": _clean_text(row.get("preferred_region_name", row.get("preferred_area_name", ""))),
                 "max_minutes": int(max_minutes) if pd.notna(max_minutes) and float(max_minutes) > 0 else 540,
@@ -2413,7 +2430,7 @@ def _build_unassigned_analysis_df(
         if lat is None or lon is None:
             continue
         available = _coerce_bool_value(row.get("available", row.get("active_flag", True)))
-        max_slots = int(_number(row, ["max_slots", "max_jobs", "slot_count"], 8) or 8)
+        max_slots = int(_number(row, ["max_slots", "max_jobs", "slot_count"], _default_technician_slot_count()) or _default_technician_slot_count())
         candidates.append({"code": code, "name": str(row.get("employee_name", code)).strip() or code, "lat": lat, "lon": lon, "available": available, "max_slots": max_slots, "assigned_slots": int(assigned_slots.get(code, 0))})
 
     rows: list[dict[str, object]] = []
@@ -2873,7 +2890,7 @@ def _build_common_region_zip_df(subsidiary_name: str, strategic_city_name: str) 
     region_df = pd.DataFrame(
         _api_get(
             DEFAULT_COMMON_SERVER_URL,
-            "/api/v1/common/regions",
+            "/api/v1/common/configured-region-plan-postals",
             subsidiary_name=subsidiary_name,
             strategic_city_name=strategic_city_name,
         ).get("rows", [])
@@ -3058,7 +3075,7 @@ def _build_result_view_state(subsidiary_name: str, strategic_city_name: str) -> 
     # Fill Rate denominator is the sum of the selected technicians' declared
     # slot capacities.  Heavy-repair normalization belongs in the numerator;
     # do not manufacture extra capacity in the denominator.
-    assigned_slot_capacity = sum(capacity_lookup.get(str(engineer_code).strip(), 8) for engineer_code in slots_per_engineer.index)
+    assigned_slot_capacity = sum(capacity_lookup.get(str(engineer_code).strip(), _default_technician_slot_count()) for engineer_code in slots_per_engineer.index)
     slot_occupancy_rate = float(assigned_slot_count / assigned_slot_capacity) if assigned_slot_capacity > 0 else 0.0
     center_type_stats: dict[str, dict[str, float | int]] = {}
     if not filtered_assignment.empty and "assigned_center_type" in filtered_assignment.columns:
@@ -3072,7 +3089,7 @@ def _build_result_view_state(subsidiary_name: str, strategic_city_name: str) -> 
             center_jobs = center_df.groupby("assigned_sm_code", dropna=True)["GSFS_RECEIPT_NO"].nunique()
             center_slots = center_df.groupby("assigned_sm_code", dropna=True)["job_slot_count"].sum()
             center_assigned_slots = int(center_slots.sum()) if not center_slots.empty else 0
-            center_capacity = sum(capacity_lookup.get(str(engineer_code).strip(), 8) for engineer_code in center_slots.index)
+            center_capacity = sum(capacity_lookup.get(str(engineer_code).strip(), _default_technician_slot_count()) for engineer_code in center_slots.index)
             center_type_stats[str(center_type)] = {
                 "engineer_count": int(center_df["assigned_sm_code"].dropna().astype(str).nunique()),
                 "job_count": int(center_df["GSFS_RECEIPT_NO"].dropna().astype(str).nunique()),
@@ -3091,7 +3108,7 @@ def _build_result_view_state(subsidiary_name: str, strategic_city_name: str) -> 
             center_jobs = center_df["job_count"]
             center_slots = center_df["slot_count"]
             center_capacity = sum(
-                capacity_lookup.get(str(code).strip(), 8)
+                capacity_lookup.get(str(code).strip(), _default_technician_slot_count())
                 for code in center_df[server_summary_code_col].astype(str)
             )
             center_type_stats[str(center_type)] = {
@@ -3832,7 +3849,7 @@ def _build_default_technician_rows_from_jobs(jobs_df: pd.DataFrame, engineer_mas
                 "center_type": center_type,
                 "shift_start": "09:00",
                 "shift_end": "18:00",
-                "slot_count": 8,
+                "slot_count": _default_technician_slot_count(),
                 "priority_group": _coerce_priority_group_value(master_row.get("priority_group", "B")),
                 "available": active_flag,
                 "start_location_type": "Home",
@@ -3869,7 +3886,7 @@ def _build_default_technician_rows_from_master(engineer_master_df: pd.DataFrame,
                 "center_type": str(row.get("center_type", "DMS")).strip().upper() or "DMS",
                 "shift_start": "09:00",
                 "shift_end": "18:00",
-                "slot_count": 8,
+                "slot_count": _default_technician_slot_count(),
                 "priority_group": _coerce_priority_group_value(master_row.get("priority_group", row.get("priority_group", "B"))),
                 "available": active_flag,
                 "start_location_type": "Home",
@@ -4385,20 +4402,20 @@ def _render_config_tab(subsidiary_name: str, strategic_city_name: str) -> None:
         st.error(f"Unable to load Region Plans: {exc}")
         return
     if plans_df.empty:
-        st.warning("No Region Plans are registered for this city yet. Import/review one in the development Region Plan workflow first.")
+        st.warning("No active Area Map Plan is registered for this city. Upload, Review, and Activate it in Admin Tools first.")
         return
     plans_df = plans_df.copy()
     plans_df["plan_id"] = plans_df["plan_id"].astype(str).str.strip()
     if "lifecycle" in plans_df.columns:
-        plans_df = plans_df[plans_df["lifecycle"].astype(str).str.lower().isin({"reviewed", "active"})].copy()
+        plans_df = plans_df[plans_df["lifecycle"].astype(str).str.lower().eq("active")].copy()
     plans_df = plans_df[plans_df["plan_id"].ne("")].drop_duplicates("plan_id").reset_index(drop=True)
     if plans_df.empty:
         st.warning("No selectable Region Plans are available for this city.")
         return
     labels = {
         str(row.get("plan_id")): (
+            f"{row.get('plan_storage_city_name') or strategic_city_name} · "
             f"{row.get('plan_id')} · "
-            f"{routing_policy_label(row.get('policy_version'))} · "
             f"{row.get('lifecycle', '')}"
         )
         for row in plans_df.to_dict("records")
@@ -4413,10 +4430,9 @@ def _render_config_tab(subsidiary_name: str, strategic_city_name: str) -> None:
         key=f"city_region_plan::{subsidiary_name}::{strategic_city_name}",
     )
     selected_plan = plans_df[plans_df["plan_id"].eq(selected_plan_id)].iloc[0].to_dict()
-    selected_plan_policy = _clean_text(selected_plan.get("policy_version"))
     configured_policy = _clean_text(config_row.get("region_policy"))
     if configured_policy not in ROUTING_POLICY_BY_VALUE:
-        configured_policy = selected_plan_policy if selected_plan_policy in ROUTING_POLICY_BY_VALUE else "home_distance_only"
+        configured_policy = "home_distance_only"
     selected_policy = st.selectbox(
         "Routing policy",
         list(ROUTING_POLICY_VALUES),
@@ -4425,20 +4441,13 @@ def _render_config_tab(subsidiary_name: str, strategic_city_name: str) -> None:
         key=f"city_routing_policy::{subsidiary_name}::{strategic_city_name}",
         help="화면에는 설명용 이름을 표시하고, 저장 시에는 내부 정책 식별자를 사용합니다.",
     )
-    st.info(routing_policy_description(selected_policy))
-    if selected_plan_policy and selected_plan_policy != selected_policy:
-        st.warning(
-            "선택한 Region Plan에는 고정 정책이 있습니다. "
-            f"이 Plan으로 실제 라우팅할 때는 {routing_policy_label(selected_plan_policy)}가 적용되며, "
-            "다른 정책을 사용하려면 해당 정책으로 생성된 Region Plan을 선택해야 합니다."
-        )
+    st.info(routing_policy_bilingual_description(selected_policy))
     st.dataframe(
         pd.DataFrame([{
             "city": strategic_city_name,
             "region_plan_id": selected_plan_id,
             "revision": selected_plan.get("plan_revision"),
             "routing_policy": routing_policy_label(selected_policy),
-            "region_plan_policy": routing_policy_label(selected_plan_policy),
             "lifecycle": selected_plan.get("lifecycle"),
             "plan_storage_city_name": selected_plan.get("plan_storage_city_name"),
         }]),
@@ -5003,9 +5012,6 @@ def _render_payload_tab(subsidiary_name: str, strategic_city_name: str) -> None:
             f"Payload date: {payload_date or selected_date} / technicians={len(payload.get('technicians', []))}, jobs={len(jobs_list)}, capabilities={len(payload.get('capabilities', []))}"
         )
         region_plan = ((payload.get("options") or {}).get("region_plan") or {}) if isinstance(payload, dict) else {}
-        policy_version = str(region_plan.get("policy_version", "")).strip()
-        if policy_version:
-            st.caption(f"Active routing policy: {routing_policy_label(policy_version)} (distance: km; duration: minutes; slots: jobs)")
         payload_debug = st.session_state.get("common_vrp_payload_debug") or {}
         for message in payload_debug.get("precheck_messages", []) or []:
             message_text = str(message).strip()

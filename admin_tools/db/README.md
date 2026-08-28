@@ -120,7 +120,7 @@ pwsh -File services/deploy/build_admin_tools_package.ps1 -Version 2026.07.19
 ```
 
 Install the approved ZIP under
-`/home/csda/AI_Routing/admin_tools/releases/<version>`. Do not merge it into
+`/home/csda/AI_Routing/admin_tools`. Do not merge it into
 `production/` or `development/`, and do not register it with systemd or cron.
 Create a release-local `.venv` and install its `requirements.txt` before use.
 Run commands manually with the matching application config path. Production
@@ -133,7 +133,7 @@ artifact versions when needed. Start the tool from its versioned release
 directory and pass the application environment root explicitly:
 
 ```bash
-ADMIN_RELEASE=/home/csda/AI_Routing/admin_tools/releases/2026.07.19
+ADMIN_TOOLS_ROOT=/home/csda/AI_Routing/admin_tools
 DEV_ROOT=/home/csda/AI_Routing/development
 
 cd "$ADMIN_RELEASE"
