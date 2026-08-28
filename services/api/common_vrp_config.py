@@ -17,6 +17,23 @@ DEFAULT_ROUTING_POLICY = {
     "heavy_job_min_service_minutes": 100,
 }
 
+DEFAULT_REGION_PLAN_RUNTIME = {
+    "production_enabled": False,
+}
+
+
+def normalize_region_plan_runtime(config: dict[str, Any]) -> dict[str, bool]:
+    """Return the production Region Plan runtime gate, defaulting to deny."""
+    raw_runtime = config.get("region_plan_runtime")
+    if raw_runtime is None:
+        return dict(DEFAULT_REGION_PLAN_RUNTIME)
+    if not isinstance(raw_runtime, dict):
+        raise ValueError("region_plan_runtime must be a JSON object.")
+    value = raw_runtime.get("production_enabled", False)
+    if not isinstance(value, bool):
+        raise ValueError("region_plan_runtime.production_enabled must be a boolean.")
+    return {"production_enabled": value}
+
 
 def _positive_integer(value: object, name: str) -> int:
     if isinstance(value, bool):
@@ -135,6 +152,7 @@ def load_and_validate_common_config(
     # written before this block existed retain their historical 45/8/100
     # behavior instead of becoming invalid on deployment.
     config["routing_policy"] = normalize_routing_policy(config)
+    config["region_plan_runtime"] = normalize_region_plan_runtime(config)
     return config
 
 

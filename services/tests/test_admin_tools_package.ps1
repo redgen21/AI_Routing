@@ -10,6 +10,21 @@ if (-not $output.StartsWith("$root$([IO.Path]::DirectorySeparatorChar)", [String
     throw "Unsafe test output path: $output"
 }
 
+function Get-ArchiveHashWithRetry {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 8; $attempt++) {
+        try {
+            return (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash
+        }
+        catch {
+            $lastError = $_
+            if ($attempt -lt 8) { Start-Sleep -Milliseconds 250 }
+        }
+    }
+    throw $lastError
+}
+
 try {
     New-Item -ItemType Directory -Path $output -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $output ".dirty-source-marker") -Value "contract test only" -Encoding UTF8
@@ -27,6 +42,7 @@ try {
         "admin_tools/db/guard.py",
         "admin_tools/db/master_data_backend.py",
         "admin_tools/db/release_backend.py",
+        "admin_tools/db/migration_runner.py",
         "admin_tools/db/common_vrp.py",
         "admin_tools/db/data_catalog.py",
         "admin_tools/db/heavy_repair.py",
@@ -39,11 +55,13 @@ try {
         "admin_tools/db/migrations/V002__region_plan_unbounded_region_seq.sql",
         "admin_tools/db/migrations/V003__region_plan_technician_source_id.sql",
         "admin_tools/db/migrations/V004__region_plan_area_type_region_soft.sql",
+        "admin_tools/db/migrations/V005__area_plan_catalog.sql",
         "admin_tools/db/region_plan_schema_backend.py",
         "admin_tools/db/region_plan_schema_v2.sql",
         "admin_tools/db/region_plan_v2_backend.py",
         "admin_tools/db/runners/__init__.py",
         "admin_tools/db/runners/reset_common_vrp_data.py",
+        "admin_tools/db/runners/upsert_profile_capabilities.py",
         "admin_tools/db/seeds/__init__.py",
         "admin_tools/db/seeds/build_la_bucket_vrp_inputs.py",
         "admin_tools/db/seeds/import_asia_technician_centroids.py",
@@ -61,7 +79,7 @@ try {
         "tools/data/technician_profile_data.py"
     ) | Sort-Object
     $manifestBefore = [IO.File]::ReadAllBytes($manifestPath)
-    $archiveHashBefore = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+    $archiveHashBefore = Get-ArchiveHashWithRetry -Path $archivePath
     $stagingHashesBefore = @(
         Get-ChildItem -LiteralPath $staging -Recurse -File | ForEach-Object {
             $relative = $_.FullName.Substring($staging.Length + 1).Replace("\", "/")
@@ -82,7 +100,7 @@ try {
     if (-not $collisionRaised) {
         throw "Admin artifact builder did not reject an existing version output."
     }
-    if ((Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash -ne $archiveHashBefore) {
+    if ((Get-ArchiveHashWithRetry -Path $archivePath) -ne $archiveHashBefore) {
         throw "Admin artifact collision attempt changed the existing ZIP."
     }
     if (-not [System.Linq.Enumerable]::SequenceEqual($manifestBefore, [IO.File]::ReadAllBytes($manifestPath))) {
@@ -129,6 +147,9 @@ try {
     }
     if (@($manifest.entrypoints) -notcontains "admin_tools.db.region_plan_schema_backend") {
         throw "Admin artifact must advertise the Region Plan schema v2 reconciler."
+    }
+    if (@($manifest.entrypoints) -notcontains "admin_tools.db.migration_runner") {
+        throw "Admin artifact must advertise the common migration runner."
     }
     if (@($manifest.entrypoints) -contains "admin_tools.db.region_plan_backend") {
         throw "Admin artifact must not advertise the historical per-migration CLI."

@@ -25,6 +25,7 @@ from .common_vrp_db import (
     get_routing_result,
     get_active_region_plan_snapshot,
     get_configured_region_plan_snapshot,
+    region_plan_production_enabled,
     list_active_region_plan_contexts,
     list_avoid_areas,
     list_capabilities,
@@ -237,21 +238,33 @@ def list_runtime_contexts(config_path: Path = COMMON_CONFIG_PATH) -> dict[str, A
 
 
 def _active_atlanta6_plan(subsidiary_name: str, strategic_city_name: str, config_path: Path) -> dict[str, Any] | None:
-    try:
-        # City Config owns the selected plan.  The activation table remains a
-        # backward-compatible fallback only for cities that have not migrated
-        # to explicit plan selection yet.
+    environment = str(load_common_config(config_path).get("environment", "")).strip().lower()
+    if environment == "production":
+        if not region_plan_production_enabled(config_path):
+            return None
+        # Production only uses a City Config-pinned plan.  In particular, do
+        # not resolve the legacy activation table after enabling this gate.
         snapshot = get_configured_region_plan_snapshot(
-            subsidiary_name,
-            strategic_city_name,
-            config_path=config_path,
+            subsidiary_name, strategic_city_name, config_path=config_path,
         )
         if snapshot is None:
-            snapshot = get_active_region_plan_snapshot(subsidiary_name, strategic_city_name, config_path=config_path)
-    except RuntimeError as exc:
-        if str(exc) in {"ACTIVE_REGION_PLAN_NOT_FOUND", "REGION_PLAN_RUNTIME_DISABLED_IN_PRODUCTION"}:
             return None
-        raise
+    else:
+        try:
+            # City Config owns the selected plan.  The activation table remains a
+            # backward-compatible fallback only for cities that have not migrated
+            # to explicit plan selection yet.
+            snapshot = get_configured_region_plan_snapshot(
+                subsidiary_name,
+                strategic_city_name,
+                config_path=config_path,
+            )
+            if snapshot is None:
+                snapshot = get_active_region_plan_snapshot(subsidiary_name, strategic_city_name, config_path=config_path)
+        except RuntimeError as exc:
+            if str(exc) in {"ACTIVE_REGION_PLAN_NOT_FOUND", "REGION_PLAN_RUNTIME_DISABLED_IN_PRODUCTION"}:
+                return None
+            raise
     status = str(snapshot.get("status", snapshot.get("plan_status", ""))).strip().lower()
     context_status = str(snapshot.get("context_status", "")).strip().lower()
     enabled = snapshot.get("enabled", snapshot.get("feature_enabled", False))

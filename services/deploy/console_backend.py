@@ -264,14 +264,17 @@ _RUNTIME_CREATED_AT = re.compile(
     r"^(?P<date>\d{4}-\d{2}-\d{2})T(?P<time>\d{2}:\d{2}:\d{2})"
     r"(?:\.(?P<fraction>\d{1,7}))?(?P<timezone>Z|[+-]\d{2}:\d{2})?$"
 )
+COMMON_VRP_READINESS_PATH = "/api/v1/common/readiness"
+
+
 SERVICE_SPECS = {
     "development": (
-        ("common-vrp-dev.service", "http://127.0.0.1:8066/api/v1/common/contexts"),
+        ("common-vrp-dev.service", f"http://127.0.0.1:8066{COMMON_VRP_READINESS_PATH}"),
         ("smart-routing-dev.service", "http://127.0.0.1:8056/api/v1/routing/health"),
         ("common-vrp-client-dev.service", "http://127.0.0.1:8503/_stcore/health"),
     ),
     "production": (
-        ("common-vrp.service", "http://127.0.0.1:8065/api/v1/common/contexts"),
+        ("common-vrp.service", f"http://127.0.0.1:8065{COMMON_VRP_READINESS_PATH}"),
         ("smart-routing.service", "http://127.0.0.1:8055/api/v1/routing/health"),
         ("common-vrp-client.service", "http://127.0.0.1:8501/_stcore/health"),
     ),
@@ -7678,7 +7681,8 @@ def _observe(
     for unit in selected:
         active_code, active_out, _ = remote.execute(f"systemctl is-active {unit}")
         health_code, _, _ = remote.execute(
-            f"curl --silent --show-error --fail --max-time 5 {allowed[unit]} >/dev/null"
+            f"curl --silent --show-error --fail --connect-timeout 2 --max-time 5 "
+            f"--output /dev/null -- {allowed[unit]}"
         )
         enabled_code = enabled_out = 0
         journal_code = 0

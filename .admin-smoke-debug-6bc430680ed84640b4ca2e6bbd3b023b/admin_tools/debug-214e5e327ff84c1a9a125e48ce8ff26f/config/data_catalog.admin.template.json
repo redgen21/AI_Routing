@@ -1,0 +1,22 @@
+{
+  "schema": "north-america-routing-data-catalog/v1",
+  "data_root": "/home/csda/AI_Routing/shared/north_america",
+  "active": {
+    "service_geocoded": "processed/service/202603181109/Service_202603181109_geocoded.csv",
+    "profile_raw": "raw/profile/20260317/Top 10_DMS_DMS2_Profile_20260317.xlsx",
+    "profile_runtime": "processed/profile/20260317/Top 10_DMS_DMS2_Profile_20260317_production.xlsx",
+    "profile_production": "processed/profile/20260317/Top 10_DMS_DMS2_Profile_20260317_production.xlsx",
+    "region_candidates_dir": "planning/regions/candidates",
+    "reviewed_regions_dir": "reviewed/regions",
+    "region_seed_dir": "db_input/regions",
+    "client_master": "reference/client/All_In_One_Master.xlsx",
+    "zcta_geometry": "reference/geospatial/tl_2024_us_zcta520.zip",
+    "symptom_mapping": "reference/lookups/Notification_Symptom_mapping_20241120_3depth.xlsx",
+    "heavy_repair_lookup": "db_input/lookups/atlanta_heavy_repair_lookup.csv",
+    "technician_list": "raw/technicians/Top10 City Tech List.xlsx",
+    "technician_map": "processed/technicians/Top10_City_Tech_List_map.xlsx",
+    "atlanta_engineer_region": "db_input/technicians/atlanta_engineer_region_assignment.csv",
+    "atlanta_engineer_home": "db_input/technicians/atlanta_engineer_home_geocoded.csv",
+    "reports_dir": "reports"
+  }
+}

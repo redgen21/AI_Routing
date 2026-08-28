@@ -30,6 +30,15 @@ COMMON_CONFIG_PATH = Path(
 ).resolve()
 GEOCODE_CACHE_RETENTION_DAYS = 7
 GEOCODE_ATTEMPT_RETENTION_DAYS = 400
+REGION_PLAN_RUNTIME_RELATIONS = (
+    "common_routing_config_master",
+    "common_city_context",
+    "common_region_plan",
+    "common_region_plan_region",
+    "common_region_plan_postal",
+    "common_region_plan_technician",
+    "common_region_plan_boundary_overflow",
+)
 
 
 def _active_profile_path() -> Path:
@@ -102,6 +111,85 @@ def load_common_config(config_path: Path = COMMON_CONFIG_PATH) -> dict[str, Any]
     if not config_path.exists():
         raise FileNotFoundError(f"Missing common config: {config_path}")
     return json.loads(config_path.read_text(encoding="utf-8"))
+
+
+def region_plan_production_enabled(config_path: Path = COMMON_CONFIG_PATH) -> bool:
+    """Return the explicit production Region Plan gate; absent is deny."""
+    runtime = load_common_config(config_path).get("region_plan_runtime")
+    return isinstance(runtime, dict) and runtime.get("production_enabled") is True
+
+
+def region_plan_runtime_readiness(config_path: Path = COMMON_CONFIG_PATH) -> dict[str, Any]:
+    """Read-only readiness for production's explicitly enabled pinned plans.
+
+    This intentionally does not inspect the activation table: production must
+    never begin using whichever plan happens to be active as a side effect of
+    enabling the runtime gate.
+    """
+    config = load_common_config(config_path)
+    environment = str(config.get("environment", "")).strip().lower()
+    production_enabled = region_plan_production_enabled(config_path)
+    result: dict[str, Any] = {
+        "environment": environment,
+        "production_enabled": production_enabled,
+        "ready": True,
+        "mode": "development" if environment != "production" else "legacy",
+        "missing_relations": [],
+        "selected_plan_count": 0,
+        "errors": [],
+    }
+    if environment != "production" or not production_enabled:
+        return result
+
+    result["mode"] = "pinned_region_plan"
+    relation_selects = ", ".join(
+        f"to_regclass('public.{relation}') as {relation}"
+        for relation in REGION_PLAN_RUNTIME_RELATIONS
+    )
+    try:
+        relations = _fetch_df(f"select {relation_selects}", config_path=config_path)
+    except Exception:
+        result["ready"] = False
+        result["errors"].append("REGION_PLAN_RUNTIME_DATABASE_UNAVAILABLE")
+        return result
+    relation_row = relations.iloc[0].to_dict() if not relations.empty else {}
+    missing_relations = [
+        relation for relation in REGION_PLAN_RUNTIME_RELATIONS
+        if not _clean_text(relation_row.get(relation))
+    ]
+    result["missing_relations"] = missing_relations
+    if missing_relations:
+        result["ready"] = False
+        result["errors"].append("REGION_PLAN_RUNTIME_SCHEMA_UNAVAILABLE")
+        return result
+
+    try:
+        selected = _fetch_df(
+            """select subsidiary_name, strategic_city_name
+                 from common_routing_config_master
+                where nullif(btrim(coalesce(region_plan_id, '')), '') is not null""",
+            config_path=config_path,
+        )
+    except Exception:
+        result["ready"] = False
+        result["errors"].append("REGION_PLAN_RUNTIME_DATABASE_UNAVAILABLE")
+        return result
+    result["selected_plan_count"] = int(len(selected))
+    for _, row in selected.iterrows():
+        subsidiary_name = _clean_text(row.get("subsidiary_name"))
+        strategic_city_name = _clean_text(row.get("strategic_city_name"))
+        try:
+            snapshot = get_configured_region_plan_snapshot(
+                subsidiary_name, strategic_city_name, config_path=config_path,
+            )
+            if snapshot is None:
+                raise RuntimeError("CONFIGURED_REGION_PLAN_NOT_FOUND")
+        except (RuntimeError, ValueError) as exc:
+            result["errors"].append(
+                f"{str(exc)}:{subsidiary_name}:{strategic_city_name}"
+            )
+    result["ready"] = not result["errors"]
+    return result
 
 
 def get_db_connection(config_path: Path = COMMON_CONFIG_PATH):

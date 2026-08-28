@@ -86,6 +86,10 @@ try {
     if ($unexpected) {
         throw "Artifact contains runtime config: $($unexpected.Name -join ', ')"
     }
+    $developmentTemplate = Get-Content -LiteralPath (Join-Path $staging "config\common_vrp.dev.template.json") -Raw | ConvertFrom-Json
+    if ($developmentTemplate.region_plan_runtime.production_enabled -ne $false) {
+        throw "Development runtime template must default-deny production Region Plan runtime."
+    }
     $excluded = @(
         "config\common_vrp.prod.template.json",
         "start_common_vrp_prod.sh",

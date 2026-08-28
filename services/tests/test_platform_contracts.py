@@ -102,6 +102,8 @@ class StaticReleaseContractTests(unittest.TestCase):
                          ("development", 8066, "vrp_db_dev"))
         self.assertEqual((prod["environment"], prod["api"]["port"], prod["database"]["dbname"]),
                          ("production", 8065, "vrp_db"))
+        self.assertFalse(dev["region_plan_runtime"]["production_enabled"])
+        self.assertFalse(prod["region_plan_runtime"]["production_enabled"])
 
     def test_general_config_template_matches_runtime_leaf_contract(self) -> None:
         template_path = ROOT / "config/config.template.json"
@@ -148,8 +150,18 @@ class StaticReleaseContractTests(unittest.TestCase):
         self.assertIn("verify_deployment.py", common_dev_unit)
         self.assertIn("verify_deployment.py", smart_unit)
         self.assertIn("verify_deployment.py", smart_dev_unit)
+        for unit, port in ((common_unit, 8065), (common_dev_unit, 8066)):
+            self.assertIn(f"http://127.0.0.1:{port}/api/v1/common/readiness", unit)
+            self.assertIn("--connect-timeout 2 --max-time 5", unit)
+            self.assertIn("--output /dev/null --", unit)
         all_units = common_unit + common_dev_unit + client_unit + client_dev_unit + smart_unit + smart_dev_unit
         self.assertNotIn("/home/AI_Routing", all_units)
+
+    def test_console_uses_bounded_common_vrp_readiness_probe(self) -> None:
+        source = (ROOT / "services/deploy/console_backend.py").read_text(encoding="utf-8")
+        self.assertIn('COMMON_VRP_READINESS_PATH = "/api/v1/common/readiness"', source)
+        self.assertIn("--connect-timeout 2 --max-time 5", source)
+        self.assertIn("--output /dev/null -- {allowed[unit]}", source)
 
     def test_manual_start_paths_enforce_hydration_gate(self) -> None:
         scripts = (

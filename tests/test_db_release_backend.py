@@ -188,7 +188,7 @@ class DatabaseReleaseBackendTests(unittest.TestCase):
                 retry_failed=True,
             )
 
-    def test_failure_rolls_back_without_commit(self) -> None:
+    def test_failure_rolls_back_and_records_failed_audit_receipt(self) -> None:
         connection = _FakeConnection(fail_on="create table release_example")
         with self.assertRaisesRegex(RuntimeError, "simulated SQL failure"):
             self.backend.apply(
@@ -197,9 +197,13 @@ class DatabaseReleaseBackendTests(unittest.TestCase):
                 typed_confirmation=self._confirmation(),
                 connection_factory=lambda target: connection,
             )
-        self.assertEqual(0, connection.commits)
+        # The failed SQL transaction rolls back; a fresh transaction then
+        # persists the immutable failed-history/receipt gate for retries.
+        self.assertEqual(1, connection.commits)
         self.assertEqual(1, connection.rollbacks)
-        self.assertEqual(1, connection.closes)
+        self.assertEqual(2, connection.closes)
+        statements = "\n".join(sql.lower() for sql, _ in connection.executions)
+        self.assertIn("admin_schema_migration_receipt", statements)
 
     def test_unregistered_or_modified_migration_is_rejected_before_connect(self) -> None:
         with self.assertRaisesRegex(ValueError, "not allowlisted"):

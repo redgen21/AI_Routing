@@ -94,6 +94,7 @@ module_names = (
     "admin_tools.db.runners.upsert_profile_capabilities",
     "admin_tools.db.seeds.build_la_bucket_vrp_inputs",
     "admin_tools.db.seeds.import_asia_technician_centroids",
+    "admin_tools.db.migration_runner",
 )
 candidate_backend = staging / "admin_tools" / "db" / "region_plan_backend.py"
 if candidate_backend.is_file():
@@ -222,6 +223,7 @@ $PackageSourcePaths = @(
     "admin_tools/db/guard.py",
     "admin_tools/db/master_data_backend.py",
     "admin_tools/db/release_backend.py",
+    "admin_tools/db/migration_runner.py",
     "admin_tools/db/common_vrp.py",
     "admin_tools/db/data_catalog.py",
     "admin_tools/db/heavy_repair.py",
@@ -354,6 +356,7 @@ $Files = Get-ChildItem -LiteralPath $StagingDir -Recurse -File | ForEach-Object 
     }
 }
 $Entrypoints = @(
+    "admin_tools.db.migration_runner",
     "admin_tools.db.runners.reset_common_vrp_data",
     "admin_tools.db.master_data_backend",
     "admin_tools.db.seeds.build_la_bucket_vrp_inputs",
@@ -374,7 +377,7 @@ $Manifest = [ordered]@{
     source_revision = $SourceRevision
     source_dirty = [bool]$SourceDirty
     promotable = [bool](-not $SourceDirty)
-    target_root = "/home/csda/AI_Routing"
+    target_root = "/home/csda/AI_Routing/admin_tools"
     contains_secrets = $false
     contains_data = $false
     entrypoints = @($Entrypoints)

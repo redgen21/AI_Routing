@@ -20,6 +20,7 @@ from .common_vrp_db import (
     list_capabilities,
     list_avoid_areas,
     region_plan_operation,
+    region_plan_runtime_readiness,
     list_engineers,
     list_jobs,
     list_request_technicians,
@@ -460,6 +461,17 @@ class CommonVRPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         try:
+            if parsed.path == "/api/v1/common/health":
+                _json_response(self, HTTPStatus.OK, {"status": "ok"})
+                return
+            if parsed.path == "/api/v1/common/readiness":
+                readiness = region_plan_runtime_readiness()
+                _json_response(
+                    self,
+                    HTTPStatus.OK if readiness.get("ready") else HTTPStatus.SERVICE_UNAVAILABLE,
+                    readiness,
+                )
+                return
             if parsed.path == "/api/v1/common/contexts":
                 _json_response(self, HTTPStatus.OK, list_runtime_contexts())
                 return
